@@ -233,6 +233,68 @@ except scan.Failure: sys.exit(3)
             self.assertTrue(report["coverage"]["gaps"])
         self.assertEqual(self.before, self.names())
 
+    def test_global_dispatch_budgets_preserve_serialized_packages_direct_calls_and_inventory(self):
+        fixtures = self.root / "dispatch-budgets"
+        generated = subprocess.run(["dotnet", "run", "--project", str(ROOT / "tests/Corpus.Generate"),
+            "-c", "Release", "--", "dispatch-budgets", str(fixtures)], capture_output=True, timeout=120)
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        policy = (ROOT / "fixtures/corpus/policy.yaml").read_text()
+        for mode, count in (("origins", 6000), ("candidates", 40), ("bytes", 650)):
+            with self.subTest(mode=mode):
+                members = [("Content/" + path.name, path.read_bytes(), False)
+                           for path in sorted((fixtures / mode).iterdir())]
+                payload = build(members)
+                result, report = self.invoke(payload, policy=policy, extra=["--content-root", "Content=/Game"])
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertEqual("partial", report["status"])
+                self.assertFalse(report["analysis-complete"])
+                self.assertEqual(3, report["counts"]["invocations"])
+                self.assertEqual(3, report["counts"]["forbidden"])
+                self.assertEqual(3, len(report["forbidden-invocations"]))
+                self.assertTrue({"unresolved-dispatch", "incomplete-extraction"} <= set(report["coverage"]["gaps"]))
+                self.assertNotIn("parser-failed", report["diagnostics"])
+                self.assertEqual(len(members), len(report["inspection"]["members"]))
+                self.assertEqual({name: hashlib.sha256(data).hexdigest() for name, data, _ in members},
+                                 {m["path"]: m["sha256"] for m in report["inspection"]["members"]})
+                later = next(m for m in report["inspection"]["members"] if m["path"] == "Content/Later.uasset")
+                self.assertEqual("partial", later["inspection-status"])  # Imported signature remains unavailable.
+                self.assertFalse(later["parsed-classes-complete"])  # Synthetic class ownership is not invented.
+                findings = report["forbidden-invocations"]
+                self.assertEqual([count * 13, count * 13, 0], [f["location"]["offset"] for f in findings])
+                for finding in findings:
+                    location = finding["location"]
+                    identity = [hashlib.sha256(payload).hexdigest(), location["asset"], location["function"], location["offset"]]
+                    self.assertEqual(hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest(), finding["id"])
+                possible = report["possible-dispatches"]
+                self.assertTrue(possible)
+                self.assertLessEqual(len(possible), 10000)
+                candidates = sum(len(p["evidence"]["candidates"]) for p in possible)
+                self.assertLessEqual(candidates, 10000)
+                if mode == "candidates":
+                    self.assertEqual(80, len(possible))
+                    self.assertEqual(10000, candidates)
+                    self.assertTrue(any("target-expansion-limit" in p["evidence"]["diagnostics"] for p in possible))
+                else:
+                    self.assertLess(len(possible), 10000 if mode == "origins" else count * 2)
+                # Exercise the actual parser protocol twice: deterministic bounded bytes,
+                # valid facts through the trusted evaluator, and stable direct locations.
+                snapshot = self.root / (mode + "-snapshot")
+                scan.snapshot(self.root / "submission", snapshot, scan.INPUT_LIMIT)
+                status, raw = self.docker.run(scan.mount(snapshot, "/input/submission"), "/usr/local/bin/python3",
+                    ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+                self.assertEqual(0, status)
+                facts = json.loads(raw)
+                self.assertLessEqual(len(raw), 8 * 1024 * 1024)
+                if mode == "bytes":
+                    entry_bytes = len(json.dumps(facts["analysis"]["dispatches"][-1], separators=(",", ":")).encode())
+                    self.assertGreater(len(raw) + entry_bytes + 1, 8 * 1024 * 1024)
+                self.assertEqual(3, len(facts["analysis"]["invocations"]))
+                self.assertEqual([p["evidence"] for p in possible], sorted(facts["analysis"]["dispatches"],
+                    key=lambda d: tuple(d["origin"][key] for key in ("asset", "function", "offset"))))
+                status, again = self.docker.run(scan.mount(snapshot, "/input/submission"), "/usr/local/bin/python3",
+                    ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+                self.assertEqual((0, raw), (status, again))
+
     def test_content_path_boundaries_and_unknown_native_are_not_approved(self):
         disabled = ["--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
         for prefix, decision, code in (("Content", "allow", 0), ("content", "allow", 0),

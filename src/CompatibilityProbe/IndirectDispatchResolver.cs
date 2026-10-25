@@ -76,7 +76,6 @@ internal sealed class IndirectDispatchResolver
                 kind = "delegate-binding";
                 name = binding.FunctionName?.ToString();
                 diagnostics.Add("binding-flow-unresolved");
-                if (string.Equals(name, "None", StringComparison.OrdinalIgnoreCase)) diagnostics.Add("unbound-delegate");
                 break;
             case EX_FinalFunction call:
                 var target = TargetResolver.ResolveIdentity(asset, call.StackNode, input.LogicalPath);
@@ -109,6 +108,11 @@ internal sealed class IndirectDispatchResolver
                 diagnostics.Add("binding-flow-unresolved");
                 break;
         }
+        // NAME_None is a null binding in both the serialized delegate and the
+        // source-scoped timer hypothesis, not a callback named None.
+        if ((kind == "delegate-binding" || kind == "timer")
+            && string.Equals(name, "None", StringComparison.OrdinalIgnoreCase))
+            diagnostics.Add("unbound-delegate");
         var receiverKind = "self";
         var receiverClass = asset.Exports[containing.ExportIndex - 1].OuterIndex?.Index ?? 0;
         if (receiver is not null)

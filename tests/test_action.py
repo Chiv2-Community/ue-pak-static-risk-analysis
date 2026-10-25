@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from ingestion_fixture import build
+from indirect_fixture import dispatch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -157,6 +158,20 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(3, result.returncode)
         self.assertEqual(["invalid-report"], json.loads(outputs["diagnostics"]))
         self.assertNotIn("private-action-canary", self.output.read_text() + summary)
+
+    def test_reordered_duplicate_dispatch_origin_is_not_published(self):
+        value = report()
+        value.update(status="partial", **{"analysis-complete": False})
+        value["coverage"]["gaps"] = ["unresolved-dispatch"]
+        first, second = dispatch(), dispatch()
+        second["origin"] = dict(reversed(list(second["origin"].items())))
+        value["possible-dispatches"] = [
+            {"evidence": evidence, "possibly-flagged": False, "possibly-forbidden": True}
+            for evidence in (first, second)]
+        result, outputs, _ = self.invoke(value)
+        self.assertEqual(3, result.returncode, result.stderr)
+        self.assertEqual(["invalid-report"], json.loads(outputs["diagnostics"]))
+        self.assertEqual("false", outputs["report-available"])
 
     def test_report_paths_do_not_overwrite_or_escape(self):
         for path in ("../escape", str(self.output), "report\nFORGED=1", "new/absent/report", "report.json"):

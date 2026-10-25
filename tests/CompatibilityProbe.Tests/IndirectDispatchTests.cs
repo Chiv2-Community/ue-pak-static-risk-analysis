@@ -260,6 +260,42 @@ public sealed class IndirectDispatchTests
     }
 
     [Theory]
+    [InlineData("None", false)]
+    [InlineData("nOnE", false)]
+    [InlineData("NONE", false)]
+    [InlineData("sEnSiTiVe", true)]
+    public void TimerAndNestedInstanceDelegateShareValidatedFNameBinding(string name, bool bound)
+    {
+        var asset = Asset();
+        asset.Imports.Add(new Import("/Script/CoreUObject", "Package", new(0), "/Script/Engine", false, asset));
+        asset.Imports.Add(new Import("/Script/CoreUObject", "Class", new(-1), "KismetSystemLibrary", false, asset));
+        asset.Imports.Add(new Import("/Script/CoreUObject", "Function", new(-2), "K2_SetTimerDelegate", false, asset));
+        var owner = Class(asset, "Class");
+        Function(asset, owner, "None");
+        Function(asset, owner, "Sensitive");
+        Function(asset, owner, "Run", new EX_FinalFunction { StackNode = new(-3), Parameters =
+            [new EX_InstanceDelegate { FunctionName = new(asset, name) }, new EX_FloatConst { Value = 1 },
+             new EX_False(), new EX_FloatConst(), new EX_FloatConst()] });
+        var report = InvocationExtractor.Inspect(asset, Input);
+        var direct = Assert.Single(report.Invocations);
+        Assert.Equal(0, direct.Offset);
+        Assert.Equal("K2_SetTimerDelegate", Assert.IsType<InvocationTarget.Resolved>(direct.Target).Function);
+        Assert.Equal(2, report.Analysis.Dispatches!.Length);
+        foreach (var dispatch in report.Analysis.Dispatches)
+        {
+            Assert.Equal(bound ? 1 : 0, dispatch.Candidates.Length);
+            Assert.Equal(!bound, dispatch.Diagnostics.Contains("unbound-delegate"));
+            Assert.Equal(!bound, dispatch.Diagnostics.Contains("target-name-unavailable"));
+            if (bound) Assert.Equal("Sensitive", dispatch.Candidates[0].Function);
+        }
+        var timer = Assert.Single(report.Analysis.Dispatches, d => d.Kind == "timer");
+        Assert.Equal(direct.Fact.Location, timer.Origin);
+        Assert.Contains("native-build-unverified", timer.Diagnostics);
+        Assert.All(report.Analysis.Dispatches, d => Assert.Contains("open-world", d.Diagnostics));
+        PolicyEvaluator.Validate(report.Analysis);
+    }
+
+    [Theory]
     [InlineData("constant")]
     [InlineData("dynamic")]
     [InlineData("delegate")]

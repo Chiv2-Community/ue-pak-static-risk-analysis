@@ -11,9 +11,10 @@ using UAssetAPI.Kismet.Bytecode.Expressions;
 using UAssetAPI.UnrealTypes;
 
 // Original synthetic serialization, not engine-cooked or game-derived content.
-if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties")) return 2;
+if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "dispatch-budgets")) return 2;
 if (args[0] == "properties") return Properties();
 var root = Path.GetFullPath(args[1]);
+if (args[0] == "dispatch-budgets") return DispatchBudgets(root);
 if (args[0] == "generate")
 {
     if (Directory.Exists(root)) return 2;
@@ -134,6 +135,52 @@ static int Properties()
         Reject<FactsException>(() => FactsCodec.Read(bad));
     }
     Console.WriteLine("PASS: 32 seeded YAML/AST, serialized bytecode and facts properties; seed=150425.");
+    return 0;
+}
+
+static int DispatchBudgets(string root)
+{
+    if (Directory.Exists(root)) return 2;
+    Directory.CreateDirectory(root);
+    foreach (var mode in new[] { "origins", "candidates", "bytes" })
+    {
+        var directory = Path.Combine(root, mode);
+        Directory.CreateDirectory(directory);
+        foreach (var package in new[] { "A", "B", "Later" })
+        {
+            var asset = Asset();
+            asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Class"),
+                OuterIndex = new(0), ClassIndex = new(-6), Data = [], Extras = [] });
+            var name = mode == "bytes" ? new string('S', 3500) : "Sensitive";
+            if (mode != "origins")
+            {
+                AddFunction(asset, name, []);
+                if (mode == "candidates")
+                    for (var i = 1; i < 150; i++)
+                    {
+                        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Owner" + i),
+                            OuterIndex = new(0), ClassIndex = new(-6), Data = [], Extras = [] });
+                        var owner = asset.Exports.Count;
+                        AddFunction(asset, name, []);
+                        asset.Exports[^1].OuterIndex = new(owner);
+                    }
+            }
+            var count = package == "Later" ? 0 : mode == "origins" ? 6000 : mode == "candidates" ? 40 : 650;
+            var code = Enumerable.Range(0, count).Select(_ => (KismetExpression)new EX_InstanceDelegate
+                { FunctionName = new(asset, mode == "origins" ? "None" : name) }).ToList();
+            code.Add(new EX_FinalFunction { StackNode = new(-3), Parameters = [] });
+            AddFunction(asset, "Run", code.ToArray());
+            asset.Write(Path.Combine(directory, package + ".uasset"));
+            // Verify actual serialized input independently, before Parser aggregation.
+            var extracted = InvocationExtractor.Read(new("submission", "Content/" + package + ".uasset",
+                "/Game/" + package, Path.Combine(directory, package + ".uasset")));
+            PolicyEvaluator.Validate(extracted.Analysis);
+            Check(extracted.Analysis.Invocations.Length == 1, "budget-direct-count");
+            Check((extracted.Analysis.Dispatches?.Length ?? 0) == count, "budget-origin-count");
+            Check((extracted.Analysis.Dispatches?.Sum(d => d.Candidates.Length) ?? 0)
+                == count * (mode == "origins" ? 0 : mode == "candidates" ? 150 : 1), "budget-candidate-count");
+        }
+    }
     return 0;
 }
 

@@ -36,6 +36,21 @@ def sha(data):
 
 
 class ModerationTests(unittest.TestCase):
+    def test_reordered_duplicate_dispatch_origin_rejected_at_handoff(self):
+        report = self.report(incomplete=True)
+        report["coverage"]["gaps"] = ["unresolved-dispatch"]
+        first, second = dispatch(), dispatch()
+        second["origin"] = dict(reversed(list(second["origin"].items())))
+        report["possible-dispatches"] = [
+            {"evidence": evidence, "possibly-flagged": False, "possibly-forbidden": True}
+            for evidence in (first, second)]
+        single = deepcopy(report)
+        single["possible-dispatches"] = [single["possible-dispatches"][1]]
+        self.assertEqual(["analysis-incomplete"], mod.handoff(
+            encoded(single), self.context, self.pak, self.dependencies)["routes"])
+        with self.assertRaises(reports.InvalidReport):
+            mod.handoff(encoded(report), self.context, self.pak, self.dependencies)
+
     def test_possible_callbacks_route_incomplete_and_exact_evidence_changes_invalidate_review(self):
         report = self.report(incomplete=True)
         report["coverage"]["gaps"] = ["unresolved-dispatch"]
