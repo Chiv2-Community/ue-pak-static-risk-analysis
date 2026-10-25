@@ -86,6 +86,15 @@ security analysis passed. Run the verifier separately and preserve its output.
 Package GUIDs can change between runs; semantic assertions, not identical cooked
 hashes across regenerations, are the reproducibility contract.
 
+The driver reaps its isolated Docker client and stops/removes only its unique
+container on every exit, including timeout, Ctrl-C, SIGTERM, and mapping errors.
+Cleanup clients have bounded waits; repeated SIGINT/SIGTERM are ignored during
+teardown. Cancellation receipts retain partial hashes, `completed: false`, and
+exit code 130 (SIGINT), 143 (SIGTERM), or 124 (timeout). Cleanup failures are
+recorded and cannot produce a successful result. SIGKILL or an unavailable Docker
+daemon can still prevent cleanup; use the receipt's exact container name for
+manual recovery.
+
 ## Measured local result: 2026-10-25
 
 Successful commands from this worktree:
@@ -127,6 +136,10 @@ dotnet run --project tests/OwnedFixtures.Verify/OwnedFixtures.Verify.csproj --no
 The original cook receipt and `verify.log` above are unchanged. GitHub CI builds
 the verifier and runs source/tool unit tests; it does not cook or claim the local
 engine-generated acceptance run.
+
+The receipt's driver hash identifies the historical script used for that cook,
+not the current cancellation-safe revision. No new cook is claimed for the
+lifecycle fix; the original receipt, logs, mappings, and cooked bytes are preserved.
 
 Earlier exploratory directories are not the final evidence selection. They retain
 the initial command-selection and engine/plugin-exclusion attempts; no artifacts

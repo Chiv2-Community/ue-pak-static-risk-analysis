@@ -4,7 +4,9 @@
 import argparse
 import hashlib
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import uuid
@@ -28,7 +30,49 @@ COMMANDS = [
 
 def hashes(directory):
     return {str(p.relative_to(directory)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(directory.rglob("*")) if p.is_file()}
+             for p in sorted(directory.rglob("*")) if p.is_file()}
+
+
+def terminate(signum, frame):
+    raise SystemExit(128 + signum)
+
+
+def reap(client):
+    if client is not None:
+        try:
+            os.killpg(client.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        client.wait(timeout=5)
+
+
+def cleanup(client, name):
+    """Reap the isolated client, then stop/remove only this job's container."""
+    errors = []
+    try:
+        reap(client)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        errors.append(f"client: {error}")
+    for command, timeout in ((["docker", "stop", "--time", "5", name], 10),
+                             (["docker", "rm", "--force", name], 10)):
+        cleaner = None
+        try:
+            cleaner = subprocess.Popen(command, start_new_session=True,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            _, stderr = cleaner.communicate(timeout=timeout)
+            if cleaner.returncode:
+                errors.append(f"{command[1]}: {stderr.strip()}")
+        except (OSError, subprocess.TimeoutExpired) as error:
+            errors.append(f"{command[1]}: {error}")
+        finally:
+            try:
+                reap(cleaner)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                errors.append(f"{command[1]} client: {error}")
+            if cleaner is not None:
+                for stream in (cleaner.stdout, cleaner.stderr):
+                    stream.close()
+    return errors
 
 
 def main():
@@ -59,13 +103,13 @@ def main():
     cache = output / "engine-ddc"
     cache.mkdir(mode=0o777)
     cache.chmod(0o777)
-    name = "owned-fixtures-" + uuid.uuid4().hex[:12]
+    name = "owned-fixtures-" + uuid.uuid4().hex
     script = "set -euo pipefail\ncp -r /source/. /work/\n"
     if seed:
         script += "cp -r /seed/. /opt/unreal-engine/Engine/DerivedDataCache/\n"
     for label, command in zip(["build", "generate", "tagged", "unversioned"], COMMANDS):
         script += f"{command} > /work/{label}.log 2>&1\n"
-    runtime = ["docker", "run", "--rm", "--pull=never", "--name", name, "--network", "none",
+    runtime = ["docker", "run", "--pull=never", "--name", name, "--network", "none",
                "--user", "1001:1001", "--cpus", "8", "--memory", "16g", "--memory-swap", "16g",
                "--pids-limit", "1024", "--cap-drop=ALL", "--security-opt=no-new-privileges",
                "--mount", f"type=bind,src={ROOT / 'fixtures/owned'},dst=/source,readonly",
@@ -81,12 +125,18 @@ def main():
                "tool_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                for p in (Path(__file__), ROOT / "scripts/owned_fixture_usmap.py")},
                "ddc_seed": str(seed) if seed else None,
-               "completed": False}
+               "completed": False, "exit_code": 1}
+    client = None
+    handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
-        result = subprocess.run(runtime, timeout=args.timeout, check=False)
-        receipt["exit_code"] = result.returncode
-        if result.returncode:
-            return result.returncode
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        signal.signal(signal.SIGTERM, terminate)
+        client = subprocess.Popen(runtime, start_new_session=True)
+        receipt["exit_code"] = client.wait(timeout=args.timeout)
+        if receipt["exit_code"]:
+            return receipt["exit_code"]
+        # Verification/mapping errors must not retain Docker's successful exit code.
+        receipt["exit_code"] = 1
         expected = {
             "tagged": ["BP_OwnedParent.uasset", "BP_OwnedChild.uasset", "OwnedMap.umap", "Data/OwnedData.uasset"],
             "unversioned": ["Data/OwnedData.uasset"],
@@ -104,19 +154,46 @@ def main():
         (output / "owned.usmap").write_bytes(encode(reflection))
         receipt["producer_reflection"] = reflection
         receipt["completed"] = True
+        receipt["exit_code"] = 0
         return 0
     except subprocess.TimeoutExpired:
-        subprocess.run(["docker", "stop", "--time", "15", name], check=False)
         receipt["timed_out"] = True
+        receipt["exit_code"] = 124
         return 124
+    except KeyboardInterrupt:
+        receipt["completed"] = False
+        receipt["exit_code"] = 130
+        receipt["interrupted"] = True
+        raise
+    except SystemExit as error:
+        receipt["completed"] = False
+        receipt["exit_code"] = error.code if isinstance(error.code, int) and error.code else 1
+        receipt["interrupted"] = True
+        raise
     finally:
-        receipt["output_sha256"] = {folder: hashes(output / folder)
-                                    for folder in ("tagged", "unversioned") if (output / folder).exists()}
-        receipt["evidence_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        # A second cancellation must not interrupt bounded teardown or its receipt.
+        for sig in handlers:
+            signal.signal(sig, signal.SIG_IGN)
+        try:
+            errors = cleanup(client, name)
+            cleanup_failed_success = bool(errors) and receipt["exit_code"] == 0
+            if errors:
+                receipt["cleanup_errors"] = errors
+                receipt["completed"] = False
+                if receipt["exit_code"] == 0:
+                    receipt["exit_code"] = 1
+            receipt["output_sha256"] = {folder: hashes(output / folder)
+                                     for folder in ("tagged", "unversioned") if (output / folder).exists()}
+            receipt["evidence_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                      for p in output.glob("*.log")}
-        if (output / "owned.usmap").exists():
-            receipt["usmap_sha256"] = hashlib.sha256((output / "owned.usmap").read_bytes()).hexdigest()
-        (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+            if (output / "owned.usmap").exists():
+                receipt["usmap_sha256"] = hashlib.sha256((output / "owned.usmap").read_bytes()).hexdigest()
+            (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+            if cleanup_failed_success:
+                raise RuntimeError("container cleanup failed; see receipt.json")
+        finally:
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
 
 
 if __name__ == "__main__":
