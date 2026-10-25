@@ -82,6 +82,12 @@ Host data scans require `--data-context NEW_PRIVATE_FILE`, also available as an
 Action input. This mode-0600 artifact binds exact report bytes, engine, asserted
 build, roots, precedence and private data-rule/original-baseline digests. Keep it
 private. It is an operator-wrapper receipt, not an authentication mechanism.
+Both output paths must be new and distinct after resolving existing parent
+directories (including symlink parents). The host rejects aliases before policy
+disclosure or parsing; final symlinks and existing files are not overwritten.
+Keep parent directories operator-controlled: this does not prevent concurrent
+parent renames or symlink changes. Distinct output writes are not transactional;
+a later write failure can leave the private receipt at its private destination.
 An operator's explicit `--moderator-detail` also permits bounded invocation rule
 IDs in the private report; receipt validation uses that explicit profile and still
 validates the entire closed report. Default scans, the Action and moderation

@@ -176,6 +176,30 @@ def write_report(path, data):
             temporary.unlink(missing_ok=True)
 
 
+def output_destinations(args):
+    # Resolve existing parents, not the final component: final symlinks and
+    # special files must remain occupied destinations, never overwrite targets.
+    paths = [Path(args.report)]
+    if args.data_context is not None:
+        paths.append(Path(args.data_context))
+    try:
+        paths = [path.parent.resolve(strict=True) / path.name for path in paths]
+    except RuntimeError:
+        # pathlib versions before 3.13 report parent symlink loops this way.
+        raise Failure("input-failed") from None
+    if len(set(paths)) != len(paths):
+        raise Failure("invalid-configuration")
+    for path in paths:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        raise FileExistsError()
+    args.report = paths[0]
+    if args.data_context is not None:
+        args.data_context = paths[1]
+
+
 def options(argv):
     parser = Arguments(description=__doc__, allow_abbrev=False)
     parser.add_argument("command", choices=["scan"])
@@ -206,6 +230,9 @@ def main(argv=None):
     args = None
     try:
         args = options(sys.argv[1:] if argv is None else argv)
+        # Reject output aliases/occupied paths before policy disclosure, parsing,
+        # or either artifact write. Parents remain operator-controlled.
+        output_destinations(args)
         # No source-policy copies. Only a file-only evaluator mount, never a parser mount.
         policy_mount = mount(args.policy_rules, "/policy/rules") if args.policy_rules is not None else []
         shared = ["--report", "-", "--engine-version", args.engine_version]

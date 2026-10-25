@@ -414,7 +414,20 @@ class DataPolicyTests(unittest.TestCase):
             common = ["--pak", str(self.paks["submission"]), "--baseline-pak", str(self.paks["baseline"]),
                 "--data-rules", str(rules), "--game-build", "original-fixture-v1", "--content-root", "Content=/Game",
                 "--policy-rules", str(policy), "--engine-version", "4.25", "--policy-revision", "original-v1",
-                "--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
+                 "--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
+            (root / "child").mkdir()
+            (root / "alias").symlink_to(root, target_is_directory=True)
+            ordinary = root / "alias-report"
+            for context in (ordinary, root / "child/../alias-report", root / "alias/alias-report"):
+                with self.subTest(alias=str(context)):
+                    rejected = subprocess.run([sys.executable, str(ROOT / "scripts/scan.py"), "scan", *common,
+                        "--image", image, "--log-level", "verbose", "--report", str(ordinary),
+                        "--data-context", str(context)], env=self.env, capture_output=True, timeout=30)
+                    self.assertEqual(2, rejected.returncode)
+                    self.assertEqual(b"", rejected.stdout)
+                    self.assertEqual(b"Scan failed.\n", rejected.stderr)
+                    self.assertFalse(ordinary.exists())
+                    self.assertFalse(context.exists())
             host = subprocess.run([sys.executable, str(ROOT / "scripts/scan.py"), "scan", *common, "--image", image,
                 "--report", str(root / "host-report"), "--data-context", str(root / "host-private")], env=self.env, capture_output=True, timeout=240)
             self.assertEqual(1, host.returncode)
@@ -451,7 +464,23 @@ class DataPolicyTests(unittest.TestCase):
                 INPUT_DATA_RULES=str(rules), INPUT_GAME_BUILD="original-fixture-v1", INPUT_CONTENT_ROOT="Content=/Game",
                 INPUT_POLICY_RULES=str(policy), INPUT_REPORT="action-report", INPUT_DATA_CONTEXT="action-private",
                 INPUT_MODERATOR_DETAIL="true",
-                INPUT_FAIL_ON_ANY_FORBIDDEN="false", INPUT_FAIL_ON_ANY_FLAGGED="false", INPUT_FAIL_ON_INCOMPLETE="false")
+                 INPUT_FAIL_ON_ANY_FORBIDDEN="false", INPUT_FAIL_ON_ANY_FLAGGED="false", INPUT_FAIL_ON_INCOMPLETE="false")
+            for context in ("action-alias-report", "alias/action-alias-report"):
+                with self.subTest(action_alias=context):
+                    alias_output, alias_summary = root / "alias-outputs", root / "alias-summary"
+                    alias_output.write_bytes(b""); alias_summary.write_bytes(b"")
+                    rejected = subprocess.run([sys.executable, str(ROOT / "scripts/action.py"), "scan"],
+                        env=dict(env, INPUT_REPORT="action-alias-report", INPUT_DATA_CONTEXT=context,
+                                 INPUT_LOG_LEVEL="verbose", GITHUB_OUTPUT=str(alias_output), GITHUB_STEP_SUMMARY=str(alias_summary)),
+                        capture_output=True, timeout=30)
+                    self.assertEqual(2, rejected.returncode)
+                    self.assertFalse((root / "action-alias-report").exists())
+                    self.assertFalse((root / context).exists())
+                    self.assertIn("report-available=false", alias_output.read_text())
+                    for data in (rejected.stdout + rejected.stderr, alias_output.read_bytes(), alias_summary.read_bytes()):
+                        for secret in (b"operator-rule-canary", b"operator-flag-canary", b"private-data-canary",
+                                       sha(self.paks["baseline"].read_bytes()).encode(), sha(rules.read_bytes()).encode()):
+                            self.assertNotIn(secret, data)
             actual = subprocess.run([sys.executable, str(ROOT / "scripts/action.py"), "scan"], env=env, capture_output=True, timeout=240)
             self.assertEqual(1, actual.returncode)
             adapted = reports.load((root / "action-report").read_bytes(), ROOT)
