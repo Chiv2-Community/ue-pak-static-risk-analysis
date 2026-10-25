@@ -4,8 +4,9 @@
 the narrow ingestion checks passed, not that the archive is safe. Exit 1 means
 ingestion failed. `analysis_complete` is always false in this standalone inventory
 command. The [Docker wrapper](container.md) adds class/invocation inspection during
-the private payload lifetime and uses the shared report/gates. Keep #3 open for
-configured class/namespace/replacement enforcement and broader inventory coverage.
+the private payload lifetime and uses the shared report/gates. Optional trusted
+[content settings](content-policy.md) enforce paths, parsed classes and protected
+replacement candidates in that evaluator, not in this standalone inventory API.
 
 ## Scope and evidence
 
@@ -54,8 +55,9 @@ trusted-input compatibility probe in `scripts/probe_pak.py`.
   Protected-prefix matches are replacement **candidates**, not verified changes:
   there is no clean-install baseline or load-order analysis.
 - Sidecars (`uexp`, `ubulk`, `uptnl`) map to same-stem `uasset`/`umap` records;
-  orphans are explicit. Package required-sidecar status remains unresolved until
-  package-summary inspection in #4. An inline package need not have a `uexp`.
+  orphans are explicit. Standalone inventory leaves required-sidecar status
+  unresolved; the container inspector parses package data. An inline package
+  need not have a `uexp`.
 - Up to 64 KiB of decoded content is examined regardless of extension for a
   bounded validated PE header, ELF/Mach-O magic, Unreal package tag and shebang.
   Script/config extensions produce candidate findings only. No recognized content
@@ -65,7 +67,8 @@ trusted-input compatibility probe in `scripts/probe_pak.py`.
 
 `payload_verified` means exact decoding and stored SHA1 passed. It does not mean
 class inspection completed. Unknown, rejected and uninspected records cannot
-produce `analysis_complete=true`. Even all-known records currently cannot.
+produce `analysis_complete=true` in the standalone command. The container
+inspector/evaluator can complete its supported checks, not certify safety.
 
 ## Resource boundary and defaults
 
@@ -140,5 +143,5 @@ at `/tmp/opencode/ue-pak-repak/target/release/repak`, a positive differential ch
 synthetic None/Zlib output; otherwise that optional test is explicitly skipped.
 
 These synthetic cases do not establish broad UE4.25/game compatibility. Owned
-cooked-package fixtures/provenance (#2) and parsed-class integration (#4) remain
-separate required evidence.
+cooked-package fixtures/provenance (#2) remain separate compatibility evidence.
+Parsed class-index integration runs in the container, not this standalone API.

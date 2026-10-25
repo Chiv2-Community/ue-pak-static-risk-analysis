@@ -23,6 +23,10 @@ mapping is supported. Unknown roots become incomplete, not invented identities.
 Encrypted paks and keys, other dependency bundles, indirect-call analysis (#8),
 transitive packages (#9), and default/configuration effects (#10) are unsupported.
 
+Optional trusted [content-policy flags](content-policy.md) restrict virtual paths
+and parsed export classes and handle protected-path replacement candidates.
+These are separate from invocation YAML and are never forwarded to the parser.
+
 Environment policy input uses the same shared loader, not Python YAML parsing:
 
 ```bash
@@ -69,7 +73,8 @@ moderator detail, verbose level, or access policy-bearing jobs/logs.
 
 1. Resolve the local image tag to an immutable image identity. Never pull during
    a scan. Use a trusted locally built image, not a submitter-supplied image.
-2. Validate policy, log level, engine version and gates in a trusted container.
+2. Validate content settings, policy, log level, engine version and gates in a
+   trusted container. Invalid content settings fail before policy disclosure.
 3. Open final-component-nofollow regular pak/mapping files nonblocking. Bound,
    copy, hash and check metadata stability; make private copies mode 0400.
 4. Mount only those copies read-only into a separate policy-free parser container.
@@ -89,7 +94,8 @@ moderator detail, verbose level, or access policy-bearing jobs/logs.
    containers on success, failure, timeout, SIGINT and SIGTERM.
 
 The optional `inspection` field in facts/reports preserves bounded inventory,
-member SHA256, signatures, class names, sidecar state, and fixed ingestion and
+member SHA256, signatures, class names, optional qualified class-index identities
+with provenance/completeness, sidecar state, and fixed ingestion and
 inspection diagnostics, including partial inventories. No generated storage path
 is transported. Metadata-only partial records can lack size/hash. Evidence remains
 parser-produced and unauthenticated: hash binding prevents accidental source
@@ -142,6 +148,9 @@ try to write a shared failed report. Docker unavailable or an unwritable report
 path can prevent any report; they never become clean empty scans. Rejected
 ingestion with usable facts produces a partial report, not an operational crash.
 
+Configured content rejection or review always exits 1, even with all three gates
+disabled. Content results remain separate from invocation counts and coverage.
+
 SIGKILL, host death, Docker daemon failure, or a kernel/container escape can defeat
 cleanup. The daemon is trusted; teardown is bounded and cannot prove removal when
 the daemon is unavailable. Do not share this worker with credentials or valuable
@@ -176,10 +185,10 @@ Synthetic CI needs no engine or game. Tests exercise actual local Docker
 isolation, policy canaries and source/log equivalence, snapshot/member hashes,
 flood/deadline/cancellation cleanup, cgroup limits, scratch exhaustion, bombs and
 unknown/missing package data. Optional cooked tests compare direct evaluator and
-container reports for the same normalized facts and private policy. Keep #3 open
-for configured class/namespace/replacement enforcement and richer inventory
-coverage; no general class allowlist or clean-install replacement baseline is
-claimed. The reusable Action and its policy workflow remain separate work.
+container reports for the same normalized facts and private policy. Configured
+class/path restrictions and protected-path candidate decisions use the shared
+trusted evaluator. No clean-install replacement baseline or complete native type
+inventory is claimed. The reusable Action does not expose content-policy flags.
 
 Run the Docker suite without concurrent scanner jobs on the same daemon. Cleanup
 assertions compare the global `pak-scan-*` inventory before and after each test;
@@ -219,3 +228,40 @@ Rebuilt locally on the same host/date; no registry publication:
   `AssetBinaryReader.LoadUexp` must be enabled for both layouts to load exports.
 - All 23 original receipt hashes still match; original evidence was read only.
 - No `pak-scan-*` containers remained after the serialized suite and repro.
+
+### Content-policy validation
+
+Local Linux validation, 2026-10-25; no image publication or engine/game execution:
+
+- Image: `sha256:195582570bc9c5ddf69d02a33c10c554454d95ec158ad5925385b5bf0ef3f054`
+  (`ue-pak-static-risk-analysis:content-policy-local`).
+- 111 extraction, 138 Scanner, 110 Policy and 26 PolicyInput tests passed.
+- 111 ordinary Python tests passed; 21 opt-in Docker tests skipped in that run.
+  Serialized runs passed all 17 container tests and all 19 Action tests, including
+  its four Docker tests. The read-only owned cooked verifier also passed.
+- Owned packages with the same virtual filename but different parsed classes
+  produce different class decisions. Split/inline packages, protected candidates,
+  class rejection with retained invocation findings, missing/malformed data and
+  signature gaps are covered. Ordinary CI uses synthetic fixtures; original
+  cooked evidence remains an authorized local opt-in, not redistributed data.
+- All 495 original evidence files are byte-identical before/after validation;
+  all 23 recorded receipt hashes match. No scanner containers remained.
+- This validates the bounded V9 contract, not exact game-build fidelity (#2),
+  native class hierarchy (#7), clean-install replacements or mod safety.
+
+### Content-policy ownership fix validation
+
+Local Linux validation, 2026-10-25; no publication or engine/game execution:
+
+- Image: `sha256:d51c1ff1b11cb1fb10e6c190d59ed078fe0cc907487b54a8796dfe0a5b82cd4b`
+  (`ue-pak-static-risk-analysis:content-policy-fix1-local`).
+- 142 Scanner, 111 extraction, 110 Policy and 26 PolicyInput tests passed.
+  Ordinary Python: 111 passed, 22 opt-in tests skipped. Serialized runs passed
+  all 18 container and 19 Action tests; the read-only cooked verifier passed.
+- Copied serialized fixtures cover imported/local classes, cyclic/null/out-of-range
+  references and missing owners through the production reader/parser. Class-only,
+  path-only and protected-only settings retain unknown class coverage. Known
+  classes and paired raw exports remain complete. Unconfigured behavior and
+  pre-existing bounds-failure extraction gaps remain unchanged.
+- All 495 original evidence files remain unchanged; all 23 receipt hashes match.
+  No scanner containers remained. The preceding fidelity/safety limits still apply.

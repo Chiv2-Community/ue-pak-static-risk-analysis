@@ -108,6 +108,16 @@ class ActionTests(unittest.TestCase):
         self.assertNotIn(b"::error::", result.stdout + result.stderr)
         self.assertNotIn("##[error]", summary)
 
+    def test_additive_content_result_keeps_real_arrays_and_nonzero_exit(self):
+        value = report()
+        value["content-policy"] = {"schema-version": 1, "decision": "reject", "incomplete": False,
+                                   "findings": [{"member-id": "r00000000", "diagnostic": "path-not-allowed"}]}
+        result, outputs, _ = self.invoke(value)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("1", outputs["forbidden-count"])
+        self.assertEqual(value["forbidden-invocations"], json.loads(outputs["forbidden-invocations"]))
+        self.assertEqual(value, json.loads((self.workspace / "report.json").read_text()))
+
     def test_large_arrays_explicitly_omitted_with_counts_and_report(self):
         value = report([finding(index, "\U0001f600" * 2000) for index in range(20)])
         result, outputs, _ = self.invoke(value)

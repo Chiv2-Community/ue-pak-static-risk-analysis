@@ -35,6 +35,8 @@ try
     var paired = new HashSet<string>();
     var inspections = new Dictionary<string, string>();
     var classes = new Dictionary<string, ImmutableArray<string>>();
+    var parsedClasses = new Dictionary<string, ParsedClassEvidence[]>();
+    var parsedClassesComplete = new Dictionary<string, bool>();
     foreach (var record in records)
     {
         if (!record.TryGetProperty("signatures", out var signatures)
@@ -78,8 +80,23 @@ try
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
             foreach (var gap in extraction.Analysis.CoverageGaps) gaps.Add(gap);
-            classes[id] = asset.Exports.Select(e => e.GetClassTypeForAncestry(asset, out var module).ToString())
-                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToImmutableArray();
+            var classTargets = asset.Exports.Select(e => TargetResolver.ResolveIdentity(asset, e.ClassIndex, logical)).ToArray();
+            var classNames = classTargets.Where(c => c is not null).Select(c => c!.Function)
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+            classes[id] = classNames.Take(256).ToImmutableArray();
+            if (classNames.Length > 256) gaps.Add(CoverageGap.IncompleteExtraction);
+            var identities = classTargets.Select(target =>
+            {
+                if (target is null) return null;
+                var identity = target.Owner + "." + target.Function;
+                return ContentPolicy.ClassIdentity(identity)
+                    ? new ParsedClassEvidence(identity, target.PackageIndex > 0 ? "export-class-index-export" : "export-class-index-import") : null;
+            }).ToArray();
+            // Missing class-index ownership is unavailable, never a guessed class.
+            var knownClasses = identities.Where(c => c is not null).Select(c => c!).Distinct()
+                .OrderBy(c => c.Identity, StringComparer.Ordinal).ToArray();
+            parsedClasses[id] = knownClasses.Take(256).ToArray();
+            parsedClassesComplete[id] = knownClasses.Length <= 256 && identities.Length > 0 && identities.All(c => c is not null);
             paired.Add(record.GetProperty("id").GetString()!);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -101,7 +118,9 @@ try
             r.TryGetProperty("sha256", out var sha) ? sha.GetString() : null, Text("status", "uninspected"),
             r.TryGetProperty("signatures", out var sigs) ? sigs.EnumerateArray().Select(s => s.GetString()!).ToImmutableArray() : [],
             classes.GetValueOrDefault(id, []), inspections.GetValueOrDefault(id, paired.Contains(id) ? "paired_export_data" : "uninspected"),
-            Text("sidecar_status", "unresolved"));
+            Text("sidecar_status", "unresolved"), parsedClasses.GetValueOrDefault(id),
+            parsedClassesComplete.TryGetValue(id, out var complete) ? complete : null,
+            r.TryGetProperty("virtual_path", out _));
     }).ToImmutableArray();
     var facts = new FactsDocument(1, pakHash, "4.25", "container-v1",
         dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray()),

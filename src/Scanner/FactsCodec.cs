@@ -11,8 +11,12 @@ public sealed record FactsDocument(int SchemaVersion, string PakSha256, string E
     string ProducerVersion, ImmutableArray<DependencyIdentity> Dependencies, InvocationAnalysis Analysis,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null);
 
+public sealed record ParsedClassEvidence(string Identity, string Provenance);
 public sealed record MemberEvidence(string Id, string Path, long? Size, string? Sha256, string Status,
-    ImmutableArray<string> Signatures, ImmutableArray<string> Classes, string InspectionStatus, string SidecarStatus);
+    ImmutableArray<string> Signatures, ImmutableArray<string> Classes, string InspectionStatus, string SidecarStatus,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ParsedClassEvidence[]? ParsedClasses = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? ParsedClassesComplete = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PathNormalized = null);
 public sealed record InspectionEvidence(string Status, string Diagnostic, ImmutableArray<MemberEvidence> Members);
 
 public sealed class FactsException() : Exception("Invalid facts input.");
@@ -133,7 +137,9 @@ public static class FactsCodec
                     || member.Status is not ("uninspected" or "rejected" or "payload_verified")
                     || member.Signatures.IsDefault || member.Signatures.Length > 16 || member.Signatures.Any(s => !Identity(s))
                     || member.Classes.IsDefault || member.Classes.Length > 256 || member.Classes.Any(s => s is null || s.Length > 4096 || !Unicode(s))
-                    || !Identity(member.InspectionStatus) || !Identity(member.SidecarStatus)) throw new FactsException();
+                    || !Identity(member.InspectionStatus) || !Identity(member.SidecarStatus)
+                    || member.ParsedClasses is { } parsed && (parsed.Length > 256 || parsed.Any(c => c is null
+                        || !ContentPolicy.ClassIdentity(c.Identity) || c.Provenance is not ("export-class-index-import" or "export-class-index-export")))) throw new FactsException();
         }
         PolicyEvaluator.Validate(document.Analysis);
     }
