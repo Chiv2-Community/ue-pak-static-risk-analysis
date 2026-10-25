@@ -1,7 +1,7 @@
 # Possible indirect dispatch
 
 Partial #8 implementation. **Do not close #8:** exact-game native/wrapper semantics,
-cross-package hierarchy linking and delegate binding-lifetime/control-flow analysis
+external dependency closure and delegate binding-lifetime/control-flow analysis
 remain unavailable. No game/mod executes during analysis.
 
 ## Evidence and policy
@@ -48,6 +48,61 @@ remain unavailable. No game/mod executes during analysis.
   consult the full report for indirect evidence. Strict report validation and
   moderation use the same schema. Exact report-byte hashing binds this evidence
   without copying it into a second moderation model.
+
+## Same-archive context
+
+The isolated parser now reads recognized packages twice. Pass one retains a small
+`ArchiveDispatchContext` of actual class/function identities and serialized parent/
+interface links; it does not retain `UAsset` objects. Pass two performs the existing
+full extraction and augments candidates from other packages in the **same submitted
+pak**. No new CLI/Action input, host mount, network request or private catalog is used.
+The original pak SHA-256 binds all context bytes, including sidecars. Changing a
+context package changes that hash and invalidates the existing moderation decision.
+Hash/schema checks do not authenticate parser semantics or submitted base classes.
+
+- Identity matching reuses bounded `TargetResolver` traversal with strict stored
+  FNames. Full package/class identities and function names match ASCII-case-
+  insensitively; original declaration spelling is retained. A same-name class in
+  another package is not the same class. Imported class links must name an actual
+  class import; missing/invalid indices are not guessed from `ToString` fallbacks.
+- Validated observed inheritance yields `inherited-function`, `override` or
+  `interface-implementation` provenance. An unknown receiver/partial ancestry can
+  also retain `archive-function` candidates without claiming a relationship.
+  This additive provenance tag uses the existing versioned dispatch-v1 evidence;
+  producer/evaluator/report schemas share the same closed enum.
+- Duplicate class/function identities never select an authoritative cross-package
+  definition. Missing classes/parents, cycles, malformed storage and global limits
+  remain explicit unknowns. Existing local evidence and diagnostics are not removed.
+  Every set remains possible, nonexhaustive and open-world; a submitted replacement
+  cannot certify a trusted base or establish safe absence.
+- No external dependency pak input or automatic game-filesystem lookup is provided.
+  Unseen external parents/implementations still require context and remain unknown.
+  This does not implement CDO/default inheritance, native constructors, engine load
+  precedence, binding lifetime or #7 exact-build summaries. The separate local
+  default-provenance API and all #10 limitations are unchanged.
+
+Hard archive-index bounds (lowerable in the trusted library API): 4,096 classes,
+4,096 function definitions, 10,000 hierarchy edges, 100,000 shared index/query
+operations, 256 ancestry depth, 262,144 retained UTF-16 text units, 10,000 added
+candidates and 10,000 augmented origins. Each package indexes at most 4,096 exports.
+Existing per-dispatch and parser-global origin/candidate/transport budgets still
+apply; a limit never stops mandatory call extraction, inventory or later packages.
+The parser sorts records by virtual path before both passes, independently of
+archive enumeration. Bounds are post-parse; upstream decoding still requires the
+existing process/cgroup isolation.
+
+Trusted library callers can `Add(asset, input)` for each original package, `Seal()`
+the context, then pass `archiveContext:` to `InvocationExtractor.Read`/`Inspect`.
+The caller owns ordering, exact archive binding and isolation. This AST API does
+not authenticate caller-supplied objects or establish a closed world.
+
+`tests/PackageContextFixture.cs` serializes separate Base, ChildOverride, Interface,
+Caller and unrelated same-name Collision packages. The fixed corpus oracle checks
+actual origins/offsets, candidates, unchanged direct counts and possible call-chain
+witnesses across ingestion/Parser/evaluator/wrapper/Action. Its fifth removal
+mutation removes a cross-package override candidate without changing counts;
+schema validation accepts the mutation but the semantic oracle rejects it.
+No generated asset is committed and no owned cooked evidence is changed.
 
 ## Narrow engine-source timer hypothesis
 

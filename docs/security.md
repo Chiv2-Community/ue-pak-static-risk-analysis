@@ -41,6 +41,9 @@ recorded symbols, not an authenticated hierarchy or native capability catalog.
 Partial [open-world indirect evidence](indirect-dispatch.md) ships for #8, not
 exhaustive resolution or callback execution proof. Source-scoped engine timer
 hypotheses explicitly retain unverified game-build applicability.
+Same-pak class links add only bounded possible candidates; submitted parent classes
+are not trusted baseline implementations. No external dependency discovery/input
+or effective cross-package defaults are supplied by this linking slice.
 Partial [bounded call chains](call-chains.md) use actual matched endpoints and
 explicit nonsecret, provenance-bearing operator summaries; they do not prove #7–9
 complete. Missing context/summaries and possible edges remain incomplete.

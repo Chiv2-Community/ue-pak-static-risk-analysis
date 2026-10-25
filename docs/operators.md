@@ -176,6 +176,9 @@ analysis completion, not policy approval.
 direct invocation counts. A possible forbid is not a definite forbidden occurrence;
 it retains incomplete coverage and fails the default incomplete gate. See the
 [partial indirect scope and source provenance](indirect-dispatch.md).
+Recognized packages in that same pak now supply bounded possible hierarchy context,
+bound by the original pak digest. External dependencies and unknown implementations
+remain gaps; no new dependency path or game-installation lookup is available.
 
 Use [moderation handoff](moderation.md) to bind original pak/dependency bytes,
 retained report bytes, actual scanner identity, explicit game build and opaque

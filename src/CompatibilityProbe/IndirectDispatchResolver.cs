@@ -14,30 +14,32 @@ internal sealed class IndirectDispatchResolver
     private readonly UAsset asset;
     private readonly PackageInput input;
     private readonly ExtractionLimits limits;
+    private readonly ArchiveDispatchContext? archiveContext;
     private readonly Dictionary<string, List<(int Index, int Owner)>> functions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, (HashSet<int> Classes, HashSet<string> Diagnostics)> chains = [];
     private int work;
     private int emitted;
     private bool indexLimited;
 
-    internal IndirectDispatchResolver(UAsset asset, PackageInput input, ExtractionLimits limits)
+    internal IndirectDispatchResolver(UAsset asset, PackageInput input, ExtractionLimits limits, ArchiveDispatchContext? archiveContext = null)
     {
         this.asset = asset;
         this.input = input;
         this.limits = limits;
+        this.archiveContext = archiveContext;
         indexLimited = asset.Exports.Count > limits.MaxExports;
         for (var i = 0; i < Math.Min(asset.Exports.Count, limits.MaxExports); i++)
         {
             if (++work > limits.MaxOccurrences) { indexLimited = true; break; }
             if (asset.Exports[i] is FunctionExport function)
-                Add(function.ObjectName?.ToString(), i + 1, function.OuterIndex?.Index ?? 0);
+                Add(TargetResolver.StoredName(function.ObjectName), i + 1, function.OuterIndex?.Index ?? 0);
         }
         for (var i = 0; i < asset.Imports.Count; i++)
         {
             if (++work > limits.MaxOccurrences) { indexLimited = true; break; }
             var import = asset.Imports[i];
-            if (import?.ClassName?.ToString() == "Function")
-                Add(import.ObjectName?.ToString(), -i - 1, import.OuterIndex?.Index ?? 0);
+            if (TargetResolver.StoredName(import?.ClassName) == "Function")
+                Add(TargetResolver.StoredName(import!.ObjectName), -i - 1, import.OuterIndex?.Index ?? 0);
         }
     }
 
@@ -64,17 +66,17 @@ internal sealed class IndirectDispatchResolver
                 break;
             case EX_VirtualFunction call:
                 kind = "virtual";
-                name = call.VirtualFunctionName?.ToString();
+                name = TargetResolver.StoredName(call.VirtualFunctionName);
                 break;
             case EX_BindDelegate binding:
                 kind = "delegate-binding";
-                name = binding.FunctionName?.ToString();
+                name = TargetResolver.StoredName(binding.FunctionName);
                 receiver = binding.ObjectTerm;
                 diagnostics.Add("binding-flow-unresolved");
                 break;
             case EX_InstanceDelegate binding:
                 kind = "delegate-binding";
-                name = binding.FunctionName?.ToString();
+                name = TargetResolver.StoredName(binding.FunctionName);
                 diagnostics.Add("binding-flow-unresolved");
                 break;
             case EX_FinalFunction call:
@@ -98,7 +100,7 @@ internal sealed class IndirectDispatchResolver
                     };
                 }
                 else if (call.Parameters.ElementAtOrDefault(0) is EX_InstanceDelegate instance)
-                    name = instance.FunctionName?.ToString();
+                    name = TargetResolver.StoredName(instance.FunctionName);
                 else diagnostics.Add("receiver-unavailable");
                 break;
             default:
@@ -153,7 +155,7 @@ internal sealed class IndirectDispatchResolver
                     var derived = ownerChain.Classes.Contains(receiverClass);
                     var uncertain = receiverChain.Diagnostics.Count != 0 || ownerChain.Diagnostics.Count != 0;
                     if (!inherited && !derived && !uncertain) continue;
-                    var identity = TargetResolver.ResolveIdentity(asset, new(entry.Index), input.LogicalPath);
+                    var identity = TargetResolver.ResolveDataIdentity(asset, new(entry.Index), input.LogicalPath);
                     if (identity is null || !PolicyYaml.IsOwner(identity.Owner) || !PolicyYaml.IsIdentifier(identity.Function))
                     { diagnostics.Add("target-metadata-unavailable"); continue; }
                     if (seen.Add((identity.Owner, identity.Function)))
@@ -167,10 +169,11 @@ internal sealed class IndirectDispatchResolver
                 }
             if (candidates.Count == 0) diagnostics.Add("target-metadata-unavailable");
         }
-        return new(1, new(input.FactIdentity, containing.Qualified, offset), node.Token.ToString(), kind,
+        var dispatch = new IndirectDispatch(1, new(input.FactIdentity, containing.Qualified, offset), node.Token.ToString(), kind,
             PolicyYaml.IsIdentifier(name) ? name : null,
             receiverKind, "possible", candidates.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),
             diagnostics.Order(StringComparer.Ordinal).ToImmutableArray(), source);
+        return archiveContext?.Augment(dispatch, asset, input, receiverClass, limits.MaxTargets) ?? dispatch;
     }
 
     private (string Kind, int Class) Receiver(KismetExpression expression, int self) => expression switch

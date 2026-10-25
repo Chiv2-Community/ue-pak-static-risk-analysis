@@ -32,7 +32,10 @@ try
     var candidateCount = 0;
     var gaps = new HashSet<CoverageGap>();
     if (report.GetProperty("ingestion_status").GetString() != "validated") gaps.Add(CoverageGap.IncompleteExtraction);
-    var records = report.GetProperty("records").EnumerateArray().ToArray();
+    var records = report.GetProperty("records").EnumerateArray()
+        .OrderBy(r => r.TryGetProperty("virtual_path", out var p) ? p.GetString() : "", StringComparer.OrdinalIgnoreCase)
+        .ThenBy(r => r.TryGetProperty("virtual_path", out var p) ? p.GetString() : "", StringComparer.Ordinal)
+        .ThenBy(r => r.GetProperty("id").GetString(), StringComparer.Ordinal).ToArray();
     var byPath = records.ToLookup(r => r.TryGetProperty("virtual_path", out var p) ? p.GetString()! : "",
         StringComparer.OrdinalIgnoreCase);
     if (records.Length == 0) gaps.Add(CoverageGap.IncompleteExtraction);
@@ -46,6 +49,42 @@ try
     var classes = new Dictionary<string, ImmutableArray<string>>();
     var parsedClasses = new Dictionary<string, ParsedClassEvidence[]>();
     var parsedClassesComplete = new Dictionary<string, bool>();
+    string Payload(JsonElement r)
+    {
+        var id = r.GetProperty("id").GetString()!;
+        if (!Regex.IsMatch(id, @"\Ar[0-9]{8}\z")) throw new InvalidDataException();
+        var file = Path.Combine(root, id);
+        if (r.GetProperty("status").GetString() != "payload_verified"
+            || Hash(file) != r.GetProperty("sha256").GetString()) throw new InvalidDataException();
+        return file;
+    }
+    string Logical(string path)
+    {
+        var relative = path[(contentRoot.Length + 1)..];
+        var dot = relative.LastIndexOf('.');
+        return logicalRoot + "/" + (dot <= relative.LastIndexOf('/') ? relative : relative[..dot]);
+    }
+    bool Package(JsonElement r) => r.TryGetProperty("signatures", out var signatures)
+        && signatures.EnumerateArray().Any(s => s.GetString() == "unreal_package_tag");
+    // First pass retains only bounded symbols/links. Each hostile UAsset is released
+    // before the next package; the second pass still inspects all mandatory calls.
+    var archiveContext = new ArchiveDispatchContext();
+    foreach (var record in records.Where(Package))
+    {
+        var path = record.GetProperty("virtual_path").GetString()!;
+        if (contentRoot == "-" || !path.StartsWith(contentRoot + "/", StringComparison.Ordinal))
+        { archiveContext.MarkIncomplete(); continue; }
+        try
+        {
+            var stem = path.LastIndexOf('.') > path.LastIndexOf('/') ? path[..path.LastIndexOf('.')] : path;
+            var exports = byPath[stem + ".uexp"].ToArray();
+            if (exports.Length > 1) throw new InvalidDataException();
+            var asset = PackageReader.Read(Payload(record), exports.Length == 1 ? Payload(exports[0]) : null, mapping);
+            archiveContext.Add(asset, new("submission", path, Logical(path), Payload(record)));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { archiveContext.MarkIncomplete(); }
+    }
+    archiveContext.Seal();
     foreach (var record in records)
     {
         if (!record.TryGetProperty("signatures", out var signatures)
@@ -58,19 +97,7 @@ try
             gaps.Add(CoverageGap.IncompleteExtraction);
             continue;
         }
-        var relative = path[(contentRoot.Length + 1)..];
-        var dot = relative.LastIndexOf('.');
-        var logical = logicalRoot + "/" + (dot <= relative.LastIndexOf('/') ? relative : relative[..dot]);
-        string Payload(JsonElement r)
-        {
-            var id = r.GetProperty("id").GetString()!;
-            if (!Regex.IsMatch(id, @"\Ar[0-9]{8}\z")) throw new InvalidDataException();
-            var file = Path.Combine(root, id);
-            if (r.GetProperty("status").GetString() != "payload_verified"
-                || Hash(file) != r.GetProperty("sha256").GetString())
-                throw new InvalidDataException();
-            return file;
-        }
+        var logical = Logical(path);
         var stem = path.LastIndexOf('.') > path.LastIndexOf('/') ? path[..path.LastIndexOf('.')] : path;
         var exports = byPath[stem + ".uexp"].ToArray();
         try
@@ -84,7 +111,7 @@ try
                 paired.Add(exports[0].GetProperty("id").GetString()!);
             // Bulk payload inspection is not implemented; it must not become clean.
             var input = new PackageInput("submission", path, logical, Payload(record));
-            var extraction = InvocationExtractor.Inspect(asset, input);
+            var extraction = InvocationExtractor.Inspect(asset, input, archiveContext: archiveContext);
             PolicyEvaluator.Validate(extraction.Analysis);
             var id = record.GetProperty("id").GetString()!;
             if (dataNodes >= DataEvidenceValidation.MaxProperties || dataPackages.Count >= 4096

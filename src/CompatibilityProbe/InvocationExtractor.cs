@@ -17,7 +17,7 @@ public static class InvocationExtractor
         typeof(ActorComponentExport), typeof(SceneComponentExport), typeof(LevelExport), typeof(EnumExport),
         typeof(DataTableExport), typeof(StringTableExport), typeof(MetaDataExport), typeof(AssetImportDataExport)];
 
-    private static void ValidateInput(PackageInput input)
+    internal static void ValidateInput(PackageInput input)
     {
         foreach (var text in new[] { input.Pak, input.Entry, input.LogicalPath })
             if (string.IsNullOrWhiteSpace(text) || text.Length > 1024 || text.Any(char.IsControl))
@@ -33,19 +33,21 @@ public static class InvocationExtractor
         return true;
     }
 
-    public static ExtractionReport Read(PackageInput input, Usmap? mappings = null, ExtractionLimits? limits = null)
+    public static ExtractionReport Read(PackageInput input, Usmap? mappings = null, ExtractionLimits? limits = null,
+        ArchiveDispatchContext? archiveContext = null)
     {
         limits ??= new();
         limits.Validate();
         ValidateInput(input);
-        try { return Inspect(PackageReader.Read(input.StoragePath, mappings), input, limits); }
+        try { return Inspect(PackageReader.Read(input.StoragePath, mappings), input, limits, archiveContext); }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             return Report(input, [], [], [new("package-read-failed")]);
         }
     }
 
-    public static ExtractionReport Inspect(UAsset asset, PackageInput input, ExtractionLimits? limits = null)
+    public static ExtractionReport Inspect(UAsset asset, PackageInput input, ExtractionLimits? limits = null,
+        ArchiveDispatchContext? archiveContext = null)
     {
         limits ??= new();
         limits.Validate();
@@ -63,7 +65,7 @@ public static class InvocationExtractor
         var metadataBudget = 0;
         var signatures = new Dictionary<int, (List<string>? Names, string? Error)>();
         IndirectDispatchResolver? indirect = null;
-        try { indirect = new(asset, input, limits); }
+        try { indirect = new(asset, input, limits, archiveContext); }
         catch (Exception error) when (error is not OutOfMemoryException) { diagnostics.Add(new("indirect-analysis-failed")); }
         var dispatches = new List<IndirectDispatch>();
         for (var i = 0; i < Math.Min(asset.Exports.Count, limits.MaxExports); i++)

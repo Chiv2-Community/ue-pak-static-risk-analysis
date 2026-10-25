@@ -14,7 +14,13 @@ using System.Security.Cryptography;
 using System.Text.Json;
 
 // Original synthetic serialization, not engine-cooked or game-derived content.
-if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget")) return 2;
+if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget" or "package-context")) return 2;
+if (args[0] == "package-context")
+{
+    if (Directory.Exists(args[1])) return 2;
+    PackageContextFixture.Write(args[1]);
+    return 0;
+}
 if (args[0] == "properties") return Properties();
 if (args[0] == "chains") return Chains(args[1]);
 if (args[0] == "data-policy") return DataPolicyFixtures(args[1]);

@@ -431,6 +431,98 @@ def data_policy_gate(run, policy):
         raise ValueError("oracle accepted removed-data-finding")
 
 
+def package_context_oracle(report):
+    expected = json.loads((ROOT / "fixtures/corpus/package-context-expectations.json").read_bytes())
+    require(report["counts"]["invocations"] == expected["invocations"] and
+            report["counts"]["forbidden"] == expected["forbidden"], "archive direct counts changed")
+    dispatches = report["possible-dispatches"]
+    require(len(dispatches) == len(expected["dispatches"]), "archive dispatch origins lost")
+    for actual, wanted in zip(dispatches, expected["dispatches"]):
+        evidence = actual["evidence"]
+        require(evidence["origin"]["function"] == wanted["function"] and evidence["origin"]["offset"] == wanted["offset"],
+                "archive dispatch location changed")
+        require(evidence["candidates"] == wanted["candidates"], "archive candidate evidence lost")
+        require(evidence["resolution"] == "possible" and "open-world" in evidence["diagnostics"], "archive world closed")
+        require(actual["possibly-forbidden"], "archive candidate policy effect lost")
+    propagated = [w for w in report["call-chains"]["witnesses"] if w["callers"]]
+    require(any(w["callers"][0]["origin"]["function"] == "/Game/Base.Type:Run#4" and
+                w["resolution"] == "possible" and w["endpoint"]["target"] ==
+                {"owner": "/Script/Corpus.Sensitive", "function": "Record"} for w in propagated),
+            "cross-package possible capability chain lost")
+    require(all(w["resolution"] == "possible" for w in propagated), "possible archive edge promoted")
+
+
+def package_context_gate(run, image=None):
+    from pak_ingest import ingest
+    generated = run.root / "package-context"
+    run.command(["dotnet", GENERATOR, "package-context", generated])
+    expected = json.loads((ROOT / "fixtures/corpus/package-context-expectations.json").read_bytes())
+    require({p.name: digest(p.read_bytes()) for p in sorted(generated.iterdir())} == expected["serialized-sha256"],
+            "archive serialized fixture hashes changed; manual review required")
+    pak = run.root / "package-context.pak"
+    pak.write_bytes(build([("Content/" + p.name, p.read_bytes(), False) for p in sorted(generated.iterdir())]))
+    project = ROOT / "src/Parser/Parser.csproj"
+    run.command(["dotnet", "restore", project, "--locked-mode"], timeout=180)
+    run.command(["dotnet", "build", project, "-c", "Release", "--no-restore"], timeout=180)
+    path = run.root / "package-context-facts.json"
+    def inspect(root, report):
+        (Path(root) / "inspection.json").write_text(json.dumps(report))
+        raw, _ = run.command(["dotnet", ROOT / "src/Parser/bin/Release/net10.0/Parser.dll", root,
+            "-", "Content", "/Game", pak])
+        path.write_bytes(raw)
+    require(ingest(pak, inspector=inspect)["ingestion_status"] == "validated", "archive context ingestion failed")
+    policy = (ROOT / "fixtures/corpus/policy.yaml").read_text() + """
+  - id: original-archive-candidate
+    description: Original synthetic override only
+    effect: forbid
+    match:
+      kind: invocation
+      target:
+        kind: exact
+        owner: /Game/ChildOverride.Type
+        function: Sensitive
+"""
+    report = run.evaluate(path, policy=policy)
+    package_context_oracle(report)
+    mutant = copy.deepcopy(report)
+    mutant["possible-dispatches"][0]["evidence"]["candidates"] = [
+        c for c in mutant["possible-dispatches"][0]["evidence"]["candidates"] if c["owner"] != "/Game/ChildOverride.Type"]
+    report_validation.load(json.dumps(mutant).encode(), ROOT)
+    try:
+        package_context_oracle(mutant)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("oracle accepted removed-archive-candidate")
+    if image:
+        # Same serial parser/evaluator/wrapper/actual-Action parity as call chains,
+        # without a catalog: the endpoint is the original direct policy match.
+        import scan
+        config = run.root / "archive-docker-config"
+        config.mkdir()
+        docker = scan.Docker(config, image, 60)
+        status, raw = docker.run(scan.mount(pak, "/input/submission"), "/usr/local/bin/python3",
+            ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+        require(status == 0 and json.loads(raw) == json.loads(path.read_bytes()), "archive container facts parity")
+        destination = run.root / "archive-wrapper-report.json"
+        run.command([sys.executable, ROOT / "scripts/scan.py", "scan", "--pak", pak, "--report", destination,
+            "--engine-version", "4.25", "--image", docker.image, "--content-root", "Content=/Game"],
+            env={"UE_PAK_POLICY_RULES": policy}, timeout=120, codes=(1,))
+        require(report_validation.load(destination.read_bytes(), ROOT) == report, "archive wrapper report parity")
+        workspace = run.root / "archive-action"
+        workspace.mkdir()
+        output, summary = workspace / "outputs", workspace / "summary"
+        output.touch(); summary.touch()
+        logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+            "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image, "GITHUB_WORKSPACE": str(workspace),
+            "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary), "INPUT_PAK": str(pak),
+            "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game"}, timeout=120, codes=(1,), cwd=workspace)
+        raw = (workspace / "report.json").read_bytes()
+        require(report_validation.load(raw, ROOT) == report, "archive Action report parity")
+        privacy(logs, raw + output.read_bytes() + summary.read_bytes())
+    return pak, path, policy, report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="new private directory outside checkout")
@@ -492,6 +584,7 @@ def main():
         output_properties(baseline)
         call_chain_gate(run, args.docker_image)
         data_policy_gate(run, policy)
+        package_context_gate(run, args.docker_image)
         if args.docker_image:
             integrated(run, args.docker_image, pak, expected, policy)
         if args.owned_evidence:
@@ -501,7 +594,7 @@ def main():
         if args.components:
             components(run, args.docker_image, args.owned_evidence)
         completed = True
-        print("PASS: integrated synthetic corpus; four removal mutations rejected; Docker=" + str(bool(args.docker_image))
+        print("PASS: integrated synthetic corpus; five removal mutations rejected; Docker=" + str(bool(args.docker_image))
               + "; external owned cook=" + str(bool(args.owned_evidence)))
         return 0
     finally:
@@ -509,7 +602,8 @@ def main():
             "completed": completed, "release-requested": args.release,
             "source-sha256": {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
                 (ROOT / "scripts/regression_corpus.py", ROOT / "tests/Corpus.Generate/Program.cs",
-                 ROOT / "fixtures/corpus/expectations.json", ROOT / "fixtures/corpus/policy.yaml")},
+                  ROOT / "fixtures/corpus/expectations.json", ROOT / "fixtures/corpus/policy.yaml",
+                  ROOT / "tests/PackageContextFixture.cs", ROOT / "fixtures/corpus/package-context-expectations.json")},
             "commands": run.receipts, "docker-requested": bool(args.docker_image),
             "owned-evidence-requested": bool(args.owned_evidence)}, indent=2) + "\n")
 
