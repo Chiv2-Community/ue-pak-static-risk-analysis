@@ -121,7 +121,11 @@ class IngestionTests(unittest.TestCase):
                             mutate=lambda m, p: m[1].__setitem__("offset", 0)), "entry_overlap")
 
     def test_block_checks(self):
-        members = [("a", b"abcd" * 10000, True)]
+        # Keep expansion below the default quota across zlib implementations.
+        members = [("a", bytes(range(256)) * 160, True)]
+        result = self.ingest(build(members))
+        self.assertEqual(result["ingestion_status"], "validated", result)
+        self.assertEqual(len(result["records"][0]["blocks"]), 2)
         for key, value, code in [("block_size", 0, "invalid_block_size"),
                                  ("block_size", 1, "invalid_block_count"),
                                  ("blocks", [(1, 2), (2, 3)], "invalid_block_layout")]:
@@ -328,13 +332,14 @@ class IngestionTests(unittest.TestCase):
 
     @unittest.skipUnless(Path("/tmp/opencode/ue-pak-repak/target/release/repak").is_file(), "local pinned repak absent")
     def test_optional_repak_differential(self):
-        data = build([("Content/a", b"owned bytes" * 10000, True), ("Content/b", b"plain", False)])
+        payload = bytes(range(256)) * 400
+        data = build([("Content/a", payload, True), ("Content/b", b"plain", False)])
         self.path.write_bytes(data)
         output = self.root / "repak-output"
         process = subprocess.run(["/tmp/opencode/ue-pak-repak/target/release/repak", "unpack",
                                   str(self.path), "--output", str(output)], capture_output=True, timeout=10)
         self.assertEqual(process.returncode, 0, "local repak positive differential failed")
-        self.assertEqual((output / "Content/a").read_bytes(), b"owned bytes" * 10000)
+        self.assertEqual((output / "Content/a").read_bytes(), payload)
         self.assertEqual((output / "Content/b").read_bytes(), b"plain")
         self.assertEqual(self.ingest()["ingestion_status"], "validated")
 
