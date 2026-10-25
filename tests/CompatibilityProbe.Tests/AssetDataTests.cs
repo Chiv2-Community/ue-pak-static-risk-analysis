@@ -1,0 +1,365 @@
+using System.Text;
+using CompatibilityProbe;
+using PakRisk.Extraction;
+using PakRisk.Policy;
+using UAssetAPI;
+using UAssetAPI.ExportTypes;
+using UAssetAPI.Kismet.Bytecode;
+using UAssetAPI.Kismet.Bytecode.Expressions;
+using UAssetAPI.PropertyTypes.Objects;
+using UAssetAPI.PropertyTypes.Structs;
+using UAssetAPI.UnrealTypes;
+using Xunit;
+
+namespace CompatibilityProbe.Tests;
+
+public sealed class AssetDataTests
+{
+    private static readonly PackageInput Input = new("original-fixture", "Content/Data.uasset", "/Game/Data", "unused");
+
+    private static UAsset Asset()
+    {
+        var asset = new UAsset(EngineVersion.VER_UE4_25)
+        {
+            PackageFlags = EPackageFlags.PKG_Cooked | EPackageFlags.PKG_FilterEditorOnly,
+            Imports = [], Exports = [], LegacyFileVersion = -7, FolderName = new("None"),
+            Generations = [], ChunkIDs = [], AssetRegistryRecords = [], AdditionalFiles = [],
+            RecordedEngineVersion = new(), RecordedCompatibleWithEngineVersion = new(),
+            UseSeparateBulkDataFiles = false
+        };
+        asset.ClearNameIndexList();
+        asset.AddNameReference(new("None"));
+        foreach (var name in new[] { "StrProperty", "BoolProperty", "IntProperty", "Int64Property", "NameProperty",
+            "EnumProperty", "ObjectProperty", "DelegateProperty", "StructProperty", "ArrayProperty" })
+            asset.AddNameReference(new(name));
+        // Same pinned writer header initialization as Corpus.Generate; original synthetic bytes only.
+        typeof(UAsset).GetField("AdditionalPackagesToCook", System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.NonPublic)!.SetValue(asset, new List<FString>());
+        typeof(UAsset).GetField("doWeHaveWorldTileInfo", System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.NonPublic)!.SetValue(asset, false);
+        asset.Imports.Add(new Import("/Script/CoreUObject", "Package", new(0), "/Script/CoreUObject", false, asset));
+        foreach (var name in new[] { "Object", "Class", "Function" })
+            asset.Imports.Add(new Import("/Script/CoreUObject", "Class", new(-1), name, false, asset));
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Data"),
+            OuterIndex = new(0), ClassIndex = new(-2), Data = [], Extras = [] });
+        return asset;
+    }
+
+    private static NormalExport Data(UAsset asset) => (NormalExport)asset.Exports[0];
+    private static AssetDataEvidence Inspect(UAsset asset, DataExtractionLimits? limits = null) =>
+        AssetDataExtractor.Inspect(asset, Input, limits);
+    private static SerializedValue Value(AssetDataEvidence evidence, string name) =>
+        Assert.Single(evidence.Properties.Where(p => p.ExportIndex == 1 && p.Path.Length == 1
+            && p.Path[0].Property == name)).Value;
+
+    private sealed class TemporaryPackage : IDisposable
+    {
+        private readonly string root = Path.Combine(Path.GetTempPath(), "asset-data-" + Guid.NewGuid().ToString("N"));
+        public string PathName { get; }
+        public TemporaryPackage(UAsset asset)
+        {
+            Directory.CreateDirectory(root);
+            PathName = Path.Combine(root, "Data.uasset");
+            asset.Write(PathName);
+        }
+        public AssetDataEvidence Read(DataExtractionLimits? limits = null) =>
+            AssetDataExtractor.Read(Input with { StoragePath = PathName }, limits: limits);
+        public void Dispose() => Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public void PublicReadPreservesTypedSerializedValuesAndNeverStoragePaths()
+    {
+        var asset = Asset();
+        Data(asset).Data = [
+            new StrPropertyData(new(asset, "Destination")) { Value = new("owned-original-destination") },
+            new BoolPropertyData(new(asset, "Enabled")) { Value = true },
+            new IntPropertyData(new(asset, "Number")) { Value = 424242 },
+            new Int64PropertyData(new(asset, "Wide")) { Value = long.MinValue },
+            new NamePropertyData(new(asset, "Named")) { Value = new(asset, "None") },
+            new EnumPropertyData(new(asset, "Mode")) { EnumType = new(asset, "OwnedMode"), Value = new(asset, "OwnedMode::One") },
+            new ObjectPropertyData(new(asset, "Absent")) { Value = new(0) },
+            new ObjectPropertyData(new(asset, "Target")) { Value = new(1) },
+            new DelegatePropertyData(new(asset, "Binding")) { Value = new(new(1), new(asset, "OwnedHandler")) }
+        ];
+        using var package = new TemporaryPackage(asset);
+        var evidence = package.Read();
+        Assert.True(evidence.Complete, string.Join(",", evidence.Diagnostics));
+        Assert.Equal(new SerializedValue.Text("owned-original-destination"), Value(evidence, "Destination"));
+        Assert.Equal(new SerializedValue.Boolean(true), Value(evidence, "Enabled"));
+        Assert.Equal(new SerializedValue.Integer(424242, "int32"), Value(evidence, "Number"));
+        Assert.Equal(new SerializedValue.Integer(long.MinValue, "int64"), Value(evidence, "Wide"));
+        Assert.Equal(new SerializedValue.Name("None"), Value(evidence, "Named"));
+        Assert.Equal(new SerializedValue.Enumeration("OwnedMode", "OwnedMode::One"), Value(evidence, "Mode"));
+        Assert.IsType<SerializedValue.NullReference>(Value(evidence, "Absent"));
+        var reference = Assert.IsType<SerializedValue.Reference>(Value(evidence, "Target"));
+        Assert.Equal(new SerializedValue.Reference(1, "/Game/Data", "Data", "local-object"), reference);
+        Assert.Equal(new SerializedValue.Delegate(reference, "OwnedHandler"), Value(evidence, "Binding"));
+        Assert.Equal(Input.FactIdentity, evidence.Asset);
+        Assert.DoesNotContain(package.PathName, evidence.ToString());
+        Assert.All(evidence.Properties, p => Assert.False(p.ClassDefaultFlag));
+    }
+
+    [Fact]
+    public void PublicReadRecursesThroughSupportedStructsAndArraysWithStructuralPaths()
+    {
+        var asset = Asset();
+        Data(asset).Data = [new StructPropertyData(new(asset, "Settings"), new(asset, "OwnedSettings"))
+        {
+            Value = [new ArrayPropertyData(new(asset, "Destinations")) { Value = [
+                new StrPropertyData(new(asset, "0")) { Value = new("original-one") },
+                new StrPropertyData(new(asset, "1")) { Value = new("original-two") }
+            ] }]
+        }];
+        using var package = new TemporaryPackage(asset);
+        var evidence = package.Read();
+        Assert.True(evidence.Complete, string.Join(",", evidence.Diagnostics));
+        Assert.Equal(4, evidence.Properties.Length);
+        Assert.Equal(new DataPathPart("Settings", 0), evidence.Properties[3].Path[0]);
+        Assert.Equal(new DataPathPart("Destinations", 0), evidence.Properties[3].Path[1]);
+        Assert.Equal(new DataPathPart(null, 0, 1), evidence.Properties[3].Path[2]);
+        Assert.Equal(new SerializedValue.Text("original-two"), evidence.Properties[3].Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PublicReadLossyStringDecodingRemainsUnknown(bool unicode)
+    {
+        var asset = Asset();
+        var marker = unicode ? "有😀界" : "owned-malformed-marker";
+        Data(asset).Data = [new StrPropertyData(new(asset, "Value"))
+            { Value = new(marker, unicode ? Encoding.Unicode : Encoding.UTF8) }];
+        using var package = new TemporaryPackage(asset);
+        var bytes = File.ReadAllBytes(package.PathName);
+        var pattern = (unicode ? Encoding.Unicode : Encoding.UTF8).GetBytes(marker);
+        var position = bytes.AsSpan().IndexOf(pattern);
+        Assert.True(position >= 0);
+        if (unicode) { bytes[position + 4] = 0; bytes[position + 5] = 0xd8; } // broken surrogate pair
+        else bytes[position] = 0xff;
+        File.WriteAllBytes(package.PathName, bytes);
+        var evidence = package.Read();
+        Assert.False(evidence.Complete);
+        Assert.Equal(new SerializedValue.Unknown("string-value-unavailable"), Value(evidence, "Value"));
+    }
+
+    [Theory]
+    [InlineData("\ufffd")]
+    [InlineData("\u001b[31m")]
+    [InlineData("\u0000")]
+    [InlineData("\ud800")]
+    public void AmbiguousOrControlBearingPropertyTextIsNotDefinitive(string value)
+    {
+        var asset = Asset();
+        Data(asset).Data = [new StrPropertyData(new(asset, "Value")) { Value = new(value) }];
+        Assert.IsType<SerializedValue.Unknown>(Value(Inspect(asset), "Value"));
+    }
+
+    private sealed class UnsupportedString : StrPropertyData
+    {
+        public UnsupportedString() { }
+        public UnsupportedString(FName name) : base(name) { }
+        public override bool ShouldBeRegistered => false;
+        public override string ToString() => throw new InvalidOperationException("Must not stringify unknown data.");
+    }
+
+    [Fact]
+    public void UnknownTypesAndMissingOrCyclicReferencesNeverBecomeNullOrStrings()
+    {
+        var asset = Asset();
+        Data(asset).Data = [new UnsupportedString(new(asset, "Unsupported")) { Value = new("not-evidence") },
+            new ObjectPropertyData(new(asset, "Missing")) { Value = new(int.MinValue) },
+            new ObjectPropertyData(new(asset, "Cycle")) { Value = new(1) }];
+        Data(asset).OuterIndex = new(1);
+        var evidence = Inspect(asset);
+        Assert.False(evidence.Complete);
+        Assert.All(evidence.Properties, p => Assert.IsType<SerializedValue.Unknown>(p.Value));
+        Assert.Contains("property-owner-or-class-unavailable", evidence.Diagnostics);
+    }
+
+    [Fact]
+    public void InvalidEnumMappingFallbackIsUnknown()
+    {
+        var asset = Asset();
+        Data(asset).Data = [new EnumPropertyData(new(asset, "Mode")) { EnumType = new(asset, "OwnedEnum"),
+            Value = new(asset, EnumPropertyData.InvalidEnumIndexFallbackPrefix + "999") }];
+        Assert.IsType<SerializedValue.Unknown>(Value(Inspect(asset), "Mode"));
+    }
+
+    [Fact]
+    public void UninitializedPropertyStorageDoesNotInventZeroFalseOrNull()
+    {
+        var asset = Asset();
+        Data(asset).Data = [new IntPropertyData(new(asset, "Number")), new BoolPropertyData(new(asset, "Boolean")),
+            new ObjectPropertyData(new(asset, "Reference"))];
+        Assert.All(Inspect(asset).Properties, p => Assert.IsType<SerializedValue.Unknown>(p.Value));
+    }
+
+    [Fact]
+    public void PublicReadUnsupportedClassPropertyBytesAreNotPromotedToObjectReferences()
+    {
+        var asset = Asset();
+        asset.AddNameReference(new("ClassProperty"));
+        var property = new UnknownPropertyData(new(asset, "DeclaredClass")) { Value = BitConverter.GetBytes(1) };
+        property.SetSerializingPropertyType(new("ClassProperty"));
+        Data(asset).Data = [property];
+        using var package = new TemporaryPackage(asset);
+        var evidence = package.Read();
+        Assert.False(evidence.Complete);
+        Assert.IsType<SerializedValue.Unknown>(Value(evidence, "DeclaredClass"));
+    }
+
+    [Theory]
+    [InlineData("世界😀", true)]
+    [InlineData("\ufffd", false)]
+    public void PublicReadValidUnicodeAndAmbiguousReplacementStayDistinct(string value, bool known)
+    {
+        var asset = Asset();
+        Data(asset).Data = [new StrPropertyData(new(asset, "Value")) { Value = new(value, Encoding.Unicode) }];
+        using var package = new TemporaryPackage(asset);
+        Assert.Equal(known, Value(package.Read(), "Value") is SerializedValue.Text);
+    }
+
+    [Fact]
+    public void PropertyCyclesDepthAndExpandedDagCountsAreBounded()
+    {
+        var asset = Asset();
+        var array = new ArrayPropertyData(new(asset, "Loop"));
+        array.Value = [array];
+        Data(asset).Data = [array];
+        Assert.Contains("property-cycle", Inspect(asset).Diagnostics);
+        Assert.Contains("data-depth-limit", Inspect(asset, new(MaxDepth: 1)).Diagnostics);
+        var scalar = new IntPropertyData(new(asset, "0")) { Value = 1 };
+        array.Value = Enumerable.Repeat<PropertyData>(scalar, 100).ToArray();
+        var bounded = Inspect(asset, new(MaxNodes: 4));
+        Assert.Equal(4, bounded.Properties.Length);
+        Assert.Contains("data-node-limit", bounded.Diagnostics);
+    }
+
+    [Fact]
+    public void TotalTextIncludesRepeatedOutputPathsAndOwnerIdentities()
+    {
+        var asset = Asset();
+        Data(asset).Data = [new ArrayPropertyData(new(asset, new string('p', 80)))
+            { Value = Enumerable.Range(0, 100).Select(i => (PropertyData)new IntPropertyData(new(asset, "0")) { Value = i }).ToArray() }];
+        var evidence = Inspect(asset, new(MaxTotalText: 512));
+        Assert.Contains("data-output-text-limit", evidence.Diagnostics);
+        Assert.InRange(evidence.Properties.Length, 1, 5);
+    }
+
+    private static (int Parent, int Child) AddDefaults(UAsset asset)
+    {
+        ClassExport Class(string name, int defaultIndex, int parent) => new() { Asset = asset,
+            ObjectName = new(asset, name), OuterIndex = new(0), ClassIndex = new(-3), Data = [],
+            ClassDefaultObject = new(defaultIndex), SuperStruct = new(parent) };
+        asset.Exports.Add(Class("OwnedParent", 3, -2));
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Default__OwnedParent"),
+            OuterIndex = new(0), ClassIndex = new(2), ObjectFlags = EObjectFlags.RF_ClassDefaultObject,
+            Data = [new StrPropertyData(new(asset, "Destination")) { Value = new("original-parent") },
+                new ObjectPropertyData(new(asset, "Target")) { Value = new(2) }] });
+        asset.Exports.Add(Class("OwnedChild", 5, 2));
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Default__OwnedChild"),
+            OuterIndex = new(0), ClassIndex = new(4), ObjectFlags = EObjectFlags.RF_ClassDefaultObject, Data = [] });
+        return (2, 4);
+    }
+
+    [Fact]
+    public void LocalDefaultInheritanceAndOverridesRetainActualOriginAndClassReferenceTarget()
+    {
+        var asset = Asset();
+        var (_, child) = AddDefaults(asset);
+        var inherited = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Destination");
+        Assert.Equal(new SerializedValue.Text("original-parent"), inherited.Value);
+        Assert.True(inherited.Inherited);
+        Assert.Equal(2, inherited.OriginClassIndex);
+        Assert.Equal(3, inherited.OriginDefaultExportIndex);
+        Assert.Equal(new[] { 4, 2 }, inherited.ClassChain.ToArray());
+        Assert.Equal("local-class", Assert.IsType<SerializedValue.Reference>(
+            AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Target").Value).TargetKind);
+        ((NormalExport)asset.Exports[4]).Data = [new StrPropertyData(new(asset, "Destination")) { Value = new("original-child") },
+            new ObjectPropertyData(new(asset, "Target")) { Value = new(4) }];
+        var overridden = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Destination");
+        Assert.False(overridden.Inherited);
+        Assert.Equal(5, overridden.OriginDefaultExportIndex);
+        Assert.Equal(new SerializedValue.Text("original-child"), overridden.Value);
+        Assert.Equal(4, Assert.IsType<SerializedValue.Reference>(
+            AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Target").Value).PackageIndex);
+        Assert.All(Inspect(asset).Properties.Where(p => p.ExportIndex == 5), p => Assert.True(p.ClassDefaultFlag));
+    }
+
+    [Theory]
+    [InlineData("external")]
+    [InlineData("cycle")]
+    [InlineData("missing-default")]
+    [InlineData("not-default")]
+    [InlineData("wrong-class")]
+    [InlineData("duplicate")]
+    [InlineData("limit")]
+    [InlineData("conflicting-parent")]
+    public void MissingOrUnverifiedDefaultContextIsUnknown(string failure)
+    {
+        var asset = Asset();
+        var (_, child) = AddDefaults(asset);
+        var parentClass = (ClassExport)asset.Exports[1];
+        var childClass = (ClassExport)asset.Exports[3];
+        var parentDefault = (NormalExport)asset.Exports[2];
+        parentDefault.Data = [];
+        switch (failure)
+        {
+            case "cycle": parentClass.SuperStruct = new(child); break;
+            case "missing-default": childClass.ClassDefaultObject = new(999); break;
+            case "not-default": parentDefault.ObjectFlags = 0; break;
+            case "wrong-class": parentDefault.ClassIndex = new(child); break;
+            case "conflicting-parent": parentClass.SuperIndex = new(child); break;
+            case "duplicate": parentDefault.Data = [new IntPropertyData(new(asset, "Destination")) { Value = 1 },
+                new IntPropertyData(new(asset, "Destination")) { Value = 2 }]; break;
+        }
+        var result = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Destination",
+            limits: failure == "limit" ? new(MaxExports: 1) : null);
+        Assert.IsType<SerializedValue.Unknown>(result.Value);
+        Assert.Null(result.OriginDefaultExportIndex);
+        Assert.Equal("local-chain-incomplete", result.Context);
+    }
+
+    [Fact]
+    public void DataChangesAndDataLimitsCannotChangeRealInvocationFactsOrPolicyFindings()
+    {
+        var asset = Asset();
+        asset.Imports.Add(new Import("/Script/CoreUObject", "Function", new(-2), "OwnedCall", false, asset));
+        KismetExpression[] code = [new EX_FinalFunction { StackNode = new(-5), Parameters = [] }];
+        asset.Exports.Add(new FunctionExport { Asset = asset, ObjectName = new(asset, "Execute"), OuterIndex = new(1),
+            ClassIndex = new(-4), Data = [], Extras = [], Field = new(), SuperStruct = new(0),
+            LoadedProperties = [], Children = [], ScriptBytecode = code, ScriptBytecodeSize = (int)code[0].GetSize(asset) });
+        Data(asset).Data = [new StrPropertyData(new(asset, "Destination")) { Value = new("original-first") }];
+        using var first = new TemporaryPackage(asset);
+        Data(asset).Data = [new StrPropertyData(new(asset, "Destination")) { Value = new("original-second") }];
+        using var second = new TemporaryPackage(asset);
+        Assert.NotEqual(Value(first.Read(), "Destination"), Value(second.Read(), "Destination"));
+        var before = InvocationExtractor.Read(Input with { StoragePath = first.PathName });
+        var after = InvocationExtractor.Read(Input with { StoragePath = second.PathName });
+        Assert.Equal(Assert.Single(before.Invocations).Fact, Assert.Single(after.Invocations).Fact);
+        Assert.False(second.Read(new(MaxTotalText: 1)).Complete);
+        var policy = new PolicyDocument(1, [new("original", "Original fixture only", RuleEffect.Forbid,
+            new MatchExpression.Invocation(new TargetMatcher.Exact("/Script/CoreUObject.Object", "OwnedCall")))]);
+        Assert.True(new PolicyEvaluator(policy).Evaluate(after.Analysis).HasForbiddenFindings);
+        Assert.Single(after.Analysis.Invocations);
+    }
+
+    [Fact]
+    public void PublicReadFailureHasFixedDiagnosticsAndNoBaselineSafetyAssertion()
+    {
+        var missing = Input with { StoragePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")) };
+        var evidence = AssetDataExtractor.Read(missing);
+        Assert.False(evidence.Complete);
+        Assert.Empty(evidence.Properties);
+        Assert.Equal(new[] { "package-data-unavailable" }, evidence.Diagnostics.ToArray());
+    }
+
+    [Fact]
+    public void LimitsCanOnlyBeLowered()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Inspect(Asset(), new(MaxNodes: 4097)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Inspect(Asset(), new(MaxDepth: 0)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Inspect(Asset(), new(MaxTotalText: 65_537)));
+    }
+}

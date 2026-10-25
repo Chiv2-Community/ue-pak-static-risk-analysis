@@ -4,6 +4,10 @@ Run from the trusted checkout root. No shorthand policy files or game defaults
 are implied. See [operator examples](operators.md) for setup and safe collection.
 `none` means omitted, not an empty string. Enum values below are exhaustive.
 
+No data-policy or trusted-baseline flags are shipped. The experimental
+[asset-data API](asset-data.md) is library-only; it neither compares a clean game
+installation nor expands CLI/Action coverage to data-driven behavior (#10).
+
 ## Host scanner
 
 `python3 scripts/scan.py scan`:
