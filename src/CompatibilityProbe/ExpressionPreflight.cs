@@ -146,7 +146,21 @@ internal static class ExpressionPreflight
             throw new ExtractionFailure("required-value-missing");
         if (value is UAssetAPI.UnrealTypes.FName name) value = name.ToString();
         if (value is string text)
+        {
             CheckText(text);
+            if (node is EX_StringConst or EX_UnicodeStringConst)
+            {
+                // Pinned Read stops at the first terminator; synthetic values must too.
+                if (text.Contains('\0')) throw new ExtractionFailure("embedded-string-terminator");
+                // Visit counts UTF-16 characters, but ANSI Read consumes lossy UTF-8 bytes.
+                if (node is EX_StringConst && text.Any(c => c > 0x7f))
+                    throw new ExtractionFailure("unsupported-string-literal-encoding");
+                // Non-virtual XFERUNICODESTRING replaces malformed UTF-16 with U+FFFD.
+                // The AST cannot distinguish replacement from a genuine U+FFFD literal.
+                if (node is EX_UnicodeStringConst && text.Contains('\ufffd'))
+                    throw new ExtractionFailure("unsupported-unicode-string-literal-encoding");
+            }
+        }
     }
 
     private static List<KismetExpression?> Children(KismetExpression node, string[] members, ExtractionLimits limits)

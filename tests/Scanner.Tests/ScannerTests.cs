@@ -124,10 +124,65 @@ public sealed class ScannerTests : IDisposable
         Assert.Throws<FactsException>(() => FactsCodec.Read(Encoding.UTF8.GetBytes(node.ToJsonString())));
     }
 
+    [Fact]
+    public void CoverageGapWireValuesMatchSchemaAndRoundTripThroughCli()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var schema = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "schemas/facts-v1.schema.json")))!;
+        var wireValues = schema["properties"]!["analysis"]!["properties"]!["coverage-gaps"]!["items"]!["enum"]!
+            .AsArray().Select(n => n!.GetValue<string>()).ToArray();
+        var gaps = Enum.GetValues<CoverageGap>();
+        Assert.Equal(gaps.Length, wireValues.Length);
+        foreach (var (gap, wire) in gaps.Zip(wireValues))
+        {
+            var bytes = FactsCodec.Write(Facts(new([], [gap])));
+            Assert.Equal(wire, JsonNode.Parse(bytes)!["analysis"]!["coverage-gaps"]![0]!.GetValue<string>());
+            Assert.Equal(gap, Assert.Single(FactsCodec.Read(bytes).Analysis.CoverageGaps));
+            Assert.Equal(bytes, FactsCodec.Write(FactsCodec.Read(bytes)));
+            var result = Run(Encoding.UTF8.GetString(bytes));
+            Assert.Equal(1, result.Exit);
+            Assert.Equal("partial", JsonNode.Parse(result.Report!)!["status"]!.GetValue<string>());
+            Assert.Equal(wire, JsonNode.Parse(result.Report!)!["coverage"]!["gaps"]![0]!.GetValue<string>());
+        }
+        Assert.Throws<FactsException>(() => FactsCodec.Write(Facts(new([], [(CoverageGap)3]))));
+    }
+
+    public static IEnumerable<object[]> InvalidCoverageGaps()
+    {
+        foreach (var gap in Enum.GetValues<CoverageGap>())
+        {
+            var wire = JsonNamingPolicy.KebabCaseLower.ConvertName(gap.ToString());
+            foreach (var alias in new[] { gap.ToString(), wire.ToUpperInvariant(), " " + wire, wire + " ",
+                "\t" + wire + "\n", wire + ", " + wire })
+                yield return [JsonSerializer.Serialize(alias)];
+        }
+        foreach (var value in new[] { "\"unsupported-parsing, unresolved-dispatch\"", "\"UnsupportedParsing, UnresolvedDispatch\"",
+            "\"\"", "\"0\"", "\"1\"", "0", "1", "3", "null", "true", "{}", "[]" })
+            yield return [value];
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidCoverageGaps))]
+    public void NoncanonicalCoverageGapsFailPublicCodecAndCli(string value)
+    {
+        var node = JsonNode.Parse(FactsCodec.Write(Facts(new([], []))))!;
+        node["analysis"]!["coverage-gaps"] = JsonNode.Parse("[" + value + "]");
+        var text = node.ToJsonString();
+        Assert.Throws<FactsException>(() => FactsCodec.Read(Encoding.UTF8.GetBytes(text)));
+        var result = Run(text, extra: ["--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]);
+        Assert.Equal(3, result.Exit);
+        Assert.Equal("failed", JsonNode.Parse(result.Report!)!["status"]!.GetValue<string>());
+        Assert.Contains("analysis-failed", result.Report!);
+        Assert.DoesNotContain(Canary, result.Log + result.Report);
+    }
+
     [Theory]
     [InlineData("{\"kind\":\"resolved\",\"owner\":\"/Script/Engine.Actor\"}")]
     [InlineData("{\"kind\":\"unresolved\",\"extra\":1}")]
     [InlineData("{\"kind\":\"other\"}")]
+    [InlineData("{\"kind\":\"Unresolved\"}")]
+    [InlineData("{\"kind\":\" unresolved \"}")]
+    [InlineData("{\"kind\":\"resolved, unresolved\"}")]
     [InlineData("{\"kind\":0}")]
     [InlineData("null")]
     public void StrictTaggedVariants(string target)

@@ -137,7 +137,7 @@ public static class InvocationExtractor
         var gaps = new List<CoverageGap>();
         if (all.Any(d => d.Code is "unresolved-virtual-target" or "unresolved-delegate-behavior" or "unresolved-direct-target"))
             gaps.Add(CoverageGap.UnresolvedDispatch);
-        if (all.Any(d => d.Code is "package-read-failed" or "unparsed-bytecode" or "raw-export" or "unsupported-instruction" or "unsupported-primitive-interface-cast"))
+        if (all.Any(d => d.Code is "package-read-failed" or "unparsed-bytecode" or "raw-export" or "unsupported-instruction" or "unsupported-primitive-interface-cast" or "unsupported-string-literal-encoding" or "unsupported-unicode-string-literal-encoding" or "embedded-string-terminator"))
             gaps.Add(CoverageGap.UnsupportedParsing);
         // Missing signatures affect argument rules, not which invocations were traversed.
         // Keep corruption, count mismatches, limits, and all other diagnostics global.

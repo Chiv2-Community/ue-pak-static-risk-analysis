@@ -43,7 +43,7 @@ public static class FactsCodec
             MaxDepth = MaxDepth,
             TypeInfoResolver = resolver
         };
-        options.Converters.Add(new JsonStringEnumConverter<CoverageGap>(JsonNamingPolicy.KebabCaseLower, false));
+        options.Converters.Add(new CoverageGapConverter());
         return options;
     }
 
@@ -52,6 +52,27 @@ public static class FactsCodec
         info.PolymorphismOptions = new JsonPolymorphismOptions { TypeDiscriminatorPropertyName = "kind" };
         foreach (var (type, tag) in variants)
             info.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(type, tag));
+    }
+
+    private sealed class CoverageGapConverter : JsonConverter<CoverageGap>
+    {
+        public override CoverageGap Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options) =>
+            reader.TokenType == JsonTokenType.String ? reader.GetString() switch
+            {
+                "unsupported-parsing" => CoverageGap.UnsupportedParsing,
+                "unresolved-dispatch" => CoverageGap.UnresolvedDispatch,
+                "incomplete-extraction" => CoverageGap.IncompleteExtraction,
+                _ => throw new JsonException()
+            } : throw new JsonException();
+
+        public override void Write(Utf8JsonWriter writer, CoverageGap value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value switch
+            {
+                CoverageGap.UnsupportedParsing => "unsupported-parsing",
+                CoverageGap.UnresolvedDispatch => "unresolved-dispatch",
+                CoverageGap.IncompleteExtraction => "incomplete-extraction",
+                _ => throw new JsonException()
+            });
     }
 
     public static FactsDocument Read(ReadOnlySpan<byte> bytes)

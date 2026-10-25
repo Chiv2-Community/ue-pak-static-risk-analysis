@@ -48,7 +48,7 @@ control characters. Invalid caller identities/limits throw fixed setup errors.
   child/next chains are bounded, ownership-checked, and cycle-checked. Duplicate
   names and malformed metadata fail closed. Imported signatures are unavailable;
   positional argument evidence is retained without inventing parameter names.
-- String/UnicodeString, Int/Int64/IntConstByte/IntZero/IntOne, True/False, and
+- ASCII String/valid UnicodeString, Int/Int64/IntConstByte/IntZero/IntOne, True/False, and
   NoObject/NoInterface become policy constants. Null, missing argument, unavailable
   metadata, malformed metadata, runtime expression, and parser failure remain
   distinct. Argument-count mismatches generate coverage.
@@ -92,6 +92,30 @@ parser omits its class operand while Visit counts eight VM bytes. No calls from
 that root or later roots in the function are emitted; prior evidence survives.
 Other primitive casts remain supported. The vendor source is unchanged.
 
+Non-ASCII `EX_StringConst` literals fail preflight with
+`unsupported-string-literal-encoding`: pinned Visit counts UTF-16 characters,
+but Read consumes UTF-8 bytes with lossy replacement. Decoded text cannot prove
+the original byte length, so extraction does not attempt an offset correction.
+ASCII strings and valid UTF-16 `EX_UnicodeStringConst` without U+FFFD remain supported. Both
+null-terminated forms reject embedded NUL in caller-supplied AST values with
+`embedded-string-terminator`, since Read stops at the first terminator. These
+failures add unsupported-parsing and incomplete-extraction coverage; no calls
+from the failed root or later roots are emitted. Prior-root findings survive.
+
+`EX_UnicodeStringConst` containing U+FFFD fails with
+`unsupported-unicode-string-literal-encoding` before any call from its root is
+emitted. Pinned `AssetBinaryReader.XFERUNICODESTRING` uses replacement decoding
+and is non-virtual; a reader subclass cannot inject strict decoding there.
+Malformed UTF-16 surrogates become U+FFFD, indistinguishable from a genuine
+U+FFFD in the AST. Both are conservatively rejected by `Read` and `Inspect`;
+other valid Unicode, including surrogate pairs, remains supported. The original
+bytes are not recovered by rewriting the parsed package.
+
+Adjacent `ReadFString`/name-map decoding also replaces malformed UTF-8/UTF-16.
+Existing ASCII policy-name validators keep replacement-bearing target and
+parameter names unresolved/unavailable rather than trusting them as policy
+identities. This is not a strict-decoding guarantee for all upstream strings.
+
 Defaults and hard maxima: 100,000 exports, 100,000 expanded instructions/package,
 128 expression depth, 10,000 roots/array elements/signature fields, 4096 characters
 per string/name literal, and 10,000 emitted invocations. Argument evidence has a
@@ -120,6 +144,12 @@ dynamic dispatch, and runtime argument computation remain unknown.
 nested/generated/map-style functions, owner/name collisions, dispatch, constants,
 loaded/legacy metadata, receivers, native boundaries, malformed references, raw
 bytecode, cycles, depth, expanded DAGs, arrays, literals, and policy consumption.
+Serialized Write/Read regressions check ASCII/UTF-16 VM offsets, non-ASCII and
+invalid-byte ANSI rejection, and first-terminator behavior without using GetSize
+as the offset oracle. Malformed UTF-16 surrogate sequences and genuine U+FFFD
+must produce unsupported/incomplete coverage, not definitive constant matches;
+valid surrogate pairs remain known constants. FString replacement-bearing
+target and parameter names remain unresolved/unavailable.
 Synthetic tests do not establish cooked-editor compatibility or actual engine VM
 offset correctness for every opcode. Engine-cooked nested/event-graph/map/local/
 native/name-collision fixtures and provenance remain issue #2 work. Issue #4's
