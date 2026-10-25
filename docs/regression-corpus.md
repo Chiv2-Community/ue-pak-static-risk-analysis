@@ -144,7 +144,23 @@ Receipt: `/tmp/opencode/corpus-run-8/execution.json` (2026-10-25).
 | External cook receipt hashes and owned verifier | Passed |
 | Docker-dependent component tests | 17 skipped; no Docker run authorized in this edit leg |
 
-Container/Action integration and hosted CI still require parent validation.
+The parent then ran the full serial release-validation path on 2026-10-25 with
+content-policy revision `5d6a7e8` and the same external cooked evidence:
+
+```sh
+docker build -t ue-pak-corpus:local .
+python3 scripts/regression_corpus.py --release --components \
+  --output /tmp/opencode/corpus-parent-release --docker-image ue-pak-corpus:local \
+  --owned-evidence /tmp/opencode/owned-fixture-clean-20261025
+```
+
+Receipt: `/tmp/opencode/corpus-parent-release/execution.json`; all 44 commands
+completed with expected outcomes. Extraction/Policy/PolicyInput/Scanner passed
+111/110/26/142 tests. All 137 Python tests passed without skips, including serial
+container/Action checks. Full parity, privacy, both mutations, and external cooked
+verification passed. This validated a local gate; it published no release.
+
+Hosted CI still requires verification.
 Do not close #15 solely on synthetic CI: release artifact authorization and
 external cooked release evidence require confirmation. Exact game/Windows fidelity
 remains #2; private external Action access remains #13. Indirect/data-driven/native
