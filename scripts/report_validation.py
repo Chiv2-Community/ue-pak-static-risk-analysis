@@ -1,0 +1,142 @@
+"""Bounded validation of the shipped report schema; no policy evaluation."""
+
+import json
+from pathlib import Path
+import re
+
+
+class InvalidReport(ValueError):
+    pass
+
+
+def require(condition):
+    if not condition:
+        raise InvalidReport("invalid-report")
+
+
+def compact(value):
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
+
+
+def pairs(items):
+    result = {}
+    for key, value in items:
+        require(key not in result)
+        result[key] = value
+    return result
+
+
+def check_schema(schema):
+    # Fail closed if schema evolution needs a keyword this adapter cannot enforce.
+    require(schema.keys() <= {"$schema", "$id", "title", "description", "$defs", "$ref", "type",
+                              "const", "enum", "required", "properties", "additionalProperties",
+                              "minimum", "maximum", "minLength", "maxLength", "pattern",
+                              "minItems", "maxItems", "uniqueItems", "items", "allOf", "oneOf", "if", "then"})
+    for key in ("properties", "$defs"):
+        for child in schema.get(key, {}).values():
+            check_schema(child)
+    for key in ("items", "if", "then"):
+        if key in schema:
+            check_schema(schema[key])
+    for key in ("allOf", "oneOf"):
+        for child in schema.get(key, []):
+            check_schema(child)
+
+
+def validate(value, schema, document, documents):
+    """Only keywords used by the shipped closed local schemas are supported."""
+    if "$ref" in schema:
+        name, pointer = schema["$ref"].split("#", 1)
+        target = documents[name] if name else document
+        part = target
+        for key in pointer.lstrip("/").split("/"):
+            part = part[key]
+        validate(value, part, target, documents)
+    if "type" in schema:
+        types = schema["type"]
+        types = types if isinstance(types, list) else [types]
+        kind = {dict: "object", list: "array", str: "string", int: "integer",
+                bool: "boolean", type(None): "null"}.get(type(value))
+        require(kind in types)
+    if "const" in schema:
+        require(type(value) is type(schema["const"]) and value == schema["const"])
+    if "enum" in schema:
+        require(value in schema["enum"])
+    if isinstance(value, dict):
+        require(set(schema.get("required", [])) <= value.keys())
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            require(value.keys() <= properties.keys())
+        for key, child in properties.items():
+            if key in value:
+                validate(value[key], child, document, documents)
+    elif isinstance(value, list):
+        require(schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", len(value)))
+        if schema.get("uniqueItems"):
+            require(len({compact(item) for item in value}) == len(value))
+        if "items" in schema:
+            for item in value:
+                validate(item, schema["items"], document, documents)
+    elif isinstance(value, str):
+        require(schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", len(value)))
+        if "pattern" in schema:
+            # JSON Schema's $ can match before a trailing LF; our wire IDs cannot.
+            require(re.fullmatch(schema["pattern"].removeprefix("^").removesuffix("$"), value) is not None)
+    elif type(value) is int:
+        require(schema.get("minimum", value) <= value <= schema.get("maximum", value))
+    for child in schema.get("allOf", []):
+        validate(value, child, document, documents)
+    if "oneOf" in schema:
+        require(sum(matches(value, child, document, documents) for child in schema["oneOf"]) == 1)
+    if "if" in schema and matches(value, schema["if"], document, documents):
+        validate(value, schema["then"], document, documents)
+
+
+def matches(value, schema, document, documents):
+    try:
+        validate(value, schema, document, documents)
+        return True
+    except InvalidReport:
+        return False
+
+
+def load(data, root):
+    require(len(data) <= 16 * 1024 * 1024)
+    report = json.loads(data.decode("utf-8", "strict"), object_pairs_hook=pairs,
+                        parse_constant=lambda _: require(False))
+    pending, nodes = [(report, 0)], 0
+    while pending:
+        value, depth = pending.pop()
+        nodes += 1
+        require(depth <= 32 and nodes <= 250000)
+        if isinstance(value, dict):
+            require("rule-ids" not in value)  # Default consumers have no moderator-detail profile.
+            pending.extend((v, depth + 1) for v in value.values())
+        elif isinstance(value, list):
+            pending.extend((v, depth + 1) for v in value)
+        elif isinstance(value, str):
+            value.encode("utf-8", "strict")
+    documents = {name: json.loads((Path(root) / "schemas" / name).read_bytes())
+                 for name in ("report-v1.schema.json", "facts-v1.schema.json")}
+    for document in documents.values():
+        check_schema(document)
+    schema = documents["report-v1.schema.json"]
+    validate(report, schema, schema, documents)
+    counts = report["counts"]
+    sets = []
+    by_id = {}
+    for kind in ("flagged", "forbidden"):
+        findings = report[kind + "-invocations"]
+        ids = {item["id"] for item in findings}
+        require(len(ids) == len(findings) == counts[kind])
+        sets.append(ids)
+        for item in findings:
+            require((item["argument-metadata"] == "known") == (item["known-argument-count"] is not None))
+            require(item["id"] not in by_id or by_id[item["id"]] == item)
+            by_id[item["id"]] = item
+    require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
+    incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"])
+    require(report["analysis-complete"] == (not incomplete))
+    if report["status"] == "failed":
+        require(all(count == 0 for count in counts.values()))
+    return report

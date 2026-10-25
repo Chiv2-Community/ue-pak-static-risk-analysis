@@ -1,0 +1,8 @@
+[
+  {"input": {}, "routes": ["qualified-completed"]},
+  {"input": {"forbid": true}, "routes": ["policy-violation"]},
+  {"input": {"flag": true}, "routes": ["needs-review"]},
+  {"input": {"incomplete": true}, "routes": ["analysis-incomplete"]},
+  {"input": {"forbid": true, "flag": true, "incomplete": true}, "routes": ["policy-violation", "needs-review", "analysis-incomplete"]},
+  {"input": {"failed": true}, "routes": ["operational-failed"]}
+]

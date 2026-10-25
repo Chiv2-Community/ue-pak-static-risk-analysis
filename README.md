@@ -10,6 +10,10 @@ A [reusable GitHub Action](docs/action.md) wraps that scanner; private external
 consumer access remains unverified. Use disposable workers; Docker is not a
 complete sandbox. Successful parsing does not mean a mod is safe.
 
+The local [moderation handoff](docs/moderation.md) binds explicit human decisions
+to exact pak/dependency bytes and trusted scan/build/policy context. It does not
+autoapprove or modify any platform, launcher or registry.
+
 For unresolved submissions, see the [manual runtime escalation runbook](docs/runtime-escalation.md).
 It includes a trusted local canary, not authorization to deploy VMs or execute mods.
 

@@ -69,7 +69,7 @@ class ActionTests(unittest.TestCase):
     def invoke(self, value=None, code=1, *, missing=False, extra=None):
         source = self.root / "action"
         (source / "scripts").mkdir(parents=True, exist_ok=True)
-        for name in ("action.py", "action_report.py"):
+        for name in ("action.py", "action_report.py", "report_validation.py"):
             shutil.copyfile(ROOT / "scripts" / name, source / "scripts" / name)
         shutil.copytree(ROOT / "schemas", source / "schemas", dirs_exist_ok=True)
         data = json.dumps(report() if value is None else value)
