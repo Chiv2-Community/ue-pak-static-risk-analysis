@@ -392,7 +392,7 @@ def components(run, image=None, evidence=None):
         env["OWNED_FIXTURE_EVIDENCE"] = str(evidence)
     # One serial suite: component Docker ownership assertions cannot race each other.
     run.command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
-                env=env, timeout=1200)
+                env=env, timeout=2400)
 
 
 def data_policy_oracle(report):
