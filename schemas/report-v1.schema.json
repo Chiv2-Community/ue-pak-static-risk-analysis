@@ -37,7 +37,23 @@
     "flagged-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
     "forbidden-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
     "diagnostics": {"type": "array", "maxItems": 1, "items": {"enum": ["invalid-configuration", "analysis-failed", "parser-failed", "parser-output-limit", "wall-timeout", "cancelled", "container-unavailable", "input-failed"]}},
-    "inspection": {"$ref": "facts-v1.schema.json#/$defs/inspection"}
+    "inspection": {"$ref": "facts-v1.schema.json#/$defs/inspection"},
+    "content-policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "decision", "incomplete", "findings"],
+      "properties": {
+        "schema-version": {"const": 1},
+        "decision": {"enum": ["allow", "needs-review", "reject"]},
+        "incomplete": {"type": "boolean"},
+        "findings": {"type": "array", "maxItems": 50000, "items": {
+          "type": "object", "additionalProperties": false, "required": ["member-id", "diagnostic"],
+          "properties": {
+            "member-id": {"$ref": "facts-v1.schema.json#/$defs/identity"},
+            "diagnostic": {"enum": ["path-identity-unavailable", "path-not-allowed", "protected-path-candidate", "content-inspection-unavailable", "class-inspection-unavailable", "class-not-allowed", "inventory-unavailable"]}
+          }
+        }}
+      }
+    }
   },
   "allOf": [
     {"if": {"properties": {"status": {"const": "successful"}}}, "then": {"properties": {"analysis-complete": {"const": true}, "diagnostics": {"maxItems": 0}}}},

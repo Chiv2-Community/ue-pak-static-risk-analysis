@@ -97,7 +97,43 @@ class ModerationTests(unittest.TestCase):
                             [("mapping", example / "mapping.txt")])
         self.assertEqual(["qualified-completed"], value["routes"])
         self.assertTrue(mod.verify(self.review(value), context, example / "submission.txt",
-                                   [("mapping", example / "mapping.txt")], (example / "report.json").read_bytes()))
+                                    [("mapping", example / "mapping.txt")], (example / "report.json").read_bytes()))
+
+    def test_content_results_use_shared_schema_routes_and_exact_report_binding(self):
+        for decision, route in (("allow", "qualified-completed"), ("needs-review", "needs-review"),
+                                ("reject", "policy-violation")):
+            report = self.report()
+            report["content-policy"] = {"schema-version": 1, "decision": decision, "incomplete": False,
+                                        "findings": [{"member-id": "r00000000", "diagnostic": "protected-path-candidate"}]}
+            data = encoded(report)
+            self.assertEqual(report, reports.load(data, ROOT))
+            value = mod.handoff(data, self.context, self.pak, self.dependencies)
+            self.assertEqual([route], value["routes"])
+            self.assertEqual(sha(data), value["report-sha256"])
+            self.assertTrue(mod.verify(self.review(value), self.context, self.pak, self.dependencies, data))
+            self.assertEqual(report["content-policy"], mod.feedback(value)["content-policy"])
+
+    def test_content_incompleteness_is_not_a_fake_invocation_or_rule(self):
+        report = self.report()
+        report.update({"status": "partial", "analysis-complete": False,
+                       "content-policy": {"schema-version": 1, "decision": "allow", "incomplete": True,
+                                          "findings": [{"member-id": "inventory", "diagnostic": "inventory-unavailable"}]}})
+        value = mod.handoff(encoded(report), self.context, self.pak, self.dependencies)
+        self.assertEqual(["analysis-incomplete"], value["routes"])
+        self.assertEqual(0, value["counts"]["invocations"])
+        report["analysis-complete"] = True
+        report["status"] = "successful"
+        with self.assertRaises(reports.InvalidReport):
+            reports.load(encoded(report), ROOT)
+
+    def test_content_result_contract_is_closed_and_does_not_accept_policy_literals(self):
+        for mutation in ({"schema-version": 2}, {"decision": "approve"}, {"allowed-paths": [CANARY]},
+                         {"findings": [{"member-id": "r00000000", "diagnostic": CANARY}]}):
+            report = self.report()
+            report["content-policy"] = {"schema-version": 1, "decision": "allow", "incomplete": False,
+                                        "findings": [], **mutation}
+            with self.assertRaises(reports.InvalidReport):
+                reports.load(encoded(report), ROOT)
 
     @unittest.skipIf(Draft202012Validator is None, "optional jsonschema/referencing unavailable")
     def test_shipped_owned_fixture_full_schema(self):

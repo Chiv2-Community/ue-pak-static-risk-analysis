@@ -109,6 +109,11 @@ Generated [examples](../examples/reports/) cover all statuses:
   Hash/producer context is null if facts were not accepted. Zero counts here do
   not assert zero calls. A fixed diagnostic and incomplete coverage mark failure.
 
+Optional trusted [content settings](content-policy.md) add a separate versioned
+result. Content incompleteness also produces `partial`; content review/rejection
+alone does not change analysis completeness or invocation counts. No configured
+allowlists or prefixes are emitted. The invocation YAML grammar is unchanged.
+
 Counts are distinct locations: flagged, forbidden, and their union. A location
 appears once per effect and can appear in both lists with the same finding ID.
 IDs are SHA-256 of the JSON tuple `[pak-sha256, asset, function, offset]`, using
@@ -121,8 +126,8 @@ from facts, not policy. Argument values and names are not emitted.
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | Evaluation reviewed; selected gates did not fail |
-| 1 | A selected forbidden/flagged/incomplete gate failed |
+| 0 | Selected gates passed; not moderation approval |
+| 1 | A selected forbidden/flagged/incomplete gate failed, or content requires review/rejection |
 | 2 | Invalid configuration or policy |
 | 3 | Invalid/unreadable facts, analysis/runtime failure, or report-write failure |
 

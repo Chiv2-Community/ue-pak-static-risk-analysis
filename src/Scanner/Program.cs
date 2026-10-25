@@ -15,7 +15,9 @@ public static class Program
         var exit = 3;
         try
         {
-            var options = Parse(args);
+            var (contentPolicy, remaining) = ContentPolicy.Parse(args);
+            args = remaining;
+            var options = Parse(remaining);
             output = Required(options, "report");
             if (args[0] == "failure-report")
             {
@@ -44,9 +46,10 @@ public static class Program
             facts = candidate;
             var evaluation = new PolicyEvaluator(loaded.Document).Evaluate(facts.Analysis);
             report = RiskReport.Create(facts, evaluation, options.ContainsKey("moderator-detail"), revision);
-            exit = gates.Fails(report.Counts.Forbidden > 0, report.Counts.Flagged > 0, !report.AnalysisComplete) ? 1 : 0;
+            report = report.WithContent(contentPolicy?.Evaluate(facts.Inspection));
+            exit = gates.Fails(report) ? 1 : 0;
         }
-        catch (Exception error) when (error is ConfigurationException or PolicyInputException or PolicyException)
+        catch (Exception error) when (error is ConfigurationException or ContentConfigurationException or PolicyInputException or PolicyException)
         {
             Console.Error.WriteLine("Invalid configuration.");
             report = RiskReport.Failed("invalid-configuration", facts, revision);

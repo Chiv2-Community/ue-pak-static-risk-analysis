@@ -74,7 +74,8 @@ def validate(value, profile):
         counts, coverage = value["counts"], value["coverage"]
         reports.require(max(counts["flagged"], counts["forbidden"]) <= counts["affected-union"] <=
                         min(counts["invocations"], counts["flagged"] + counts["forbidden"]))
-        incomplete = bool(coverage["gaps"] or coverage["evaluation-incomplete"])
+        incomplete = bool(coverage["gaps"] or coverage["evaluation-incomplete"]
+                          or value.get("content-policy", {}).get("incomplete", False))
         reports.require(value["analysis-complete"] == (not incomplete))
         if value["status"] == "failed":
             reports.require(incomplete and not any(counts.values()))
@@ -122,9 +123,9 @@ def routes(value):
     if value["status"] == "failed":
         return ["operational-failed"]
     result = []
-    if value["counts"]["forbidden"]:
+    if value["counts"]["forbidden"] or value.get("content-policy", {}).get("decision") == "reject":
         result.append("policy-violation")
-    if value["counts"]["flagged"]:
+    if value["counts"]["flagged"] or value.get("content-policy", {}).get("decision") == "needs-review":
         result.append("needs-review")
     if not value["analysis-complete"]:
         result.append("analysis-incomplete")
@@ -146,6 +147,8 @@ def handoff(report_data, context, pak, dependencies):
              "report-sha256": hashlib.sha256(report_data).hexdigest(),
              **{key: deepcopy(report[key]) for key in ("status", "analysis-complete", "counts", "coverage")},
              "routes": routes(report)}
+    if "content-policy" in report:
+        value["content-policy"] = deepcopy(report["content-policy"])
     return validate(value, "handoff")
 
 
@@ -170,6 +173,8 @@ def feedback(value):
     public = {key: deepcopy(value[key]) for key in
               ("schema-version", "status", "analysis-complete", "counts", "coverage", "routes")}
     public["kind"] = "submitter-feedback"
+    if "content-policy" in value:
+        public["content-policy"] = deepcopy(value["content-policy"])
     return validate(public, "feedback")
 
 

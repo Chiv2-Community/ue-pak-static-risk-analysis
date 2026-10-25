@@ -9,6 +9,8 @@ public sealed record GateOptions(bool FailOnAnyForbidden = true, bool FailOnAnyF
 {
     public bool Fails(bool forbidden, bool flagged, bool incomplete) =>
         (FailOnAnyForbidden && forbidden) || (FailOnAnyFlagged && flagged) || (FailOnIncomplete && incomplete);
+    public bool Fails(RiskReport report) => report.ContentPolicy?.Decision is "reject" or "needs-review"
+        || Fails(report.Counts.Forbidden > 0, report.Counts.Flagged > 0, !report.AnalysisComplete);
 }
 
 public sealed record PublicTarget(string Owner, string Function);
@@ -23,8 +25,15 @@ public sealed record ReportContext(string ToolVersion, string EngineVersion, str
 public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisComplete,
     ReportContext Context, ReportCounts Counts, ReportCoverage Coverage,
     ReportFinding[] FlaggedInvocations, ReportFinding[] ForbiddenInvocations, string[] Diagnostics,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContentResult? ContentPolicy = null)
 {
+    public RiskReport WithContent(ContentResult? result) => result is null ? this : this with
+    {
+        ContentPolicy = result,
+        AnalysisComplete = AnalysisComplete && !result.Incomplete,
+        Status = result.Incomplete && Status == "successful" ? "partial" : Status
+    };
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.KebabCaseLower,

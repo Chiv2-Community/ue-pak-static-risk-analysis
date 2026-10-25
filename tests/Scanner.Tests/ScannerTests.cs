@@ -78,6 +78,61 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public void ContentRejectionPreservesBothRealInvocationArraysAndPrivateConfiguration()
+    {
+        var facts = Facts(new([Fact()], [CoverageGap.UnsupportedParsing])) with
+        { Inspection = new("validated", "completed", [ContentPolicyTests.Member()]) };
+        var result = Run(Encoding.UTF8.GetString(FactsCodec.Write(facts)), extra:
+            ["--allowed-path", "private-content-canary", "--allowed-class", "/Script/PrivateCanary.Class",
+             "--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]);
+        Assert.Equal(1, result.Exit);
+        var report = JsonNode.Parse(result.Report!)!;
+        Assert.Equal("reject", report["content-policy"]!["decision"]!.GetValue<string>());
+        Assert.Equal(1, report["counts"]!["flagged"]!.GetValue<int>());
+        Assert.Equal(1, report["counts"]!["forbidden"]!.GetValue<int>());
+        Assert.Single(report["flagged-invocations"]!.AsArray());
+        Assert.Single(report["forbidden-invocations"]!.AsArray());
+        Assert.Equal("unsupported-parsing", report["coverage"]!["gaps"]![0]!.GetValue<string>());
+        Assert.DoesNotContain("private-content-canary", result.Report + result.Log);
+        Assert.DoesNotContain("PrivateCanary", result.Report + result.Log);
+    }
+
+    [Fact]
+    public void InvalidContentConfigurationFailsBeforeVerbosePolicyDisclosure()
+    {
+        foreach (var environment in new[] { false, true })
+        foreach (var level in new[] { "error", "warn", "info", "verbose" })
+        {
+            var result = Run(environment: environment, extra: ["--allowed-path", "private-content-canary/../bad", "--log-level", level]);
+            Assert.Equal(2, result.Exit);
+            Assert.DoesNotContain(Canary, result.Log);
+            Assert.DoesNotContain("private-content-canary", result.Log);
+            Assert.DoesNotContain("VERBOSE", result.Log);
+        }
+    }
+
+    [Theory]
+    [InlineData("parsed-classes", "[{\"identity\":\"/Script/Engine.Actor\",\"provenance\":\"filename\"}]")]
+    [InlineData("parsed-classes", "[{\"identity\":\"Actor\",\"provenance\":\"export-class-index-import\"}]")]
+    [InlineData("parsed-classes-complete", "\"true\"")]
+    [InlineData("path-normalized", "\"true\"")]
+    public void NewInspectionEvidenceHasClosedWireTypesAndProvenance(string key, string value)
+    {
+        var facts = Facts() with { Inspection = new("validated", "completed", [ContentPolicyTests.Member()]) };
+        var node = JsonNode.Parse(FactsCodec.Write(facts))!;
+        node["inspection"]!["members"]![0]![key] = JsonNode.Parse(value);
+        Assert.Throws<FactsException>(() => FactsCodec.Read(Encoding.UTF8.GetBytes(node.ToJsonString())));
+    }
+
+    [Fact]
+    public void ParsedClassEvidenceRemainsBounded()
+    {
+        var member = ContentPolicyTests.Member() with
+        { ParsedClasses = Enumerable.Repeat(new ParsedClassEvidence("/Script/Engine.Actor", "export-class-index-import"), 257).ToArray() };
+        Assert.Throws<FactsException>(() => FactsCodec.Write(Facts() with { Inspection = new("validated", "completed", [member]) }));
+    }
+
+    [Fact]
     public void CodecRoundTripsAllClosedVariants()
     {
         ArgumentValue[] values = [new ArgumentValue.Dynamic(), new ArgumentValue.Missing(),

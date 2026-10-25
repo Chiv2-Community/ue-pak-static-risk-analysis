@@ -78,3 +78,35 @@ class ScanTests(unittest.TestCase):
             ingest(source, inspector=inspector)
             self.assertEqual(1, len(observed))
             self.assertFalse(observed[0].exists())
+
+    def test_content_configuration_only_reaches_trusted_stages(self):
+        calls = []
+        class Docker:
+            def __init__(self, *args):
+                pass
+            def run(self, mounts, entry, arguments, **options):
+                calls.append((mounts, entry, arguments, options))
+                return (0, b"{}")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pak = root / "submission"
+            pak.write_bytes(b"owned")
+            with patch.object(scan, "Docker", Docker):
+                code = scan.main(["scan", "--pak", str(pak), "--report", str(root / "report"),
+                    "--engine-version", "4.25", "--allowed-path", "PrivateCanary", "--allowed-path", "Other",
+                    "--allowed-class", "/Script/PrivateCanary.Class", "--protected-path", "ProtectedCanary",
+                    "--replacement-policy", "review", "--replacement-policy", "reject"])
+            self.assertEqual(0, code)
+        self.assertEqual(3, len(calls))
+        for index in (0, 2):
+            self.assertTrue(calls[index][3]["policy"])
+            self.assertIn("PrivateCanary", calls[index][2])
+            self.assertIn("/Script/PrivateCanary.Class", calls[index][2])
+            self.assertIn("ProtectedCanary", calls[index][2])
+            self.assertEqual(2, calls[index][2].count("--replacement-policy"))
+        self.assertTrue(calls[1][3]["parser"])
+        self.assertNotIn("Canary", repr(calls[1]))
+
+    def test_content_flag_abbreviations_are_not_accepted(self):
+        with self.assertRaisesRegex(scan.Failure, "invalid-configuration"):
+            scan.options(["scan", "--pak", "pak", "--report", "report", "--engine-version", "4.25", "--allowed-pa", "Content"])

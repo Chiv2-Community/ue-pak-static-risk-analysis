@@ -105,6 +105,11 @@ uses it for bounded normalized facts and versioned reports. The
 policy evaluation without exposing policy to the parser. The old compatibility
 probe remains trusted-input-only. See the [Action guide](docs/action.md) for CI.
 
+Optional trusted [content-policy flags](docs/content-policy.md) restrict virtual
+namespaces and parsed export classes and allow, review or reject protected-path
+replacement candidates. They do not change invocation YAML or finding counts;
+without a clean-install baseline, candidates are not verified replacements.
+
 The evaluation CLI and Docker wrapper accept a
 `policy-rules` file or raw YAML in `UE_PAK_POLICY_RULES`, with exactly one source.
 The Action exposes `log-level`: `error`, `warn`, `info`, or `verbose`, default

@@ -33,12 +33,21 @@
           "required": ["id", "path", "size", "sha256", "status", "signatures", "classes", "inspection-status", "sidecar-status"],
           "properties": {
             "id": {"$ref": "#/$defs/identity"}, "path": {"$ref": "#/$defs/text"},
+            "path-normalized": {"type": "boolean"},
             "size": {"type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807},
             "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
             "status": {"enum": ["uninspected", "rejected", "payload_verified"]},
             "signatures": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/identity"}},
             "classes": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/text"}},
-            "inspection-status": {"$ref": "#/$defs/identity"}, "sidecar-status": {"$ref": "#/$defs/identity"}
+            "inspection-status": {"$ref": "#/$defs/identity"}, "sidecar-status": {"$ref": "#/$defs/identity"},
+            "parsed-classes-complete": {"type": "boolean"},
+            "parsed-classes": {"type": "array", "maxItems": 256, "items": {
+              "type": "object", "additionalProperties": false, "required": ["identity", "provenance"],
+              "properties": {
+                "identity": {"type": "string", "maxLength": 4096, "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$"},
+                "provenance": {"enum": ["export-class-index-import", "export-class-index-export"]}
+              }
+            }}
           }
         }}
       }
