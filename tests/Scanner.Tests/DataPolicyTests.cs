@@ -244,6 +244,54 @@ public sealed class DataPolicyTests
     }
 
     [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public void MinimalDataCannotDisplaceMandatoryFactsAtProductionBudgets(bool byteLimit, bool graph, bool overflowingGraph)
+    {
+        var count = byteLimit ? 1900 : 7997;
+        var calls = Enumerable.Range(0, count).Select(i => new InvocationFact(
+            new(byteLimit ? new string('a', 4096) : "submission:Content/Data.uasset", "/Game/Data.Data:Run", i),
+            new InvocationTarget.Resolved("/Script/Fixture.Object", "Touch"), new ArgumentMetadata.Unavailable())).ToImmutableArray();
+        var mandatory = Facts() with { AssetData = null, ProducerVersion = "test-v1",
+            Dependencies = graph ? [] : [new("d0", new('b', 64)), new("d1", new('c', 64))],
+            Analysis = new(calls, [], null, graph ? new(1, false, []) : null) };
+        if (byteLimit)
+        {
+            var remaining = FactsCodec.MaxBytes - 8 - FactsCodec.Write(mandatory).Length;
+            var classes = Enumerable.Repeat(new string('x', 4096), remaining / 4099).ToImmutableArray();
+            mandatory = mandatory with { Inspection = mandatory.Inspection! with
+                { Members = [mandatory.Inspection.Members[0] with { Classes = classes }] } };
+            var tail = FactsCodec.MaxBytes - 8 - FactsCodec.Write(mandatory).Length - 3;
+            mandatory = mandatory with { Inspection = mandatory.Inspection with
+                { Members = [mandatory.Inspection.Members[0] with { Classes = classes.Add(new string('x', tail)) }] } };
+        }
+        var original = FactsCodec.Write(mandatory);
+        var additive = mandatory with { AssetData = new(1, "Content", "/Game", true, []) };
+        if (overflowingGraph)
+            additive = additive with { Analysis = additive.Analysis with
+                { CallGraph = new(1, true, [new("a", "f", "/A.B", "F", false)]) } };
+        var written = FactsCodec.Write(additive);
+        Assert.Equal(original, written);
+        var retained = FactsCodec.Read(written);
+        Assert.Null(retained.AssetData);
+        Assert.Equal(calls.ToArray(), retained.Analysis.Invocations.ToArray());
+        Assert.Equal(mandatory.PakSha256, retained.PakSha256);
+        Assert.Equal(mandatory.Inspection!.Members[0].Sha256, retained.Inspection!.Members[0].Sha256);
+        var analysis = Policy().Evaluate(retained, Context.BuildScope, Facts(hash: 'b'));
+        Assert.False(analysis.Complete);
+        Assert.True(new GateOptions(false, false, false).Fails(
+            RiskReport.Create(retained, Evaluator().Evaluate(retained.Analysis), false, null).WithData(analysis)));
+        // Validation precedes trimming, including when even an empty marker cannot fit.
+        Assert.Throws<FactsException>(() => FactsCodec.Write(additive with
+            { AssetData = Facts().AssetData! with { Packages = [Facts().AssetData!.Packages[0] with
+                { Evidence = Facts().AssetData!.Packages[0].Evidence with { Properties = [Property(new SerializedValue.Text(new('s', 4097)))] } }] } }));
+    }
+
+    [Theory]
     [InlineData("error")]
     [InlineData("warn")]
     [InlineData("info")]

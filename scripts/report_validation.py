@@ -141,8 +141,10 @@ def load(data, root, *, moderator_detail=False):
         sets.append(ids)
         for item in findings:
             require((item["argument-metadata"] == "known") == (item["known-argument-count"] is not None))
-            require(item["id"] not in by_id or by_id[item["id"]] == item)
-            by_id[item["id"]] = item
+            # Rule IDs describe this effect; every other field identifies the shared invocation.
+            shared = {key: value for key, value in item.items() if key != "rule-ids"}
+            require(item["id"] not in by_id or by_id[item["id"]] == shared)
+            by_id[item["id"]] = shared
     require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
     dispatch_origins = set()
     candidate_count = 0

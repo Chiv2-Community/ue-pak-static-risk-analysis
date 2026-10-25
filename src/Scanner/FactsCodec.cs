@@ -115,15 +115,25 @@ public static class FactsCodec
             catch (FactsException) when (document.AssetData is not null || document.Analysis.CallGraph is { Functions.Length: > 0 })
             {
                 // Additive evidence must not evict mandatory calls or inventory. First drop data;
-                // retain a fixed incomplete marker even when no property fits.
+                // retain an incomplete marker when it fits without displacing mandatory facts.
                 var bounded = document.AssetData is null ? document : document with
                     { AssetData = document.AssetData with { Complete = false, Packages = [] } };
                 byte[] retained;
                 try { retained = Serialize(bounded); }
-                catch (FactsException) when (document.Analysis.CallGraph is { Functions.Length: > 0 })
+                catch (FactsException)
                 {
+                    // Even an empty data marker is optional. Try the original graph without it
+                    // before applying the existing incomplete-graph fallback.
+                    if (bounded.AssetData is not null)
+                    {
+                        try { return Serialize(bounded with { AssetData = null }); }
+                        catch (FactsException) when (document.Analysis.CallGraph is { Functions.Length: > 0 }) { }
+                    }
+                    if (document.Analysis.CallGraph is not { Functions.Length: > 0 }) throw;
                     bounded = bounded with { Analysis = bounded.Analysis with { CallGraph = new(1, false, []) } };
-                    retained = Serialize(bounded);
+                    try { retained = Serialize(bounded); }
+                    catch (FactsException) when (bounded.AssetData is not null)
+                    { return Serialize(bounded with { AssetData = null }); }
                 }
                 if (document.AssetData is not { } original) return retained;
                 // Retain a deterministic prefix of useful typed values under the shared byte/token

@@ -37,6 +37,9 @@ rules:
 MATCHING_POLICY = POLICY.replace("original-invocation-model", "operator-rule-canary").replace(
     "effect: flag", "effect: forbid").replace("/Script/Fixture.Other", "/Script/Corpus.Sensitive").replace(
     "function: Touch", "function: Record")
+DUAL_POLICY = (MATCHING_POLICY + MATCHING_POLICY.split("rules:\n", 1)[1].replace(
+    "operator-rule-canary", "operator-flag-canary").replace("effect: forbid", "effect: flag")).replace(
+    "Original illustrative fixture only", "operator-description-canary")
 
 
 def sha(value):
@@ -106,6 +109,7 @@ class DataPolicyTests(unittest.TestCase):
         result, report = self.evaluate(extra=("--moderator-detail",), policy=MATCHING_POLICY)
         self.assertEqual(1, result.returncode)
         self.assertEqual(["operator-rule-canary"], report["forbidden-invocations"][0]["rule-ids"])
+        self.assertNotIn(b"operator-description-canary", result.stdout + result.stderr)
         self.assertEqual(1, report["counts"]["forbidden"])
         self.assertEqual(1, len(report["data-analysis"]["findings"]))
         self.assertEqual(default["counts"], report["counts"])
@@ -145,6 +149,55 @@ class DataPolicyTests(unittest.TestCase):
         self.assertEqual([], report["forbidden-invocations"])
         self.assertIn("protected-path-candidate", [f["diagnostic"] for f in report["content-policy"]["findings"]])
         self.assertNotIn("Destination", result.stdout.decode())
+
+    def test_dual_effect_detail_only_varies_effect_specific_rule_ids(self):
+        ordinary, default = self.evaluate(policy=DUAL_POLICY)
+        result, report = self.evaluate(policy=DUAL_POLICY, extra=("--moderator-detail",))
+        self.assertEqual((1, 1), (ordinary.returncode, result.returncode))
+        self.assertEqual({"invocations": 1, "flagged": 1, "forbidden": 1, "affected-union": 1}, report["counts"])
+        self.assertEqual(default["counts"], report["counts"])
+        self.assertEqual(default["data-analysis"], report["data-analysis"])
+        self.assertEqual(["operator-flag-canary"], report["flagged-invocations"][0]["rule-ids"])
+        self.assertEqual(["operator-rule-canary"], report["forbidden-invocations"][0]["rule-ids"])
+        from jsonschema import Draft202012Validator
+        from referencing import Registry, Resource
+        documents = [json.loads((ROOT / "schemas" / name).read_bytes()) for name in
+                     ("report-v1.schema.json", "facts-v1.schema.json")]
+        registry = Registry().with_resources((d["$id"], Resource.from_contents(d)) for d in documents)
+        Draft202012Validator(documents[0], registry=registry).validate(report)
+        for kind in ("flagged", "forbidden"):
+            for ids in ([], ["valid", "valid"], ["invalid literal"], ["a" * 65], ["valid\n"], [None]):
+                changed = deepcopy(report)
+                changed[kind + "-invocations"][0]["rule-ids"] = ids
+                with self.assertRaises(reports.InvalidReport):
+                    reports.load(json.dumps(changed).encode(), ROOT, moderator_detail=True)
+            changed = deepcopy(report)
+            changed[kind + "-invocations"].append(deepcopy(changed[kind + "-invocations"][0]))
+            changed["counts"][kind] += 1
+            with self.assertRaises(reports.InvalidReport):
+                reports.load(json.dumps(changed).encode(), ROOT, moderator_detail=True)
+        for field, value in (("location", {"asset": "other", "function": "other", "offset": 5}),
+                             ("target", {"owner": "/Script/Other.Object", "function": "Other"}),
+                             ("argument-metadata", "known")):
+            changed = deepcopy(report)
+            changed["forbidden-invocations"][0][field] = value
+            if field == "argument-metadata":
+                changed["forbidden-invocations"][0]["known-argument-count"] = 0
+            with self.assertRaises(reports.InvalidReport):
+                reports.load(json.dumps(changed).encode(), ROOT, moderator_detail=True)
+        with self.assertRaises(reports.InvalidReport):
+            reports.load(result.stdout, ROOT)
+        with self.assertRaises(reports.InvalidReport):
+            moderation.handoff(result.stdout, {}, self.paks["submission"], [])
+
+    def test_absent_data_is_incomplete_when_enabled(self):
+        facts = json.loads(self.facts["submission"])
+        del facts["asset-data"]
+        result, report = self.evaluate(facts=json.dumps(facts).encode(), policy=MATCHING_POLICY)
+        self.assertEqual(1, result.returncode)
+        self.assertFalse(report["data-analysis"]["complete"])
+        self.assertFalse(report["analysis-complete"])
+        self.assertEqual(1, report["counts"]["forbidden"])
 
     def test_missing_baseline_cannot_pass_even_when_all_invocation_gates_are_off(self):
         result, report = self.evaluate(baseline=False)
@@ -298,6 +351,57 @@ class DataPolicyTests(unittest.TestCase):
             self.assertLessEqual(len(properties), 4096)
             self.assertEqual({"kind": "integer", "value": 0, "type": "int32"}, properties[0]["value"])
 
+    def test_real_parser_minimal_marker_cannot_displace_near_limit_mandatory_evidence(self):
+        with tempfile.TemporaryDirectory(dir=self.root) as temporary:
+            root = Path(temporary)
+            generated = root / "packages"
+            result = subprocess.run(["dotnet", str(ROOT / "tests/Corpus.Generate/bin/Debug/net10.0/Corpus.Generate.dll"),
+                "data-marker-budget", str(generated)], capture_output=True, timeout=60)
+            self.assertEqual(0, result.returncode)
+            pak = root / "submission.pak"
+            pak.write_bytes(build((("Content/Data.uasset", (generated / "Data.uasset").read_bytes(), False),)))
+            observed = []
+            def inspect(directory, manifest):
+                (Path(directory) / "inspection.json").write_text(json.dumps(manifest))
+                parsed = subprocess.run(["dotnet", str(ROOT / "src/Parser/bin/Debug/net10.0/Parser.dll"),
+                    directory, "-", "Content", "/Game", str(pak)], capture_output=True, timeout=60)
+                self.assertEqual(0, parsed.returncode)
+                observed.append(parsed.stdout)
+            ingest(pak, inspector=inspect)
+            raw = observed[0]
+            facts = json.loads(raw)
+            def tokens(value):
+                if isinstance(value, dict):
+                    return 2 + sum(1 + tokens(v) for v in value.values())
+                if isinstance(value, list):
+                    return 2 + sum(tokens(v) for v in value)
+                return 1
+            self.assertEqual(199994, tokens(facts))
+            self.assertLess(len(raw), 8 * 1024 * 1024)
+            self.assertEqual(7996, len(facts["analysis"]["invocations"]))
+            self.assertEqual(sha(pak.read_bytes()), facts["pak-sha256"])
+            self.assertEqual(1, len(facts["inspection"]["members"]))
+            self.assertNotIn("asset-data", facts)
+            self.assertFalse(facts["analysis"]["call-graph"]["complete"])
+            enabled, report = self.evaluate(facts=raw, policy=MATCHING_POLICY)
+            self.assertEqual(1, enabled.returncode)
+            self.assertEqual(7996, report["counts"]["forbidden"])
+            self.assertFalse(report["data-analysis"]["complete"])
+            self.assertIn("data-evidence-incomplete", report["data-analysis"]["diagnostics"])
+            self.assertLessEqual(len(report["data-analysis"]["diagnostics"]), 64)
+            (root / "facts").write_bytes(raw)
+            (root / "policy").write_text(MATCHING_POLICY)
+            disabled = subprocess.run(["dotnet", str(ROOT / "src/Scanner/bin/Debug/net10.0/Scanner.dll"), "evaluate",
+                "--facts", str(root / "facts"), "--policy-rules", str(root / "policy"), "--report", "-",
+                "--engine-version", "4.25", "--fail-on-any-forbidden", "false", "--fail-on-incomplete", "false"],
+                env=self.env, capture_output=True, timeout=60)
+            self.assertEqual(0, disabled.returncode)
+            legacy = reports.load(disabled.stdout, ROOT)
+            self.assertNotIn("data-analysis", legacy)
+            self.assertEqual(report["counts"], legacy["counts"])
+            self.assertEqual(report["forbidden-invocations"], legacy["forbidden-invocations"])
+            self.assertEqual(report["coverage"], legacy["coverage"])
+
     @unittest.skipUnless(os.environ.get("UE_PAK_CONTAINER_TEST_IMAGE"), "requires explicitly authorized local Docker image")
     def test_actual_isolated_host_and_action_parity(self):
         image = os.environ["UE_PAK_CONTAINER_TEST_IMAGE"]
@@ -306,7 +410,7 @@ class DataPolicyTests(unittest.TestCase):
             rules = root / "rules"
             rules.write_text(json.dumps(self.rules))
             policy = root / "policy"
-            policy.write_text(MATCHING_POLICY)
+            policy.write_text(DUAL_POLICY)
             common = ["--pak", str(self.paks["submission"]), "--baseline-pak", str(self.paks["baseline"]),
                 "--data-rules", str(rules), "--game-build", "original-fixture-v1", "--content-root", "Content=/Game",
                 "--policy-rules", str(policy), "--engine-version", "4.25", "--policy-revision", "original-v1",
@@ -317,6 +421,8 @@ class DataPolicyTests(unittest.TestCase):
             report = reports.load((root / "host-report").read_bytes(), ROOT)
             self.assertEqual("needs-review", report["data-analysis"]["decision"])
             self.assertEqual(1, report["counts"]["forbidden"])
+            self.assertEqual(1, report["counts"]["flagged"])
+            self.assertEqual(1, report["counts"]["affected-union"])
             detailed = subprocess.run([sys.executable, str(ROOT / "scripts/scan.py"), "scan", *common, "--image", image,
                 "--moderator-detail", "--report", str(root / "detail-report"), "--data-context", str(root / "detail-private")],
                 env=self.env, capture_output=True, timeout=240)
@@ -326,6 +432,7 @@ class DataPolicyTests(unittest.TestCase):
             self.assertEqual(report["counts"], detail["counts"])
             self.assertEqual(report["data-analysis"], detail["data-analysis"])
             self.assertEqual(["operator-rule-canary"], detail["forbidden-invocations"][0]["rule-ids"])
+            self.assertEqual(["operator-flag-canary"], detail["flagged-invocations"][0]["rule-ids"])
             with self.assertRaises(reports.InvalidReport):
                 reports.load(detailed_bytes, ROOT)
             with self.assertRaises(reports.InvalidReport):
@@ -358,12 +465,13 @@ class DataPolicyTests(unittest.TestCase):
                          output.read_bytes(), summary.read_bytes(), (root / "host-report").read_bytes(),
                          (root / "action-report").read_bytes()):
                 self.assertNotIn(b"operator-rule-canary", data)
+                self.assertNotIn(b"operator-flag-canary", data)
                 self.assertNotIn(b"private-data-canary", data)
                 self.assertNotIn(b"private-original-model", data)
                 self.assertNotIn(sha(self.paks["baseline"].read_bytes()).encode(), data)
             self.assertTrue((root / "action-private").is_file())
             for private_value in (b"private-data-canary", b"private-original-model", b"Destination",
-                                  sha(self.paks["baseline"].read_bytes()).encode()):
+                                   b"operator-description-canary", sha(self.paks["baseline"].read_bytes()).encode()):
                 self.assertNotIn(private_value, detailed_bytes)
 
 

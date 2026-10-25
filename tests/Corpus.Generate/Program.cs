@@ -14,11 +14,24 @@ using System.Security.Cryptography;
 using System.Text.Json;
 
 // Original synthetic serialization, not engine-cooked or game-derived content.
-if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets")) return 2;
+if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget")) return 2;
 if (args[0] == "properties") return Properties();
 if (args[0] == "chains") return Chains(args[1]);
 if (args[0] == "data-policy") return DataPolicyFixtures(args[1]);
 if (args[0] == "data-budgets") return DataBudgetFixtures(args[1]);
+if (args[0] == "data-marker-budget")
+{
+    if (Directory.Exists(args[1])) return 2;
+    Directory.CreateDirectory(args[1]);
+    var asset = DataFixtureAsset();
+    AddFunction(asset, "Consume", Enumerable.Range(0, 7996).Select(_ => (KismetExpression)
+        new EX_FinalFunction { StackNode = new(-3), Parameters = [] }).ToArray());
+    foreach (var index in new[] { -6, -2 })
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Data" + -index), OuterIndex = new(0),
+            ClassIndex = new(index), Data = [], Extras = [] });
+    asset.Write(Path.Combine(args[1], "Data.uasset"));
+    return 0;
+}
 var root = Path.GetFullPath(args[1]);
 if (args[0] == "dispatch-budgets") return DispatchBudgets(root);
 if (args[0] == "generate")
