@@ -11,7 +11,7 @@ inputs:
     description: Supported Unreal Engine version (4.25 only).
     default: '4.25'
   log-level:
-    description: 'error, warn, info, or verbose. WARNING: verbose prints the policy to workflow logs; anyone with log access can read it. Environment variables are not secrets and do not guarantee masking or confidentiality.'
+    description: 'error, warn, info, or verbose. WARNING: verbose prints the full policy to workflow logs; anyone with log access can read it. Ordinary environment values are not masked secrets; runner step setup and host/container administrators may expose them outside scanner logs.'
     default: info
   fail-on-any-forbidden:
     description: Fail on forbidden invocations (true or false).

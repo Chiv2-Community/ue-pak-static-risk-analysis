@@ -20,9 +20,17 @@ It includes a trusted local canary, not authorization to deploy VMs or execute m
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
 Compatibility and legal-fidelity limits remain tracked in [issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
 
+Start with the [operator guide](docs/operators.md), [CLI/Action input tables](docs/inputs.md),
+[security boundaries](docs/security.md) and [controlled release checklist](docs/releases.md).
+No release/publication or expanded access is approved. Indirect/transitive/data
+effects (#8–10) and native implementation analysis are not shipped; exact
+Windows/game fidelity and broader redistribution rights remain open.
+
 ## Build and test
 
-Requires Linux, .NET SDK 10, Rust/Cargo, a C compiler, Python 3.11+, and Git.
+Requires Linux, .NET SDK 10, Python 3.11+, and Git. See the
+[fresh setup](docs/operators.md#trusted-linux-setup) for Docker and pinned optional
+Python test dependencies. Rust/Cargo and a C compiler are needed only for repak.
 
 ```bash
 git submodule update --init --recursive
@@ -41,20 +49,28 @@ cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_
 The dependency submodules are pinned. Do not substitute the current NuGet release
 for the evaluated UAssetAPI source revision.
 
-The [integrated regression gate](docs/regression-corpus.md) adds reviewed synthetic
+The [integrated regression gate](docs/regression-corpus.md) checks reviewed synthetic
 package/pak expectations, finding/coverage removal mutations, bounded boundary
 properties and optional complete CLI/container/Action parity. Authorized external
 owned cooks remain a separate release prerequisite; CI does not cook or redistribute
 engine-derived assets.
+The [completed local release-path/component receipt](docs/regression-corpus.md#ci-upgrades-and-release-prerequisites)
+records 142 Scanner / 111 extraction / 110 Policy / 26 PolicyInput and 137 serial
+Python tests. That run published nothing and does not complete exact game fidelity.
 
 ## Run a local compatibility experiment
 
-Use only assets you are authorized to inspect. **Do not expose this prototype to
-untrusted submissions:** it does not yet enforce memory, decompression, storage,
-or process isolation limits. Run experiments on a disposable worker without
-credentials. Neither Unreal Editor nor the game is launched.
+Use only assets you are authorized to inspect. **This compatibility experiment
+is trusted-input-only:** `probe_pak.py` and the probe DLL do not enforce the
+host wrapper's memory/decompression/storage/container boundaries. This warning
+does not describe `scripts/scan.py scan`, which has separate bounded parser and
+evaluator containers. Those controls still do not make Docker a complete sandbox
+or certify mod safety. Use disposable workers without credentials for either
+route. Neither Unreal Editor nor the game is launched.
 
 ```bash
+dotnet restore src/CompatibilityProbe/CompatibilityProbe.csproj --locked-mode
+dotnet build src/CompatibilityProbe/CompatibilityProbe.csproj -c Release --no-restore
 python3 scripts/probe_pak.py \
   --pak /path/to/mod.pak \
   --repak vendor/repak/target/release/repak \

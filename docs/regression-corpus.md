@@ -6,6 +6,9 @@ actual Docker/Action boundary. It does not implement policy or parsing semantics
 
 ## Run
 
+See [all runner flags](inputs.md#regression-runner) and the
+[manual controlled release checklist](releases.md); no run authorizes publication.
+
 Requires Linux, Python 3.11+, .NET 10, and the pinned UAssetAPI submodule.
 
 ```sh
@@ -160,8 +163,9 @@ completed with expected outcomes. Extraction/Policy/PolicyInput/Scanner passed
 container/Action checks. Full parity, privacy, both mutations, and external cooked
 verification passed. This validated a local gate; it published no release.
 
-Hosted CI still requires verification.
-Do not close #15 solely on synthetic CI: release artifact authorization and
-external cooked release evidence require confirmation. Exact game/Windows fidelity
-remains #2; private external Action access remains #13. Indirect/data-driven/native
-implementation analyses are not shipped and have no claimed corpus proof.
+#3/#4/#15 are closed following PR #29/#30 tests and independent review; the full
+local receipt above records the external cooked release-path evidence. This is
+not release publication authorization. Exact game/Windows fidelity and broader
+redistribution rights remain #2; private external Action access remains #13.
+Indirect/data-driven/native implementation analyses are not shipped and have no
+claimed corpus proof. Owner publication/access decisions remain #18 gates.

@@ -92,6 +92,14 @@ and explicit decision. Never substitute context copied from the old approval for
 the consumer's current trusted context. Approval records are private, not publicly
 queryable policy fingerprints.
 
+Invocation or content-setting changes require a new opaque policy revision.
+Future reviewed native catalogs/summaries (#7) also change interpretation context;
+bind their restricted provenance to a fresh opaque policy revision and the actual
+scanner/build record, then rescan and re-review. No catalog identity field or
+native capability evaluator is shipped by this schema. See
+[ownership and catalog update requirements](security.md#capability-ownership-and-review-invalidation);
+do not invent exact-game APIs or preserve approvals across changed context.
+
 Verification is a point-in-time read, not installation or a retained file handle.
 The platform/consumer must freeze the verified snapshots and atomically deliver
 those same bytes; prevent modification between verification and use. Rehash after

@@ -32,6 +32,8 @@ Private-image authentication is therefore not required or claimed verified.
 
 ## Use
 
+The complete [input table](inputs.md#action-inputs) lists every input/default.
+
 This example assumes `/approved/submission.pak` has been obtained without
 executing submission code. Choose the actual virtual pak prefix for content-root.
 Use no checkout step when only calling the remotely pinned Action.
@@ -95,6 +97,40 @@ For file input, replace the `env` block with
 is required; do not set `UE_PAK_POLICY_RULES` at all when using a file. Missing,
 empty, conflicting, malformed, or oversized sources fail through the shared loader.
 Raw environment YAML is not placed in argv or temporary files.
+
+A complete file-backed variant, once the named private consumer is authorized:
+
+```yaml
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # Trusted transfer provisions only pak and operator-owned policy first.
+      - name: Scan with restricted file policy
+        id: scan
+        uses: Chiv2-Community/ue-pak-static-risk-analysis@REVIEWED_40_HEX_COMMIT
+        with:
+          pak: /approved/submission.pak
+          policy-rules: /private/rules.yaml
+          content-root: Content=/Game
+          log-level: info
+          report: ue-pak-risk-report.json
+      - name: Check local report after gates
+        if: ${{ always() && steps.scan.outputs.report-available == 'true' }}
+        shell: bash
+        env:
+          REPORT: ${{ steps.scan.outputs.report-path }}
+        run: test -f "$REPORT"
+```
+
+Do not define `UE_PAK_POLICY_RULES` anywhere in this job for the file variant.
+The last step leaves the report local; it does not upload it. Configure separately
+authorized restricted collection if retention beyond the disposable runner is
+needed. File and env examples require trusted scanner/workflow/policy provenance;
+neither may execute submitted code or expose network credentials to the parser.
 
 `log-level` accepts `error`, `warn`, `info` (default), and `verbose`.
 **Verbose prints the complete escaped policy after a disclosure warning; anyone

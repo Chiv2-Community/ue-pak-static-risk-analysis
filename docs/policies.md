@@ -147,8 +147,9 @@ negation. Host approval is not proof of destination safety or redirect behavior.
 
 ### Normalized invocation contract
 
-`InvocationAnalysis` is the shared boundary for the future issue #4 extractor.
-The compatibility probe does **not** supply it yet. Each `InvocationFact` has:
+`InvocationAnalysis` is the shared boundary supplied by the implemented
+[normalized extractor](extraction.md) through the Docker scanner. The old
+compatibility CLI does **not** supply it. Each `InvocationFact` has:
 
 - `InvocationLocation`: canonical asset identity, containing function identity,
   and nonnegative bytecode offset. The producer must supply stable identities.
@@ -217,15 +218,15 @@ expression variants. They need versioned extensions and corresponding analysis.
 - `PolicyYaml.Write` produces canonical JSON, which is valid YAML 1.2. It
   revalidates the document before returning it. Parsing/writing never logs.
 
-Planned input: `policy-rules` file or `UE_PAK_POLICY_RULES` containing raw YAML,
-exactly one source. The Action will have `log-level` enum (`error`, `warn`,
+Implemented input: `policy-rules` file or `UE_PAK_POLICY_RULES` containing raw YAML,
+exactly one source. The Action has `log-level` enum (`error`, `warn`,
 `info`, `verbose`), default `info`.
 
-**Warning: verbose logging will print the policy to logs. Anyone with log access
+**Warning: verbose logging prints the policy to logs. Anyone with log access
 can read it.** Ordinary environment variables are not secrets and may also be
 exposed by runner setup logs or host/container administrators. Do not enable
 verbose for a policy that must remain confidential. Policy printing and safe
-workflow-command rendering belong to the later transport/logging work.
+workflow-command rendering use the [shared input boundary](policy-input.md).
 
 ## Library API
 
