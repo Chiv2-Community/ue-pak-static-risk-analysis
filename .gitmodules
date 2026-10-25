@@ -1,0 +1,6 @@
+[submodule "vendor/UAssetAPI"]
+	path = vendor/UAssetAPI
+	url = https://github.com/atenfyr/UAssetAPI.git
+[submodule "vendor/repak"]
+	path = vendor/repak
+	url = https://github.com/trumank/repak.git

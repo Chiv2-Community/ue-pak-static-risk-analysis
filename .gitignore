@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.artifacts/
+*.user
+*.suo
+__pycache__/
+*.pyc
+# Never commit locally supplied game/mod assets or private policy.
+*.pak
+*.uasset
+*.uexp
+*.ubulk
+*.umap
+*.usmap
+policy.local.yaml
