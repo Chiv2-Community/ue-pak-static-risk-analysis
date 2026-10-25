@@ -51,21 +51,30 @@ baseline, game installation, network dependency or private catalog.
 - `Complete` describes supported serialized-property enumeration only. It does
   not establish property-purpose metadata, dependency closure, effective defaults,
   a baseline, behavior equivalence, or safety. Unknown custom export payloads,
-  missing mappings/owners, unsupported properties and bounds retain fixed gaps.
+  missing mappings/owners, unsupported properties, duplicate flagged CDOs for one
+  `ClassIndex` and bounds retain fixed gaps. Like invocation extraction, either
+  `PKG_Cooked` or the reader's editor-only-filtered marker is required; neither
+  marker alone proves engine compatibility or safety.
 
 `FindLocalDefaultOverride` freshly extracts from the same asset; it accepts no
 caller-supplied baseline or evidence snapshot. Each visited local class must have
 an actual `ClassDefaultObject` link to a flagged CDO whose `ClassIndex` points
-back to that class. Parent traversal uses `SuperStruct`; conflicting header
-`SuperIndex` metadata fails closed. It retains the requested class, bounded class
-chain, origin class and origin default-export index. Ordinary exports are not
-assumed to be defaults.
+back to that class, with no second flagged CDO claiming the same `ClassIndex`.
+Parent traversal uses `SuperStruct`; conflicting header `SuperIndex` metadata
+fails closed. The entire claimed local ancestry is validated before returning
+the nearest candidate, including ancestors beyond a child or parent override.
+Missing local metadata/CDOs, contradictions and cycles invalidate that candidate.
+The retained class chain covers all validated local ancestors, not just those up
+to the origin. Ordinary exports are not assumed to be defaults.
 
 Only top-level scalar/reference overrides are located. A missing child override
 may locate a serialized override on a verified **local** parent chain, with
 `Inherited: true`; this is structural provenance, **not an engine-effective value**.
-External/native parents, missing CDOs, cycles, duplicate properties, compound
-merging and incomplete extraction return unknown. Reflection/property declarations,
+An external/native boundary ends local validation without resolving constructors
+or external defaults; a previously located local override can still be returned.
+Without a local override, such a boundary returns unknown. Missing CDOs, cycles,
+duplicate properties/CDOs, compound merging and incomplete extraction also return
+unknown. Reflection/property declarations,
 native constructors, instance archetypes and cross-package inheritance are not
 verified. No absent value is asserted to be a language/native zero default.
 
@@ -123,9 +132,17 @@ tagged parent/child defaults and tagged/mapped native data against its original
 10101/20202/424242 and original string values. It only reads the supplied evidence
 directory. Missing mappings remain incomplete. These checks establish neither
 exact-game Windows fidelity nor baseline safety.
+Tagged and mapped native `OwnedData` must have complete supported property
+enumeration. Blueprint packages retain unsupported property-model gaps; their
+supported values and cooked/filtered markers are checked without claiming completeness.
 
-Local serial validation on 2026-10-25: 166 extraction tests (28 new), 115 Policy,
+Initial implementation validation on 2026-10-25: 166 extraction tests (28 new), 115 Policy,
 26 PolicyInput, 193 Scanner and 159 Python tests passed without skips, plus the
 Docker/Action corpus, three removal mutations and owned-cook checks.
 Receipt: `/tmp/opencode/issue10-data-evidence-release-proof1/execution.json`.
 This is implementation validation, not independent review or release approval.
+
+FIX1 serial validation: 192 extraction tests (26 additional), 115 Policy,
+26 PolicyInput, 193 Scanner and 135 ordinary Python tests passed without skips.
+The non-Docker corpus and read-only owned verifier passed; 24 Docker tests were
+excluded, not rerun. Receipt: `/tmp/opencode/pr34-fix1-proof/execution.json`.

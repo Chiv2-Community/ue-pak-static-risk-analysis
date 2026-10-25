@@ -47,7 +47,7 @@ try
     CheckValues(taggedData.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == "OwnedData"),
         424242, "owned-unversioned-value");
     CheckData(taggedData, "unused", "TaggedOwnedData", taggedData.Exports.OfType<NormalExport>()
-        .Single(e => e.ObjectName.ToString() == "OwnedData"), 424242, "owned-unversioned-value");
+        .Single(e => e.ObjectName.ToString() == "OwnedData"), 424242, "owned-unversioned-value", requireComplete: true);
     var mappedPath = Path.Combine(root, "unversioned/OwnedFixtures/Content/Data/OwnedData.uasset");
     var mappings = new Usmap(Path.Combine(root, "owned.usmap"));
     var data = PackageReader.Read(mappedPath, mappings);
@@ -56,7 +56,7 @@ try
     CheckValues(data.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == "OwnedData"),
         424242, "owned-unversioned-value");
     CheckData(data, mappedPath, "MappedOwnedData", data.Exports.OfType<NormalExport>()
-        .Single(e => e.ObjectName.ToString() == "OwnedData"), 424242, "owned-unversioned-value");
+        .Single(e => e.ObjectName.ToString() == "OwnedData"), 424242, "owned-unversioned-value", requireComplete: true);
     var missingData = AssetDataExtractor.Read(new("owned-loose-cook", "missing-mapping", "/Game/Data/OwnedData", mappedPath));
     Check(!missingData.Complete, "unversioned data without mappings must remain incomplete");
     var missing = Probe.Read(mappedPath, "OwnedData-without-mappings");
@@ -85,10 +85,14 @@ static void CheckCooked(UAsset asset, string name)
     Check(!asset.Exports.Any(e => e is RawExport), name + " must not contain RawExport");
 }
 
-static void CheckData(UAsset asset, string path, string name, NormalExport source, int number, string text)
+static void CheckData(UAsset asset, string path, string name, NormalExport source, int number, string text,
+    bool requireComplete = false)
 {
     var input = new PackageInput("owned-loose-cook", name, "/Game/" + name, path);
     var evidence = AssetDataExtractor.Inspect(asset, input);
+    if (requireComplete)
+        Check(evidence.Complete, name + " supported property enumeration: " + string.Join(",", evidence.Diagnostics));
+    Check(!evidence.Diagnostics.Contains("cooked-marker-unavailable"), name + " accepted cooked/filtered marker");
     var exportIndex = asset.Exports.IndexOf(source) + 1;
     SerializedValue Value(string property) => evidence.Properties.Single(p => p.ExportIndex == exportIndex
         && p.Path.Length == 1 && p.Path[0].Property == property).Value;
