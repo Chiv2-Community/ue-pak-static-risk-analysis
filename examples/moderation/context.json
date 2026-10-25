@@ -1,0 +1,16 @@
+{
+  "schema-version": 1,
+  "kind": "scan-context",
+  "scanner-identity": "git:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "game-build": "owned-test-build-not-installed-game",
+  "report-context": {
+    "tool-version": "1.0.0.0",
+    "engine-version": "4.25",
+    "pak-sha256": "738d0d1eb966eb974fd0758770d12dcf888866f578a370cef477261353db4ecc",
+    "producer-version": "owned-example-v1",
+    "dependencies": [
+      {"kind": "mapping", "sha256": "8c07a7954220784e9bf801373b9399c3c8a19deb62da847012e3d8625ce9ed5f"}
+    ],
+    "policy-revision": "d17eb2b6-9029-44c8-9858-b4fe90abf617"
+  }
+}

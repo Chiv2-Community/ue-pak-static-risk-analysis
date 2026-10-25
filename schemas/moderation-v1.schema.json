@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/schemas/moderation-v1.schema.json",
+  "title": "Local moderation handoff v1 (private except feedback)",
+  "oneOf": [
+    {"$ref": "#/$defs/context"}, {"$ref": "#/$defs/handoff"},
+    {"$ref": "#/$defs/review"}, {"$ref": "#/$defs/feedback"}
+  ],
+  "$defs": {
+    "context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "kind", "scanner-identity", "game-build", "report-context"],
+      "properties": {
+        "schema-version": {"const": 1}, "kind": {"const": "scan-context"},
+        "scanner-identity": {"type": "string", "pattern": "^(git:[a-f0-9]{40}|sha256:[a-f0-9]{64})$"},
+        "game-build": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+        "report-context": {"$ref": "report-v1.schema.json#/properties/context"}
+      }
+    },
+    "routes": {
+      "type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true,
+      "items": {"enum": ["policy-violation", "needs-review", "analysis-incomplete", "qualified-completed", "operational-failed"]}
+    },
+    "handoff": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "kind", "context", "report-sha256", "status", "analysis-complete", "counts", "coverage", "routes"],
+      "properties": {
+        "schema-version": {"const": 1}, "kind": {"const": "moderation-handoff"},
+        "context": {"$ref": "#/$defs/context"},
+        "report-sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "status": {"$ref": "report-v1.schema.json#/properties/status"},
+        "analysis-complete": {"type": "boolean"},
+        "counts": {"$ref": "report-v1.schema.json#/properties/counts"},
+        "coverage": {"$ref": "report-v1.schema.json#/properties/coverage"},
+        "routes": {"$ref": "#/$defs/routes"}
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "kind", "handoff", "actor", "time", "decision", "rationale"],
+      "properties": {
+        "schema-version": {"const": 1}, "kind": {"const": "human-review"},
+        "handoff": {"$ref": "#/$defs/handoff"},
+        "actor": {"type": "string", "minLength": 1, "maxLength": 128},
+        "time": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+        "decision": {"enum": ["approve", "reject", "request-review"]},
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "feedback": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "kind", "status", "analysis-complete", "counts", "coverage", "routes"],
+      "properties": {
+        "schema-version": {"const": 1}, "kind": {"const": "submitter-feedback"},
+        "status": {"$ref": "report-v1.schema.json#/properties/status"},
+        "analysis-complete": {"type": "boolean"},
+        "counts": {"$ref": "report-v1.schema.json#/properties/counts"},
+        "coverage": {"$ref": "report-v1.schema.json#/properties/coverage"},
+        "routes": {"$ref": "#/$defs/routes"}
+      }
+    }
+  }
+}
