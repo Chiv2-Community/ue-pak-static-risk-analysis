@@ -264,6 +264,49 @@ public sealed class AssetDataTests
     }
 
     [Fact]
+    public void PublicReadAndInspectRejectDuplicateFlaggedClassDefaults()
+    {
+        var asset = Asset();
+        Data(asset).ObjectFlags = EObjectFlags.RF_ClassDefaultObject;
+        Data(asset).Data = [new StrPropertyData(new(asset, "Destination")) { Value = new("original-first") }];
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "SecondDefault"),
+            OuterIndex = new(0), ClassIndex = new(-2), ObjectFlags = EObjectFlags.RF_ClassDefaultObject,
+            Data = [new StrPropertyData(new(asset, "Destination")) { Value = new("original-second") }], Extras = [] });
+        using var package = new TemporaryPackage(asset);
+        foreach (var evidence in new[] { Inspect(asset), package.Read() })
+        {
+            Assert.False(evidence.Complete);
+            Assert.Contains("duplicate-class-default-object", evidence.Diagnostics);
+            Assert.Equal(2, evidence.Properties.Length);
+        }
+        asset.Exports[1].ObjectFlags = 0;
+        Assert.True(Inspect(asset).Complete); // Ordinary instances are not additional CDOs.
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void PublicReadAndInspectUseCookedOrFilteredMarkerContract(bool cooked, bool filtered)
+    {
+        var asset = Asset();
+        asset.PackageFlags = (cooked ? EPackageFlags.PKG_Cooked : 0)
+            | (filtered ? EPackageFlags.PKG_FilterEditorOnly : 0);
+        Data(asset).Data = [new IntPropertyData(new(asset, "Number")) { Value = 424242 }];
+        using var package = new TemporaryPackage(asset);
+        foreach (var evidence in new[] { Inspect(asset), package.Read() })
+        {
+            Assert.Equal(cooked || filtered, evidence.Complete);
+            Assert.Equal(!cooked && !filtered, evidence.Diagnostics.Contains("cooked-marker-unavailable"));
+            Assert.Equal(new SerializedValue.Integer(424242, "int32"), Value(evidence, "Number"));
+        }
+        var (_, child) = AddDefaults(asset);
+        var result = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Destination");
+        Assert.Equal(cooked || filtered, result.Value is SerializedValue.Text);
+    }
+
+    [Fact]
     public void LocalDefaultInheritanceAndOverridesRetainActualOriginAndClassReferenceTarget()
     {
         var asset = Asset();
@@ -282,9 +325,105 @@ public sealed class AssetDataTests
         Assert.False(overridden.Inherited);
         Assert.Equal(5, overridden.OriginDefaultExportIndex);
         Assert.Equal(new SerializedValue.Text("original-child"), overridden.Value);
+        Assert.Equal(new[] { 4, 2 }, overridden.ClassChain.ToArray());
         Assert.Equal(4, Assert.IsType<SerializedValue.Reference>(
             AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Target").Value).PackageIndex);
         Assert.All(Inspect(asset).Properties.Where(p => p.ExportIndex == 5), p => Assert.True(p.ClassDefaultFlag));
+    }
+
+    [Theory]
+    [InlineData("conflicting-parent", false)]
+    [InlineData("conflicting-parent", true)]
+    [InlineData("cycle", false)]
+    [InlineData("cycle", true)]
+    [InlineData("matching-cycle", false)]
+    [InlineData("matching-cycle", true)]
+    [InlineData("missing-parent-metadata", false)]
+    [InlineData("missing-parent-metadata", true)]
+    [InlineData("duplicate-cdo", false)]
+    [InlineData("duplicate-cdo", true)]
+    [InlineData("missing-cdo", false)]
+    [InlineData("missing-cdo", true)]
+    [InlineData("unflagged-cdo", false)]
+    [InlineData("unflagged-cdo", true)]
+    [InlineData("wrong-cdo-class", false)]
+    [InlineData("wrong-cdo-class", true)]
+    [InlineData("missing-local-ancestor", false)]
+    [InlineData("missing-local-ancestor", true)]
+    public void DefaultCandidateRequiresWholeClaimedLocalProvenance(string failure, bool childOverride)
+    {
+        var asset = Asset();
+        var (_, child) = AddDefaults(asset);
+        var parentClass = (ClassExport)asset.Exports[1];
+        var parentDefault = (NormalExport)asset.Exports[2];
+        if (childOverride)
+            ((NormalExport)asset.Exports[4]).Data = [new StrPropertyData(new(asset, "Destination"))
+                { Value = new("original-child") }];
+        switch (failure)
+        {
+            case "conflicting-parent": parentClass.SuperIndex = new(child); break;
+            case "cycle": parentClass.SuperStruct = new(child); break;
+            case "matching-cycle": parentClass.SuperIndex = parentClass.SuperStruct = new(child); break;
+            case "missing-parent-metadata": parentClass.SuperStruct = null; break;
+            case "missing-cdo": parentClass.ClassDefaultObject = new(999); break;
+            case "unflagged-cdo": parentDefault.ObjectFlags = 0; break;
+            case "wrong-cdo-class": parentDefault.ClassIndex = new(child); break;
+            case "missing-local-ancestor": parentClass.SuperStruct = new(999); break;
+            case "duplicate-cdo":
+                asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "SecondParentDefault"),
+                    OuterIndex = new(0), ClassIndex = new(2), ObjectFlags = EObjectFlags.RF_ClassDefaultObject,
+                    Data = [new StrPropertyData(new(asset, "Destination")) { Value = new("contradictory-parent") }] });
+                break;
+        }
+        var evidence = Inspect(asset);
+        Assert.Contains(evidence.Properties, p => p.Value == new SerializedValue.Text("original-parent"));
+        if (failure == "duplicate-cdo") Assert.Contains("duplicate-class-default-object", evidence.Diagnostics);
+        var result = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Destination");
+        Assert.IsType<SerializedValue.Unknown>(result.Value);
+        Assert.Null(result.OriginClassIndex);
+        Assert.Null(result.OriginDefaultExportIndex);
+        Assert.False(result.Inherited);
+        Assert.Equal("local-chain-incomplete", result.Context);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-2)]
+    public void LocalSerializedCandidateDoesNotRequireNativeOrExternalDefaults(int boundary)
+    {
+        var asset = Asset();
+        var (_, child) = AddDefaults(asset);
+        var parentClass = (ClassExport)asset.Exports[1];
+        parentClass.SuperIndex = parentClass.SuperStruct = new(boundary);
+        var result = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Destination");
+        Assert.Equal(new SerializedValue.Text("original-parent"), result.Value);
+        Assert.Equal(new[] { 4, 2 }, result.ClassChain.ToArray());
+        Assert.Equal("serialized-local-default-override", result.Context);
+        Assert.IsType<SerializedValue.Unknown>(AssetDataExtractor.FindLocalDefaultOverride(
+            asset, Input, child, "NotSerialized").Value);
+    }
+
+    [Fact]
+    public void LocalCandidateCannotBypassClassChainBound()
+    {
+        var asset = Asset();
+        var (_, child) = AddDefaults(asset);
+        var ancestor = (ClassExport)asset.Exports[1];
+        for (var i = 0; i < 255; i++)
+        {
+            var index = asset.Exports.Count + 1;
+            ancestor.SuperStruct = new(index);
+            ancestor = new ClassExport { Asset = asset, ObjectName = new(asset, "Ancestor" + i),
+                OuterIndex = new(0), ClassIndex = new(-3), Data = [],
+                ClassDefaultObject = new(index + 1), SuperStruct = new(-2) };
+            asset.Exports.Add(ancestor);
+            asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Default" + i),
+                OuterIndex = new(0), ClassIndex = new(index), ObjectFlags = EObjectFlags.RF_ClassDefaultObject, Data = [] });
+        }
+        Assert.True(Inspect(asset).Complete);
+        var result = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, "Destination");
+        Assert.Equal(new SerializedValue.Unknown("class-chain-cycle-or-limit"), result.Value);
+        Assert.Equal(256, result.ClassChain.Length);
     }
 
     [Theory]

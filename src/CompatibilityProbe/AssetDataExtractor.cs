@@ -69,8 +69,8 @@ public static class AssetDataExtractor
         return new Walker(asset, input, bounds).Run();
     }
 
-    // Closed local CDO chain only. Absence, external parents and incomplete extraction are unknown,
-    // never language/native zero defaults. Only whole top-level property overrides are located.
+    // Validate the whole claimed local CDO chain, even beyond the nearest override.
+    // External/native boundaries do not invalidate a local override or supply absent defaults.
     // This is structural provenance, not verified reflection metadata or engine-effective values.
     public static DefaultOverrideEvidence FindLocalDefaultOverride(UAsset asset, PackageInput input,
         int classIndex, string property, int arrayIndex = 0, DataExtractionLimits? limits = null)
@@ -80,13 +80,18 @@ public static class AssetDataExtractor
         var chain = ImmutableArray.CreateBuilder<int>();
         var seen = new HashSet<int>();
         var current = classIndex;
+        (SerializedValue Value, int Class, int Default)? candidate = null;
         DefaultOverrideEvidence Unknown(string code) => new(new SerializedValue.Unknown(code), classIndex,
             null, null, false, chain.ToImmutable(), "local-chain-incomplete");
         var evidence = Inspect(asset, input, limits);
         if (!evidence.Complete) return Unknown("property-evidence-incomplete");
         while (true)
         {
-            if (current <= 0) return Unknown(current < 0 ? "external-parent-unavailable" : "native-default-unavailable");
+            if (current <= 0)
+                return candidate is { } found
+                    ? new(found.Value, classIndex, found.Class, found.Default, found.Class != classIndex,
+                        chain.ToImmutable(), "serialized-local-default-override")
+                    : Unknown(current < 0 ? "external-parent-unavailable" : "native-default-unavailable");
             if (!seen.Add(current) || seen.Count > 256) return Unknown("class-chain-cycle-or-limit");
             chain.Add(current);
             if (current > asset.Exports.Count || asset.Exports[current - 1] is not ClassExport cls)
@@ -96,17 +101,18 @@ public static class AssetDataExtractor
                 || !defaults.ObjectFlags.HasFlag(EObjectFlags.RF_ClassDefaultObject)
                 || defaults.ClassIndex?.Index != current)
                 return Unknown("class-default-object-unavailable");
-            var candidates = evidence.Properties.Where(p => p.ExportIndex == cdo && p.Path.Length == 1
-                && p.Path[0] == new DataPathPart(property, arrayIndex)).Take(2).ToArray();
-            if (candidates.Length > 1) return Unknown("duplicate-property-identity");
-            if (candidates.Length == 1 && candidates[0].Value is SerializedValue.Container)
-                return Unknown("compound-default-unavailable");
-            if (candidates.Length == 1)
-                return new(candidates[0].Value, classIndex, current, cdo, current != classIndex,
-                    chain.ToImmutable(), "serialized-local-default-override");
             if (cls.SuperStruct is null) return Unknown("parent-metadata-unavailable");
             if (cls.SuperIndex is not null && cls.SuperIndex.Index != cls.SuperStruct.Index)
                 return Unknown("conflicting-parent-metadata");
+            if (candidate is null)
+            {
+                var candidates = evidence.Properties.Where(p => p.ExportIndex == cdo && p.Path.Length == 1
+                    && p.Path[0] == new DataPathPart(property, arrayIndex)).Take(2).ToArray();
+                if (candidates.Length > 1) return Unknown("duplicate-property-identity");
+                if (candidates.Length == 1 && candidates[0].Value is SerializedValue.Container)
+                    return Unknown("compound-default-unavailable");
+                if (candidates.Length == 1) candidate = (candidates[0].Value, current, cdo);
+            }
             current = cls.SuperStruct.Index;
         }
     }
@@ -176,14 +182,19 @@ public static class AssetDataExtractor
 
         public AssetDataEvidence Run()
         {
-            if (!asset.PackageFlags.HasFlag(EPackageFlags.PKG_Cooked)) gaps.Add("cooked-marker-unavailable");
+            if (!asset.PackageFlags.HasFlag(EPackageFlags.PKG_Cooked) && !asset.IsFilterEditorOnly)
+                gaps.Add("cooked-marker-unavailable");
             if (asset.HasUnversionedProperties && asset.Mappings is null) gaps.Add("property-mappings-unavailable");
             if (asset.Exports.Count > limits.MaxExports) gaps.Add("data-export-limit");
+            var defaultClasses = new HashSet<int>();
             for (var i = 0; i < Math.Min(asset.Exports.Count, limits.MaxExports); i++)
             {
                 if (nodes >= limits.MaxNodes) { gaps.Add("data-node-limit"); break; }
                 if (asset.Exports[i] is not NormalExport export || export.Data is null)
                 { gaps.Add("export-properties-unavailable"); continue; }
+                if (export.ObjectFlags.HasFlag(EObjectFlags.RF_ClassDefaultObject)
+                    && export.ClassIndex is { } defaultClass && !defaultClasses.Add(defaultClass.Index))
+                    gaps.Add("duplicate-class-default-object");
                 if (export.GetType() != typeof(NormalExport) && export.GetType() != typeof(ClassExport)
                     && export.GetType() != typeof(FunctionExport)) gaps.Add("additional-export-data-uninspected");
                 var owner = Identity(new(i + 1));
