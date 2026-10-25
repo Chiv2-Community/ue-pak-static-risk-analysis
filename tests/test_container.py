@@ -233,6 +233,144 @@ except scan.Failure: sys.exit(3)
             self.assertTrue(report["coverage"]["gaps"])
         self.assertEqual(self.before, self.names())
 
+    def test_content_path_boundaries_and_unknown_native_are_not_approved(self):
+        disabled = ["--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
+        for prefix, decision, code in (("Content", "allow", 0), ("content", "allow", 0),
+                                       ("Cont", "reject", 1), ("private-namespace-canary", "reject", 1)):
+            result, report = self.invoke(extra=disabled + ["--allowed-path", prefix])
+            self.assertEqual(code, result.returncode, result.stderr)
+            self.assertEqual(decision, report["content-policy"]["decision"])
+            self.assertTrue(report["content-policy"]["incomplete"])
+            self.assertFalse(report["analysis-complete"])
+            self.assertNotIn("private-namespace-canary", json.dumps(report) + result.stderr.decode())
+        for data in (b"\x7fELF" + bytes(60), b"#!/bin/sh\necho not-executed\n", b"unknown"):
+            result, report = self.invoke(build([("Content/renamed.uasset", data, False)]),
+                extra=["--allowed-path", "Content", "--allowed-class", "/Script/Engine.Actor"])
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertFalse(report["analysis-complete"])
+            self.assertTrue(report["coverage"]["gaps"])
+
+    @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for content-policy scan")
+    def test_owned_content_classes_protected_candidates_and_partial_findings(self):
+        content = Path(os.environ["OWNED_FIXTURE_EVIDENCE"]) / "tagged/OwnedFixtures/Content"
+        header = (content / "BP_OwnedParent.uasset").read_bytes()
+        exports = (content / "BP_OwnedParent.uexp").read_bytes()
+        path = "Content/BP_OwnedParent"
+        payload = build([(path + ".uasset", header, False), (path + ".uexp", exports, False)])
+        disabled = ["--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
+        root = ["--content-root", "Content=/Game"]
+        for mode, expected, code in (("allow", "allow", 0), ("review", "needs-review", 1), ("reject", "reject", 1)):
+            result, report = self.invoke(payload, extra=root + disabled + ["--protected-path", "content", "--replacement-policy", mode])
+            self.assertEqual(code, result.returncode, result.stderr)
+            self.assertEqual(expected, report["content-policy"]["decision"])
+            self.assertTrue(report["analysis-complete"])
+            self.assertEqual(1, report["counts"]["forbidden"])
+            self.assertTrue(report["forbidden-invocations"])
+        result, baseline = self.invoke(payload, extra=root + disabled)
+        package = baseline["inspection"]["members"][0]
+        self.assertTrue(package["parsed-classes"])
+        self.assertTrue(all(c["provenance"].startswith("export-class-index-") for c in package["parsed-classes"]))
+        classes = [arg for c in package["parsed-classes"] for arg in ("--allowed-class", c["identity"])]
+        for inline in (False, True):
+            source = build([(path + ".uasset", header + exports, False)]) if inline else payload
+            result, report = self.invoke(source, extra=root + disabled + classes)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("allow", report["content-policy"]["decision"])
+            self.assertEqual(not package["parsed-classes-complete"], report["content-policy"]["incomplete"])
+            result, report = self.invoke(source, extra=root + disabled + ["--allowed-class", "/Script/Engine.Unrelated"])
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertEqual("reject", report["content-policy"]["decision"])
+            self.assertEqual(1, report["counts"]["forbidden"])
+        # Class rejection cannot erase invocation findings or earlier manifest members.
+        corrupt = build([(path + ".uasset", header, False), (path + ".uexp", exports, False),
+                         ("Content/later", b"bad", False)],
+                        mutate=lambda metas, payloads: payloads.__setitem__(2, b"BAD"))
+        result, report = self.invoke(corrupt, extra=root + disabled + ["--allowed-class", "/Script/Engine.Unrelated"])
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("reject", report["content-policy"]["decision"])
+        self.assertEqual(1, report["counts"]["forbidden"])
+        self.assertEqual(3, len(report["inspection"]["members"]))
+
+    def test_invalid_content_config_does_not_disclose_verbose_invocation_policy(self):
+        for settings in (["--allowed-path", "private-content-canary/../bad"],
+                         ["--protected-path", "Content", "--replacement-policy", "allow", "--replacement-policy", "reject"]):
+            result, _ = self.invoke(extra=[*settings, "--log-level", "verbose"])
+            self.assertEqual(2, result.returncode, result.stderr)
+            self.assertNotIn(b"private-container-canary", result.stdout + result.stderr)
+            self.assertNotIn(b"private-content-canary", result.stdout + result.stderr)
+
+    @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for actual-class identity scan")
+    def test_same_filename_different_actual_owned_classes(self):
+        content = Path(os.environ["OWNED_FIXTURE_EVIDENCE"]) / "tagged/OwnedFixtures/Content"
+        disabled = ["--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
+        extra = ["--content-root", "Content=/Game", *disabled]
+        def payload(stem):
+            return build([("Content/Same.uasset", (content / (stem + ".uasset")).read_bytes(), False),
+                          ("Content/Same.uexp", (content / (stem + ".uexp")).read_bytes(), False)])
+        source = payload("Data/OwnedData")
+        result, report = self.invoke(source, extra=extra)
+        self.assertEqual(0, result.returncode, result.stderr)
+        member = report["inspection"]["members"][0]
+        self.assertTrue(member["parsed-classes-complete"])
+        allowed = [arg for c in member["parsed-classes"] for arg in ("--allowed-class", c["identity"])]
+        result, allowed_report = self.invoke(source, extra=extra + allowed)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(allowed_report["analysis-complete"])
+        result, other = self.invoke(payload("BP_OwnedParent"), extra=extra + allowed)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("reject", other["content-policy"]["decision"])
+        self.assertEqual(member["path"], other["inspection"]["members"][0]["path"])
+        self.assertNotEqual(member["parsed-classes"], other["inspection"]["members"][0]["parsed-classes"])
+        # Missing/synthetic corrupt package data stays incomplete under an allowlist.
+        for source in (build([("Content/Same.uasset", (content / "BP_OwnedParent.uasset").read_bytes(), False)]),
+                       build([("Content/Same.uasset", b"\xc1\x83\x2a\x9e" + bytes(20), False)])):
+            result, partial = self.invoke(source, extra=extra + allowed)
+            self.assertFalse(partial["analysis-complete"])
+            self.assertTrue(partial["content-policy"]["incomplete"])
+        # Additional signatures cannot mask a known class rejection when coverage gates are disabled.
+        inline = (content / "BP_OwnedParent.uasset").read_bytes() + (content / "BP_OwnedParent.uexp").read_bytes()
+        result, partial = self.invoke(build([("Content/Same.ini", inline, False)]), extra=extra + allowed)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("reject", partial["content-policy"]["decision"])
+
+    @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for class ownership mutations")
+    def test_serialized_class_ownership_coverage_is_independent_of_restrictions(self):
+        fixtures = self.root / "class-fixtures"
+        generated = subprocess.run(["dotnet", "run", "--project", str(ROOT / "tests/OwnedFixtures.Verify"),
+            "-c", "Release", "--", os.environ["OWNED_FIXTURE_EVIDENCE"], "--class-fixtures", str(fixtures)],
+            capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        cases = json.loads(generated.stdout)
+        root = ["--content-root", "Content=/Game"]
+        for case in cases:
+            payload = build([("Content/Ownership.uasset", (fixtures / (case["name"] + ".uasset")).read_bytes(), False),
+                             ("Content/Ownership.uexp", (fixtures / (case["name"] + ".uexp")).read_bytes(), False)])
+            identity = case["identity"]
+            allowed = identity or "/Script/OwnedFixtures.FixtureData"
+            for settings in ([], ["--allowed-path", "Content"], ["--protected-path", "Other"], ["--allowed-class", allowed]):
+                with self.subTest(case=case["name"], settings=settings):
+                    result, report = self.invoke(payload, extra=root + settings)
+                    member = report["inspection"]["members"][0]
+                    self.assertEqual(identity is not None, member["parsed-classes-complete"])
+                    self.assertEqual([] if identity is None else [identity], [c["identity"] for c in member["parsed-classes"]])
+                    if identity is not None:
+                        self.assertEqual("export-class-index-export" if case["name"] == "valid-local" else "export-class-index-import",
+                                         member["parsed-classes"][0]["provenance"])
+                    self.assertEqual("paired_export_data", report["inspection"]["members"][1]["inspection-status"])
+                    # Unconfigured invocation-only behavior remains unchanged.
+                    # Bounds failures already carry invocation-extraction gaps, even unconfigured.
+                    incomplete = (bool(settings) and identity is None) or case["name"] in ("owner-out-of-range", "class-out-of-range")
+                    self.assertEqual(int(incomplete), result.returncode, result.stderr)
+                    self.assertEqual(not incomplete, report["analysis-complete"])
+                    self.assertEqual(0, report["counts"]["invocations"])
+                    if settings:
+                        self.assertEqual("allow", report["content-policy"]["decision"])
+                        self.assertEqual(identity is None, report["content-policy"]["incomplete"])
+                        diagnostics = [f["diagnostic"] for f in report["content-policy"]["findings"]]
+                        self.assertEqual(["class-inspection-unavailable"] if identity is None else [], diagnostics)
+                    else:
+                        self.assertNotIn("content-policy", report)
+
     @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for cooked-package scan")
     def test_real_cooked_calls_file_environment_direct_evaluator_and_hashes(self):
         original = Path(os.environ["OWNED_FIXTURE_EVIDENCE"])

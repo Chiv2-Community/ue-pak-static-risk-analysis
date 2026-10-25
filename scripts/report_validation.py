@@ -135,7 +135,8 @@ def load(data, root):
             require(item["id"] not in by_id or by_id[item["id"]] == item)
             by_id[item["id"]] = item
     require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
-    incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"])
+    incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
+                      or report.get("content-policy", {}).get("incomplete", False))
     require(report["analysis-complete"] == (not incomplete))
     if report["status"] == "failed":
         require(all(count == 0 for count in counts.values()))

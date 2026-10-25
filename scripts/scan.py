@@ -176,7 +176,7 @@ def write_report(path, data):
 
 
 def options(argv):
-    parser = Arguments(description=__doc__)
+    parser = Arguments(description=__doc__, allow_abbrev=False)
     parser.add_argument("command", choices=["scan"])
     for key in ("pak", "report", "engine-version"):
         parser.add_argument("--" + key, required=True)
@@ -185,6 +185,9 @@ def options(argv):
     for key in ("policy-rules", "log-level", "policy-revision", "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "mapping", "content-root"):
         parser.add_argument("--" + key)
     parser.add_argument("--moderator-detail", action="store_true")
+    for key in ("allowed-path", "allowed-class", "protected-path"):
+        parser.add_argument("--" + key, action="append", default=[])
+    parser.add_argument("--replacement-policy", action="append", default=[])
     result = parser.parse_args(argv)
     if os.getuid() == 0 or not 0 < result.timeout <= 600:
         raise Failure("invalid-configuration")
@@ -207,6 +210,11 @@ def main(argv=None):
                 shared += ["--" + key, value]
         if args.moderator_detail:
             shared += ["--moderator-detail"]
+        for key in ("allowed-path", "allowed-class", "protected-path"):
+            for value in getattr(args, key.replace("-", "_")):
+                shared += ["--" + key, value]
+        for value in args.replacement_policy:
+            shared += ["--replacement-policy", value]
         root, logical = "-", "-"
         if args.content_root is not None:
             from pak_ingest.reader import components

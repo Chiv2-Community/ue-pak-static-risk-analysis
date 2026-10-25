@@ -7,6 +7,8 @@ using UAssetAPI.Kismet.Bytecode.Expressions;
 using UAssetAPI.PropertyTypes.Objects;
 using UAssetAPI.Unversioned;
 
+if (args.Length == 3 && args[1] == "--class-fixtures")
+    return ClassOwnership.WriteFixtures(args[0], args[2]);
 if (args.Length != 1)
 {
     Console.Error.WriteLine("Usage: OwnedFixtures.Verify <external-evidence-directory>");
