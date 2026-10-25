@@ -78,6 +78,8 @@ moderator detail, verbose level, or access policy-bearing jobs/logs.
    explicit generated-ID export sidecars before cleanup. It does not require a
    `.uexp` for every inline package. Content signatures select package candidates;
    unknown, native/script/config and unpaired bulk data remain coverage gaps.
+   Export pairing accounts only for unclassified raw bytes; recognized signatures
+   remain gaps even when the package reads successfully using that sidecar.
 5. Collect at most 8 MiB of stdout facts. Discard parser stderr; do not replay it.
    Validate the closed typed facts protocol in another trusted evaluator, including
    exact expected pak and mapping SHA256 values from the host snapshots. A hash
@@ -179,6 +181,11 @@ for configured class/namespace/replacement enforcement and richer inventory
 coverage; no general class allowlist or clean-install replacement baseline is
 claimed. The reusable Action and its policy workflow remain separate work.
 
+Run the Docker suite without concurrent scanner jobs on the same daemon. Cleanup
+assertions compare the global `pak-scan-*` inventory before and after each test;
+unrelated concurrent scans can cause false failures. Tests never remove foreign
+containers to satisfy those assertions.
+
 Local validation, 2026-10-25, Linux x86-64, Docker 29.8.2 with cgroup v2:
 
 - Local image identity:
@@ -193,3 +200,22 @@ Local validation, 2026-10-25, Linux x86-64, Docker 29.8.2 with cgroup v2:
 - All 23 hashes recorded in the original owned-fixture receipt still match.
   Original cooked files were read only; generated paks/snapshots used temporary copies.
 - No `pak-scan-*` containers remained after the integration suite.
+
+### PR #25 signature-fix validation
+
+Rebuilt locally on the same host/date; no registry publication:
+
+- Image: `sha256:4b2346e3d74c7d6f7a16640723e067a8124972e42fbda161e00b639f42f64849`.
+- 111 extraction/compatibility, 91 Scanner, 110 Policy, 26 PolicyInput tests passed.
+- 54 ordinary Python tests passed; 13 opt-in Docker tests skipped in that run.
+- All 13 Docker tests passed separately, serialized with owned cooked evidence.
+  ELF, PE, Mach-O and shebang export sidecars retain signatures, package findings
+  and incomplete coverage. Legitimate split export data still completes; script/
+  config package-name hints, unknown content and bulk data retain their gaps.
+- Original review repro: inline package exits 0; ELF and shebang sidecars exit 1
+  with partial reports, `analysis-complete=false`, and both package invocations.
+- Direct production `PackageReader.Read` checks retain two invocations and no
+  global gaps for both split and inline copies of the owned parent package.
+  `AssetBinaryReader.LoadUexp` must be enabled for both layouts to load exports.
+- All 23 original receipt hashes still match; original evidence was read only.
+- No `pak-scan-*` containers remained after the serialized suite and repro.

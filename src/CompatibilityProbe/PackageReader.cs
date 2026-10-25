@@ -32,7 +32,8 @@ public static class PackageReader
             FilePath = path,
             UseSeparateBulkDataFiles = separate
         };
-        using var reader = new AssetBinaryReader(combined, separate, asset);
+        // Load export data in both layouts; LoadUexp is not a sidecar-presence flag.
+        using var reader = new AssetBinaryReader(combined, true, asset);
         asset.Read(reader);
         return asset;
     }
