@@ -93,6 +93,10 @@ are hashed but not decoded or security-validated.
 
 ## Coverage matrix
 
+The [owned cook-fixture workflow](owned-fixtures.md) provides a separate original
+source project and strict external-artifact verifier. Its Linux cook evidence
+does not establish target-game Windows compatibility.
+
 | Case | Evidence and behavior |
 | --- | --- |
 | V9 legacy pak, Zlib, unencrypted index | Verified on local mod and base-game containers |
@@ -101,8 +105,8 @@ are hashed but not decoded or security-validated.
 | `.ubulk` | Local mod sidecars extracted and hashed; not decoded |
 | Blueprint event graphs and nested calls | Real mod functions parsed; nested visitor regression tests |
 | Native game types and inherited classes | Selected game samples parsed; no cross-package/inheritance behavior resolution |
-| `.umap` | One simple map parsed; map-contained executable Blueprint fixture still needed |
-| Unversioned properties | Missing-mapping diagnostic regression; no target-game unversioned asset/mapping pair verified |
+| `.umap` | Simple game map plus owned Linux Level Blueprint with 2/2 executable functions verified; no Windows fixture claim |
+| Unversioned properties | Owned Linux native UObject/mapping pair and missing-mapping negative verified; no target-game pair verified |
 | Custom game serialization | Selected samples parsed; no general custom-serializer claim |
 | Missing dependency context | No cross-package resolution; report limitations remain explicit |
 | Encryption | No keys accepted in this experiment; metadata/extraction failure is not success |
@@ -143,11 +147,13 @@ data/default-driven behavior analysis is implemented.
 - Validate build reproducibility in the final Ubuntu image; the managed probe
   and repak index reader/extractor already run in the pinned Ubuntu x86-64
   runtime above.
-- Generate an owned UE 4.25 fixture project with explicit expected calls,
-  inheritance, custom game properties, and map-contained executable Blueprints.
-- Establish fixture redistribution rights and exact cook/game build provenance.
-- Validate a real unversioned-properties/mappings pair and negative dependency
-  cases. Do not reuse proprietary upstream samples without permission.
+- Broaden the [owned Linux fixtures](owned-fixtures.md) beyond minimal calls,
+  inheritance, custom native properties, and executable Level Blueprint coverage.
+- Establish generated-fixture redistribution rights and target-game Windows cook
+  provenance; the owned Linux producer is pinned and recorded.
+- Extend unversioned coverage beyond the owned two-property UObject schema;
+  validate target-game mappings and broader negative dependency cases. Do not
+  reuse proprietary upstream samples without permission.
 - Complete the dependency/native redistribution inventory before packaging.
 
 Keep issue #2 open until these gaps have explicit evidence or agreed scope
