@@ -77,7 +77,8 @@ public sealed class PolicyEvaluator
                         break;
                 }
             }
-            policy = PolicyYaml.Parse(PolicyYaml.Write(document));
+            _ = PolicyYaml.Write(document);
+            policy = document;
 
             void Push(ImmutableArray<MatchExpression> expressions, int depth)
             {
@@ -88,7 +89,7 @@ public sealed class PolicyEvaluator
             }
             void CheckString(string? value)
             {
-                if (value is null || value.Length > MaxFactStringLength
+                if (value is null || value.Length > MaxFactStringLength || !ValidUnicode(value)
                     || (characters += value.Length) > PolicyYaml.MaxInputBytes || ++count > PolicyYaml.MaxYamlNodes)
                     throw new ArgumentException();
             }

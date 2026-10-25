@@ -223,14 +223,74 @@ public sealed class EvaluatorTests
     }
 
     [Fact]
+    public void PublicAstsRejectInvalidUnicodeInEveryStringField()
+    {
+        foreach (var text in new[] { "\ud800", "\udc00", "private-canary\ud800x" })
+        {
+            PolicyRule[] rules = [Rule(Target(), text), Rule(Target()) with { Description = text },
+                Rule(new MatchExpression.Invocation(new TargetMatcher.Exact(text, "LaunchURL"))),
+                Rule(new MatchExpression.Invocation(new TargetMatcher.Exact(Owner, text))),
+                Rule(new MatchExpression.Invocation(new TargetMatcher.ByOwner(text))),
+                Rule(new MatchExpression.Argument(text, new ValuePredicate.StringStartsWith("prefix"))),
+                Rule(Argument(new ValuePredicate.StringStartsWith(text))),
+                Rule(Argument(new ValuePredicate.UrlHostIn([text]))),
+                Rule(Argument(new ValuePredicate.EqualTo(new PolicyLiteral.String(text)))),
+                Rule(Argument(new ValuePredicate.In([new PolicyLiteral.String(text)])))];
+            foreach (var rule in rules)
+            {
+                var error = Assert.Throws<ArgumentException>(() => new PolicyEvaluator(Document(rule)));
+                Assert.Equal("Invalid policy document.", error.Message);
+                Assert.Null(error.InnerException);
+                Assert.DoesNotContain("private-canary", error.ToString());
+            }
+        }
+    }
+
+    [Fact]
+    public void PublicAstsPreserveValidUnicodeMatching()
+    {
+        foreach (var text in new[] { "\ufffd", "\ud800\udc00", "é" })
+        {
+            var fact = WithLiteral(new PolicyLiteral.String(text + "-data"));
+            var rule = Rule(Argument(new ValuePredicate.StringStartsWith(text))) with { Description = text };
+            var result = new PolicyEvaluator(Document(rule)).Evaluate(new([fact], []));
+            Assert.Equal(MatchResult.Match, Result(result));
+            Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(new ValuePredicate.StringStartsWith(text)),
+                WithLiteral(new PolicyLiteral.String("other-data")))));
+        }
+    }
+
+    [Fact]
     public void InvalidPublicAstsAreRejectedBeforeEvaluation()
     {
         MatchExpression deep = Target();
         for (var i = 0; i < 1000; i++) deep = new MatchExpression.Not(deep);
-        PolicyDocument[] invalid = [new(1, default), new(1, []), Document(Rule(null!)), Document(Rule(deep)),
+        PolicyDocument[] invalid = [null!, new(1, default), new(1, []), Document(null!),
+            Document(Rule(null!)), Document(Rule(deep)), Document(Rule(Target())) with { SchemaVersion = 2 },
+            Document(Rule(Target()) with { Id = null! }), Document(Rule(Target()) with { Description = null! }),
+            Document(Rule(Target()) with { Description = "" }), Document(Rule(Target()) with { Description = "private\ncanary" }),
+            Document(Rule(new MatchExpression.Invocation(null!))), Document(Rule(new MatchExpression.Argument("URL", null!))),
+            Document(Rule(Argument(new ValuePredicate.StringStartsWith(null!)))),
+            Document(Rule(Argument(new ValuePredicate.EqualTo(null!)))),
+            Document(Rule(Argument(new ValuePredicate.In([new PolicyLiteral.Integer(1), new PolicyLiteral.String("1")])))),
             Document(Rule(new MatchExpression.All([]))), Document(Rule(Argument(new ValuePredicate.In(default)))),
             Document(Rule(Argument(new ValuePredicate.UrlHostIn(["UPPER.example.org"])))),
             Document(Rule(Target(), effect: (RuleEffect)99)), Document(Rule(Target()), Rule(Target()))];
+        foreach (var document in invalid)
+            Assert.Equal("Invalid policy document.", Assert.Throws<ArgumentException>(() => new PolicyEvaluator(document)).Message);
+    }
+
+    [Fact]
+    public void PublicAstBudgetsRemainEnforced()
+    {
+        MatchExpression deep = Target();
+        for (var i = 0; i < PolicyYaml.MaxYamlDepth; i++) deep = new MatchExpression.Not(deep);
+        PolicyDocument[] invalid = [Document(Rule(deep)),
+            Document(Rule(new MatchExpression.All(Enumerable.Repeat(Target(), PolicyYaml.MaxYamlNodes + 1).ToImmutableArray()))),
+            Document(Rule(new MatchExpression.All(Enumerable.Repeat(Target(), 800).ToImmutableArray()))),
+            Document(Rule(Target()) with { Description = new string('x', PolicyEvaluator.MaxFactStringLength + 1) }),
+            Document(Enumerable.Range(0, 64).Select(i => Rule(Target(), "rule-" + i) with
+                { Description = new string('x', PolicyEvaluator.MaxFactStringLength) }).ToArray())];
         foreach (var document in invalid)
             Assert.Equal("Invalid policy document.", Assert.Throws<ArgumentException>(() => new PolicyEvaluator(document)).Message);
     }
