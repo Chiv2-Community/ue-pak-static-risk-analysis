@@ -34,6 +34,10 @@ rules:
         function: Touch
 """
 
+MATCHING_POLICY = POLICY.replace("original-invocation-model", "operator-rule-canary").replace(
+    "effect: flag", "effect: forbid").replace("/Script/Fixture.Other", "/Script/Corpus.Sensitive").replace(
+    "function: Touch", "function: Record")
+
 
 def sha(value):
     return hashlib.sha256(value).hexdigest()
@@ -42,7 +46,7 @@ def sha(value):
 class DataPolicyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temporary = tempfile.TemporaryDirectory(prefix="data-integration-", dir="/tmp/opencode")
+        cls.temporary = tempfile.TemporaryDirectory(prefix="data-integration-")
         cls.root = Path(cls.temporary.name)
         cls.generated = cls.root / "generated"
         for command in (["dotnet", "build", "src/Parser", "--verbosity", "quiet"],
@@ -74,14 +78,15 @@ class DataPolicyTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temporary.cleanup()
 
-    def evaluate(self, *, baseline=True, rules=None, facts=None, build_scope="original-fixture-v1", extra=()):
+    def evaluate(self, *, baseline=True, rules=None, facts=None, build_scope="original-fixture-v1", extra=(), policy=None):
         with tempfile.TemporaryDirectory(prefix="data-case-", dir=self.root) as temporary:
             root = Path(temporary)
             (root / "facts").write_bytes(self.facts["submission"] if facts is None else facts)
             (root / "rules").write_text(json.dumps(self.rules if rules is None else rules))
+            (root / "policy").write_text(POLICY if policy is None else policy)
             args = ["dotnet", str(ROOT / "src/Scanner/bin/Debug/net10.0/Scanner.dll"), "evaluate", "--facts", str(root / "facts"),
                 "--data-rules", str(root / "rules"), "--game-build", build_scope, "--engine-version", "4.25", "--report", "-",
-                "--policy-rules", str(self.policy), "--policy-revision", "original-v1", "--fail-on-any-forbidden", "false",
+                "--policy-rules", str(root / "policy"), "--policy-revision", "original-v1", "--fail-on-any-forbidden", "false",
                 "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
             if baseline:
                 (root / "baseline").write_bytes(self.facts["baseline"])
@@ -91,8 +96,36 @@ class DataPolicyTests(unittest.TestCase):
             self.assertNotIn(b"private-data-canary", result.stdout + result.stderr)
             self.assertNotIn(b"private-original-model", result.stdout + result.stderr)
             self.assertNotIn(sha(self.paks["baseline"].read_bytes()).encode(), result.stdout + result.stderr)
-            report = reports.load(result.stdout, ROOT)
+            report = reports.load(result.stdout, ROOT, moderator_detail="--moderator-detail" in extra)
             return result, report
+
+    def test_operator_detail_profile_is_explicit_and_keeps_closed_validation(self):
+        ordinary, default = self.evaluate(policy=MATCHING_POLICY)
+        self.assertEqual(1, ordinary.returncode)
+        self.assertNotIn(b"operator-rule-canary", ordinary.stdout + ordinary.stderr)
+        result, report = self.evaluate(extra=("--moderator-detail",), policy=MATCHING_POLICY)
+        self.assertEqual(1, result.returncode)
+        self.assertEqual(["operator-rule-canary"], report["forbidden-invocations"][0]["rule-ids"])
+        self.assertEqual(1, report["counts"]["forbidden"])
+        self.assertEqual(1, len(report["data-analysis"]["findings"]))
+        self.assertEqual(default["counts"], report["counts"])
+        self.assertEqual(default["data-analysis"], report["data-analysis"])
+        self.assertNotIn(b"operator-rule-canary", result.stderr)
+        with self.assertRaises(reports.InvalidReport):
+            reports.load(result.stdout, ROOT)
+        with self.assertRaises(reports.InvalidReport):
+            moderation.handoff(result.stdout, {}, self.paks["submission"], [])
+        for field, value in (("rule-ids", ["invalid private literal"]), ("rule-ids", ["a" * 65]),
+                             ("rule-ids", []), ("rule-ids", ["valid", "valid"]),
+                             ("private-condition", "private-data-canary")):
+            changed = deepcopy(report)
+            changed["forbidden-invocations"][0][field] = value
+            with self.assertRaises(reports.InvalidReport):
+                reports.load(json.dumps(changed).encode(), ROOT, moderator_detail=True)
+        changed = deepcopy(report)
+        changed["rule-ids"] = ["valid"]
+        with self.assertRaises(reports.InvalidReport):
+            reports.load(json.dumps(changed).encode(), ROOT, moderator_detail=True)
 
     def test_serialized_changed_destination_drives_separate_finding_with_identical_stored_bytecode(self):
         proof = json.loads((self.generated / "proof.json").read_bytes())
@@ -272,15 +305,35 @@ class DataPolicyTests(unittest.TestCase):
             root = Path(temporary)
             rules = root / "rules"
             rules.write_text(json.dumps(self.rules))
+            policy = root / "policy"
+            policy.write_text(MATCHING_POLICY)
             common = ["--pak", str(self.paks["submission"]), "--baseline-pak", str(self.paks["baseline"]),
                 "--data-rules", str(rules), "--game-build", "original-fixture-v1", "--content-root", "Content=/Game",
-                "--policy-rules", str(self.policy), "--engine-version", "4.25", "--policy-revision", "original-v1",
+                "--policy-rules", str(policy), "--engine-version", "4.25", "--policy-revision", "original-v1",
                 "--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
             host = subprocess.run([sys.executable, str(ROOT / "scripts/scan.py"), "scan", *common, "--image", image,
                 "--report", str(root / "host-report"), "--data-context", str(root / "host-private")], env=self.env, capture_output=True, timeout=240)
             self.assertEqual(1, host.returncode)
             report = reports.load((root / "host-report").read_bytes(), ROOT)
             self.assertEqual("needs-review", report["data-analysis"]["decision"])
+            self.assertEqual(1, report["counts"]["forbidden"])
+            detailed = subprocess.run([sys.executable, str(ROOT / "scripts/scan.py"), "scan", *common, "--image", image,
+                "--moderator-detail", "--report", str(root / "detail-report"), "--data-context", str(root / "detail-private")],
+                env=self.env, capture_output=True, timeout=240)
+            self.assertEqual(1, detailed.returncode)
+            detailed_bytes = (root / "detail-report").read_bytes()
+            detail = reports.load(detailed_bytes, ROOT, moderator_detail=True)
+            self.assertEqual(report["counts"], detail["counts"])
+            self.assertEqual(report["data-analysis"], detail["data-analysis"])
+            self.assertEqual(["operator-rule-canary"], detail["forbidden-invocations"][0]["rule-ids"])
+            with self.assertRaises(reports.InvalidReport):
+                reports.load(detailed_bytes, ROOT)
+            with self.assertRaises(reports.InvalidReport):
+                moderation.handoff(detailed_bytes, {}, self.paks["submission"], [])
+            for name in ("host", "detail"):
+                private = json.loads((root / (name + "-private")).read_bytes())
+                self.assertEqual(sha((root / (name + "-report")).read_bytes()), private["report-sha256"])
+                self.assertEqual(0o600, (root / (name + "-private")).stat().st_mode & 0o777)
             config = root / "docker"
             config.mkdir()
             identity = scan.Docker(config, image, 60).image
@@ -289,18 +342,29 @@ class DataPolicyTests(unittest.TestCase):
             env = dict(self.env, GITHUB_WORKSPACE=str(root), GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(summary),
                 UE_PAK_ACTION_IMAGE=identity, INPUT_PAK=str(self.paks["submission"]), INPUT_BASELINE_PAK=str(self.paks["baseline"]),
                 INPUT_DATA_RULES=str(rules), INPUT_GAME_BUILD="original-fixture-v1", INPUT_CONTENT_ROOT="Content=/Game",
-                INPUT_POLICY_RULES=str(self.policy), INPUT_REPORT="action-report", INPUT_DATA_CONTEXT="action-private",
+                INPUT_POLICY_RULES=str(policy), INPUT_REPORT="action-report", INPUT_DATA_CONTEXT="action-private",
+                INPUT_MODERATOR_DETAIL="true",
                 INPUT_FAIL_ON_ANY_FORBIDDEN="false", INPUT_FAIL_ON_ANY_FLAGGED="false", INPUT_FAIL_ON_INCOMPLETE="false")
             actual = subprocess.run([sys.executable, str(ROOT / "scripts/action.py"), "scan"], env=env, capture_output=True, timeout=240)
             self.assertEqual(1, actual.returncode)
             adapted = reports.load((root / "action-report").read_bytes(), ROOT)
             self.assertEqual(report["data-analysis"], adapted["data-analysis"])
             self.assertEqual(report["counts"], adapted["counts"])
-            for data in (host.stdout + host.stderr, actual.stdout + actual.stderr, output.read_bytes(), summary.read_bytes()):
+            self.assertEqual(sha((root / "action-report").read_bytes()),
+                json.loads((root / "action-private").read_bytes())["report-sha256"])
+            self.assertIn("forbidden-count=1", output.read_text())
+            self.assertIn("data-review-count=1", output.read_text())
+            for data in (host.stdout + host.stderr, detailed.stdout + detailed.stderr, actual.stdout + actual.stderr,
+                         output.read_bytes(), summary.read_bytes(), (root / "host-report").read_bytes(),
+                         (root / "action-report").read_bytes()):
+                self.assertNotIn(b"operator-rule-canary", data)
                 self.assertNotIn(b"private-data-canary", data)
                 self.assertNotIn(b"private-original-model", data)
                 self.assertNotIn(sha(self.paks["baseline"].read_bytes()).encode(), data)
             self.assertTrue((root / "action-private").is_file())
+            for private_value in (b"private-data-canary", b"private-original-model", b"Destination",
+                                  sha(self.paks["baseline"].read_bytes()).encode()):
+                self.assertNotIn(private_value, detailed_bytes)
 
 
 if __name__ == "__main__":

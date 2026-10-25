@@ -222,7 +222,8 @@ UE_PAK_CONTAINER_TEST_IMAGE=ue-pak-static-risk-analysis:dev \
   python3 -m unittest discover -s tests -p test_action.py -v
 ```
 
-Structural YAML tests need PyYAML (CI pins 6.0.3); the Action runtime uses only the
+Install `tests/requirements.txt` in a venv for Python tests; CI uses the same pins.
+The Action runtime uses only the
 Python standard library. Owned evidence tests read original cooked files and
 generate temporary pak copies. They do not establish exact Windows/game fidelity
 or private external-consumer access.

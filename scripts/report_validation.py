@@ -105,7 +105,9 @@ def matches(value, schema, document, documents):
         return False
 
 
-def load(data, root):
+def load(data, root, *, moderator_detail=False):
+    # Only trusted operator callers may select detail; public consumers stay strict.
+    require(type(moderator_detail) is bool)
     require(len(data) <= 16 * 1024 * 1024)
     report = json.loads(data.decode("utf-8", "strict"), object_pairs_hook=pairs,
                         parse_constant=lambda _: require(False))
@@ -115,7 +117,7 @@ def load(data, root):
         nodes += 1
         require(depth <= 32 and nodes <= 250000)
         if isinstance(value, dict):
-            require("rule-ids" not in value)  # Default consumers have no moderator-detail profile.
+            require(moderator_detail or "rule-ids" not in value)
             pending.extend((v, depth + 1) for v in value.values())
         elif isinstance(value, list):
             pending.extend((v, depth + 1) for v in value)

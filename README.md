@@ -45,12 +45,16 @@ dotnet restore tests/PolicyInput.Tests/PolicyInput.Tests.csproj --locked-mode
 dotnet test tests/PolicyInput.Tests/PolicyInput.Tests.csproj -c Release --no-restore
 dotnet restore tests/Scanner.Tests/Scanner.Tests.csproj --locked-mode
 dotnet test tests/Scanner.Tests/Scanner.Tests.csproj -c Release --no-restore
-python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 -m venv .venv
+.venv/bin/pip install -r tests/requirements.txt
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
 cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_cli --no-default-features
 ```
 
 The dependency submodules are pinned. Do not substitute the current NuGet release
 for the evaluated UAssetAPI source revision.
+The full Python suite requires the pinned test dependencies, including mandatory
+data-schema validation. Production Python remains standard-library-only.
 
 The [integrated regression gate](docs/regression-corpus.md) checks reviewed synthetic
 package/pak expectations, finding/coverage removal mutations, bounded boundary

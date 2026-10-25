@@ -4,6 +4,7 @@
 *.user
 *.suo
 __pycache__/
+.venv/
 *.pyc
 # Never commit locally supplied game/mod assets or private policy.
 *.pak

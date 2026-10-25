@@ -306,7 +306,7 @@ def main(argv=None):
             if args.data_rules is not None and code in (0, 1):
                 # Separate private artifact. No policy/baseline fingerprint enters ordinary reports.
                 from report_validation import load
-                checked = load(report, Path(__file__).resolve().parents[1])
+                checked = load(report, Path(__file__).resolve().parents[1], moderator_detail=args.moderator_detail)
                 if "data-analysis" not in checked:
                     raise Failure("parser-failed")
                 private = {"schema-version": 1, "kind": "data-context", "report-sha256": hashlib.sha256(report).hexdigest(),

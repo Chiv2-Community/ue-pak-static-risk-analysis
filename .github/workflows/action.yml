@@ -66,7 +66,7 @@ jobs:
       - name: Test adapter and actual local Docker boundary
         run: |
           python3 -m venv "$RUNNER_TEMP/action-test-venv"
-          "$RUNNER_TEMP/action-test-venv/bin/pip" install PyYAML==6.0.3
+          "$RUNNER_TEMP/action-test-venv/bin/pip" install -r tests/requirements.txt
           export UE_PAK_CONTAINER_TEST_IMAGE="$(docker image ls --filter 'reference=ue-pak-action:*' --no-trunc --format '{{.ID}}' | head -n 1)"
           test -n "$UE_PAK_CONTAINER_TEST_IMAGE"
           "$RUNNER_TEMP/action-test-venv/bin/python" -m unittest discover -s tests -p test_action.py -v

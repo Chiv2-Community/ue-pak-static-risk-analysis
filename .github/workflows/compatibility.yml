@@ -28,6 +28,9 @@ jobs:
       - name: Test YAML policy AST
         run: dotnet test tests/Policy.Tests/Policy.Tests.csproj -c Release --no-restore
       - name: Test format rejection
-        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+        run: |
+          python3 -m venv "$RUNNER_TEMP/python-test-venv"
+          "$RUNNER_TEMP/python-test-venv/bin/pip" install -r tests/requirements.txt
+          "$RUNNER_TEMP/python-test-venv/bin/python" -m unittest discover -s tests -p 'test_*.py' -v
       - name: Build extractor without Oodle downloads
         run: cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_cli --no-default-features

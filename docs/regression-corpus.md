@@ -10,9 +10,13 @@ See [all runner flags](inputs.md#regression-runner) and the
 [manual controlled release checklist](releases.md); no run authorizes publication.
 
 Requires Linux, Python 3.11+, .NET 10, and the pinned UAssetAPI submodule.
+Component suites require the pinned test-only schema/YAML dependencies; production
+Python remains standard-library-only.
 
 ```sh
-python3 scripts/regression_corpus.py --output /tmp/opencode/new-corpus-run --components
+python3 -m venv .venv
+.venv/bin/pip install -r tests/requirements.txt
+.venv/bin/python scripts/regression_corpus.py --output /tmp/opencode/new-corpus-run --components
 ```
 
 For container/Action parity, build the current checkout locally. Run Docker suites
@@ -20,13 +24,13 @@ serially: existing tests compare daemon-wide owned container names.
 
 ```sh
 docker build -t ue-pak-corpus:local .
-python3 scripts/regression_corpus.py --output /tmp/opencode/new-container-corpus --docker-image ue-pak-corpus:local --components
+.venv/bin/python scripts/regression_corpus.py --output /tmp/opencode/new-container-corpus --docker-image ue-pak-corpus:local --components
 ```
 
 The stronger local release check requires existing authorized cooked evidence:
 
 ```sh
-python3 scripts/regression_corpus.py --release --output /tmp/opencode/new-release-corpus --docker-image ue-pak-corpus:local --owned-evidence /path/to/authorized-owned-evidence --components
+.venv/bin/python scripts/regression_corpus.py --release --output /tmp/opencode/new-release-corpus --docker-image ue-pak-corpus:local --owned-evidence /path/to/authorized-owned-evidence --components
 ```
 
 `--release` requires all three options. `--owned-evidence` always requires a
@@ -97,7 +101,7 @@ a secret or an argv value. See [policy input](policy-input.md).
 
 - Output must be new, external and mode 0700. Keep it private: intentional verbose
   logs contain policy text. CI uploads no generated artifacts.
-- Per-command deadlines: 30 seconds normally, 180 for builds/tests, 1200 for the
+- Per-command deadlines: 30 seconds normally, 180 for builds/tests, 2400 for the
   serial Python component suite. Streamed stdout/stderr cap: 32 MiB combined.
   Aggregate output cap: 64 MiB checked after commands. No core dumps. Cancellation
   signals the process group, allows 15 seconds for owned-container cleanup, then

@@ -82,6 +82,12 @@ Host data scans require `--data-context NEW_PRIVATE_FILE`, also available as an
 Action input. This mode-0600 artifact binds exact report bytes, engine, asserted
 build, roots, precedence and private data-rule/original-baseline digests. Keep it
 private. It is an operator-wrapper receipt, not an authentication mechanism.
+An operator's explicit `--moderator-detail` also permits bounded invocation rule
+IDs in the private report; receipt validation uses that explicit profile and still
+validates the entire closed report. Default scans, the Action and moderation
+handoff retain the default profile and reject detailed payloads. The Action has
+no detail input. Do not submit a detailed report to the default moderation path
+or publish it as feedback.
 
 For moderation, insert this artifact as `data-context` in the trusted scan-context
 object, alongside the ordinary `report-context`. Supply exact dependencies with
