@@ -21,6 +21,7 @@ try
     using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(root, "inspection.json")));
     var report = manifest.RootElement;
     var calls = ImmutableArray.CreateBuilder<InvocationFact>();
+    var dispatches = new List<IndirectDispatch>();
     var gaps = new HashSet<CoverageGap>();
     if (report.GetProperty("ingestion_status").GetString() != "validated") gaps.Add(CoverageGap.IncompleteExtraction);
     var records = report.GetProperty("records").EnumerateArray().ToArray();
@@ -79,6 +80,7 @@ try
             var id = record.GetProperty("id").GetString()!;
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
+            dispatches.AddRange(extraction.Analysis.Dispatches ?? []);
             foreach (var gap in extraction.Analysis.CoverageGaps) gaps.Add(gap);
             var classTargets = asset.Exports.Select(e => TargetResolver.ResolveIdentity(asset, e.ClassIndex, logical)).ToArray();
             var classNames = classTargets.Where(c => c is not null).Select(c => c!.Function)
@@ -123,7 +125,7 @@ try
             r.TryGetProperty("virtual_path", out _));
     }).ToImmutableArray();
     var facts = new FactsDocument(1, pakHash, "4.25", "container-v1",
-        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray()),
+        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray()),
         new InspectionEvidence(report.GetProperty("ingestion_status").GetString()!,
             report.GetProperty("diagnostic").GetString()!, evidence));
     Console.OpenStandardOutput().Write(FactsCodec.Write(facts));

@@ -23,8 +23,9 @@ host output directory. Replace `TBL/Content` with the actual virtual mount/index
 prefix for your input; there is no built-in game namespace. Only one content-root
 mapping is supported. Unknown roots become incomplete, not invented identities.
 `--mapping /approved/owned.usmap` supplies one optional, bounded property mapping.
-Encrypted paks and keys, other dependency bundles, indirect-call analysis (#8),
+Encrypted paks and keys, other dependency bundles, complete indirect resolution (#8),
 transitive packages (#9), and default/configuration effects (#10) are unsupported.
+[Possible indirect evidence](indirect-dispatch.md) stays explicitly incomplete.
 
 Optional trusted [content-policy flags](content-policy.md) restrict virtual paths
 and parsed export classes and handle protected-path replacement candidates.

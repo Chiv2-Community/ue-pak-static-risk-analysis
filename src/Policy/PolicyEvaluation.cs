@@ -10,10 +10,12 @@ public sealed record InvocationFinding(InvocationLocation Location, ImmutableArr
     public bool IsForbidden => Rules.Any(rule => rule.Effect == RuleEffect.Forbid);
 }
 public sealed record RuleUncertainty(InvocationLocation Location, string RuleId, ImmutableArray<UncertaintyReason> Reasons);
+public sealed record PossibleDispatchFinding(InvocationLocation Origin, ImmutableArray<RuleMatch> Rules);
 public sealed record PolicyEvaluation(
     ImmutableArray<InvocationFinding> Findings,
     ImmutableArray<RuleUncertainty> Uncertainties,
-    ImmutableArray<CoverageGap> CoverageGaps)
+    ImmutableArray<CoverageGap> CoverageGaps,
+    ImmutableArray<PossibleDispatchFinding> PossibleDispatches = default)
 {
     public bool IsIncomplete => !Uncertainties.IsEmpty || !CoverageGaps.IsEmpty;
     public bool HasForbiddenFindings => Findings.Any(finding => finding.IsForbidden);

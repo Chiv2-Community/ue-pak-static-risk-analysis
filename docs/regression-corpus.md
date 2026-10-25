@@ -45,7 +45,7 @@ producer output. There is no baseline-update mode.
 | --- | --- | --- |
 | Synthetic `Calls` | Native VM 0; outer/nested 15/24; different-owner same-name nonfinding 35; local constant/dynamic 45/56 | `tests/Corpus.Generate/Program.cs` |
 | Synthetic `Map.umap` | Native VM 0; extension/routing only, not an engine Level Blueprint | Same generator |
-| Synthetic `Unresolved` | Earlier call retained; virtual VM 10 unresolved | Same generator |
+| Synthetic `Unresolved` | Earlier call retained; virtual VM 10 remains unresolved; separate possible `DynamicDispatch` forbid | Same generator |
 | Synthetic `Unsupported` | Earlier call retained; lossy ANSI string rejects later root/offset evidence | Same generator |
 | Aggregate policy | 10 calls, 6 forbidden, 1 flagged, 7 affected; all three global gaps and evaluation uncertainty | `fixtures/corpus/policy.yaml` |
 | Hostile archives | 16 seeded truncations, traversal, case collision, expansion bomb rejected; valid control accepted | Runner and existing pak builder |
@@ -67,8 +67,9 @@ not engine-cooked**, even when a synthetic package uses the `.umap` extension.
 
 ## Regression, parity and privacy
 
-- Two mutations start from an actual validated CLI report: remove a sensitive
-  finding and adjust counts; suppress `unsupported-parsing`. Both remain
+- Three mutations start from an actual validated CLI report: remove a sensitive
+  finding and adjust counts; suppress `unsupported-parsing`; remove possible
+  dispatch evidence. All remain
   schema-valid and must fail the independent expectation checker.
 - All eight gate combinations must preserve report evidence. File/environment
   sources and error/warn/info/verbose must produce identical reports. Malformed
@@ -96,7 +97,7 @@ a secret or an argv value. See [policy input](policy-input.md).
 
 - Output must be new, external and mode 0700. Keep it private: intentional verbose
   logs contain policy text. CI uploads no generated artifacts.
-- Per-command deadlines: 30 seconds normally, 180 for builds/tests, 900 for the
+- Per-command deadlines: 30 seconds normally, 180 for builds/tests, 1200 for the
   serial Python component suite. Streamed stdout/stderr cap: 32 MiB combined.
   Aggregate output cap: 64 MiB checked after commands. No core dumps. Cancellation
   signals the process group, allows 15 seconds for owned-container cleanup, then
@@ -127,7 +128,7 @@ For each pinned dependency upgrade:
 3. Review every identity, offset, argument, diagnostic, count and hash change.
    Compare serialized bytes/writer sizes and authorized engine bytecode/reflection;
    UAssetGUI/FModel or Kismet Analyzer can help. Decompiled output is not an oracle.
-4. Commit justified source/oracle changes with review evidence; rerun both removal
+4. Commit justified source/oracle changes with review evidence; rerun all removal
    mutations and full parity/privacy checks. Hash-only updates do not prove correctness.
 
 Source, policy and expectations are original test material. Generated packages,

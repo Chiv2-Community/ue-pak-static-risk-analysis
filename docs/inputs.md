@@ -93,6 +93,8 @@ allowlists, policy revision or moderator-detail input exists.
 See [Action outputs and failures](action.md#outputs-and-failures). Reports remain
 authoritative when arrays are omitted. The Action source pin is a full reviewed
 commit; remote private use is blocked pending named-consumer authorization/test.
+Indirect candidates appear only in the full report's optional `possible-dispatches`,
+not direct invocation arrays/counts. No new input, YAML predicate or gate is added.
 
 ## Environment policy source
 

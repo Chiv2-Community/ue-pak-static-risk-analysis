@@ -34,7 +34,7 @@ if (args[0] == "generate")
         };
         asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "BP_Corpus_C"),
             OuterIndex = new(0), ClassIndex = new(-6), Data = [], Extras = [] });
-        AddFunction(asset, "Local", []);
+        AddFunction(asset, name == "Unresolved" ? "DynamicDispatch" : "Local", []);
         ((FunctionExport)asset.Exports[1]).LoadedProperties = [new FGenericProperty {
             Name = new(asset, "Value"), SerializedType = new(asset, "IntProperty"),
             RepNotifyFunc = new(asset, "None"), ElementSize = 4, ArrayDim = (EArrayDim)1,
@@ -45,6 +45,7 @@ if (args[0] == "generate")
     return 0;
 }
 var calls = ImmutableArray.CreateBuilder<InvocationFact>();
+var dispatches = new List<IndirectDispatch>();
 var gaps = new HashSet<CoverageGap>();
 foreach (var path in Directory.GetFiles(root).Where(p => p.EndsWith(".uasset") || p.EndsWith(".umap")).Order())
 {
@@ -52,10 +53,11 @@ foreach (var path in Directory.GetFiles(root).Where(p => p.EndsWith(".uasset") |
         "/Game/" + Path.GetFileNameWithoutExtension(path), path);
     var extracted = InvocationExtractor.Read(input);
     calls.AddRange(extracted.Analysis.Invocations);
+    dispatches.AddRange(extracted.Analysis.Dispatches ?? []);
     gaps.UnionWith(extracted.Analysis.CoverageGaps);
 }
 Console.OpenStandardOutput().Write(FactsCodec.Write(new FactsDocument(1, new string('a', 64), "4.25", "synthetic-corpus-v1", [],
-    new(calls.ToImmutable(), gaps.Order().ToImmutableArray()))));
+    new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray()))));
 return 0;
 
 static UAsset Asset()

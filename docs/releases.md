@@ -95,7 +95,7 @@ actual output hashes/digests and inventory for each build even from the same sou
 
    Output must be new, external and private. `--release` is a test-strength flag,
    **not publication approval**. Require completed receipt, no unintended skips,
-   all component suites, full report parity/privacy and both removal mutations.
+   all component suites, full report parity/privacy and all removal mutations.
    Preserve exact commands/log hashes and owned receipt/verifier identities.
    Review every changed bytecode offset, identity, argument, coverage, finding,
    count and expectation before accepting it; never auto-update the oracle.
@@ -137,7 +137,9 @@ those completed components do not remove the gates below.
 
 - #2: exact game/Windows producer coverage and broader redistribution rights.
 - #7: authorized exact-build source/header/reflection and reviewed native summaries.
-- #8–10: indirect, transitive and data/default effects remain unshipped.
+- #8: partial open-world indirect evidence only; exhaustive/context-linked callback
+  and exact-build native/wrapper coverage remain open ([scope](indirect-dispatch.md)).
+- #9–10: transitive and data/default effects remain unshipped.
 - #13: owner-authorized named external private Action consumer and access test.
 - #18: owner publication/version/destination/audience approval, selected artifact
   rights review and verified publication identities. No approval is supplied.

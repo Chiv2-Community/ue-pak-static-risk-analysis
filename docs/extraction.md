@@ -40,11 +40,14 @@ control characters. Invalid caller identities/limits throw fixed setup errors.
   Imported owner names are symbolic identities, not proofs about external code.
   Multicast dispatch is checked before its `EX_FinalFunction` base type; its
   signature index is never treated as the eventual direct target. Virtual and
-  local-virtual calls retain names but stay unresolved.
+   local-virtual calls retain names but stay unresolved. Additive
+   [possible-dispatch evidence](indirect-dispatch.md) keeps bounded candidates
+   separate from these original invocation facts.
 - Context receivers retain object/interface opcode and available package-index or
   name evidence. Context calls and their nested argument calls are both visited.
   Bind/instance/add/remove/clear delegate operations produce unresolved-behavior
-  coverage rather than invented calls.
+   coverage rather than invented calls; additive evidence retains binding names,
+   possible targets and real mutation origins without fabricating invocations.
 - Local signature metadata uses serialized `LoadedProperties` order, selecting
   `CPF_Parm` and excluding `CPF_ReturnParm`. Legacy `PropertyExport`/`UProperty`
   child/next chains are bounded, ownership-checked, and cycle-checked. Duplicate
@@ -57,7 +60,7 @@ control characters. Invalid caller identities/limits throw fixed setup errors.
 - FName, byte/enum-like values, floats, object references, and other unsupported
   constant types remain `ArgumentValue.Dynamic` with the fixed reason
   `unsupported-constant-type` and source opcode. They are not coerced to policy
-  strings/integers. No shared policy ADT variants or evaluator semantics changed.
+   strings/integers. Direct invocation ADT/evaluator semantics are unchanged.
 - Policy-unrepresentable owner/function identities remain structured extraction
   evidence, but the policy target is unresolved with coverage. More than 256 named
   arguments uses unavailable policy metadata with coverage. Positional evidence

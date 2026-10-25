@@ -62,6 +62,10 @@ public static class InvocationExtractor
         var evidenceBudget = 0;
         var metadataBudget = 0;
         var signatures = new Dictionary<int, (List<string>? Names, string? Error)>();
+        IndirectDispatchResolver? indirect = null;
+        try { indirect = new(asset, input, limits); }
+        catch (Exception error) when (error is not OutOfMemoryException) { diagnostics.Add(new("indirect-analysis-failed")); }
+        var dispatches = new List<IndirectDispatch>();
         for (var i = 0; i < Math.Min(asset.Exports.Count, limits.MaxExports); i++)
         {
             var export = asset.Exports[i];
@@ -109,6 +113,17 @@ public static class InvocationExtractor
                                 throw new ExtractionFailure("visitor-sequence-mismatch");
                             var occurrence = expected[cursor++];
                             visited++;
+                            try
+                            {
+                                var dispatch = indirect?.Inspect(identity, node, position, occurrence.Receivers);
+                                if (dispatch is not null)
+                                {
+                                    if (dispatches.Count >= PolicyEvaluator.MaxInvocations) local.Add(new("indirect-dispatch-limit", index, position));
+                                    else dispatches.Add(dispatch);
+                                    local.Add(new("indirect-dispatch-incomplete", index, position));
+                                }
+                            }
+                            catch (Exception error) when (error is not OutOfMemoryException) { local.Add(new("indirect-analysis-failed", index, position)); }
                             Extract(asset, input, identity, node, position, occurrence.Receivers, calls, local, limits,
                                 ref evidenceBudget, ref metadataBudget, signatures);
                             // The pinned upstream IntConstByte lacks its one-byte operand in Visit.
@@ -127,15 +142,16 @@ public static class InvocationExtractor
             }
             functions.Add(new(identity, local.Count == 0, native, visited, local.ToImmutableArray()));
         }
-        return Report(input, calls, functions, diagnostics, asset.Exports.Count, Math.Min(asset.Exports.Count, limits.MaxExports));
+        return Report(input, calls, functions, diagnostics, asset.Exports.Count, Math.Min(asset.Exports.Count, limits.MaxExports), dispatches);
     }
 
     private static ExtractionReport Report(PackageInput input, List<ExtractedInvocation> calls,
-        List<FunctionCoverage> functions, List<ExtractionDiagnostic> diagnostics, int exports = 0, int inspectedExports = 0)
+        List<FunctionCoverage> functions, List<ExtractionDiagnostic> diagnostics, int exports = 0, int inspectedExports = 0,
+        List<IndirectDispatch>? dispatches = null)
     {
         var all = diagnostics.Concat(functions.SelectMany(f => f.Diagnostics)).ToArray();
         var gaps = new List<CoverageGap>();
-        if (all.Any(d => d.Code is "unresolved-virtual-target" or "unresolved-delegate-behavior" or "unresolved-direct-target"))
+        if (all.Any(d => d.Code is "unresolved-virtual-target" or "unresolved-delegate-behavior" or "unresolved-direct-target" or "indirect-dispatch-incomplete" or "indirect-analysis-failed" or "indirect-dispatch-limit"))
             gaps.Add(CoverageGap.UnresolvedDispatch);
         if (all.Any(d => d.Code is "package-read-failed" or "unparsed-bytecode" or "raw-export" or "unsupported-instruction" or "unsupported-primitive-interface-cast" or "unsupported-string-literal-encoding" or "unsupported-unicode-string-literal-encoding" or "embedded-string-terminator"))
             gaps.Add(CoverageGap.UnsupportedParsing);
@@ -144,7 +160,7 @@ public static class InvocationExtractor
         if (all.Any(d => d.Code is not ("imported-signature-unavailable" or "parameter-metadata-unavailable")))
             gaps.Add(CoverageGap.IncompleteExtraction);
         return new(input, exports, inspectedExports, calls.ToImmutableArray(), functions.ToImmutableArray(), diagnostics.ToImmutableArray(),
-            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray()));
+            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray(), dispatches is { Count: > 0 } ? dispatches.ToArray() : null));
     }
 
     private static void Extract(UAsset asset, PackageInput input, FunctionIdentity containing,

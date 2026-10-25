@@ -37,6 +37,93 @@ public sealed class ScannerTests : IDisposable
         """;
 
     public ScannerTests() => Directory.CreateDirectory(directory);
+    private static IndirectDispatch Indirect() => new(1, new("/Game/Callback", "Bind", 17), "EX_BindDelegate", "delegate-binding",
+        "Destroy", "unknown", "possible", [new("/Script/Engine.Actor", "Destroy", "imported-function")],
+        ["binding-flow-unresolved", "open-world", "receiver-unavailable"], "kismet-serialized-v1");
+
+    [Fact]
+    public void PossibleCallbackForbidIsVisibleUncertainAndNotCountedAsDirectInvocation()
+    {
+        var facts = Facts(new([], [], [Indirect()]));
+        var bytes = FactsCodec.Write(facts);
+        Assert.Equal(bytes, FactsCodec.Write(FactsCodec.Read(bytes)));
+        var file = Run(Encoding.UTF8.GetString(bytes));
+        var env = Run(Encoding.UTF8.GetString(bytes), environment: true);
+        Assert.Equal(1, file.Exit);
+        Assert.Equal(file.Report, env.Report);
+        Assert.DoesNotContain(Canary, file.Report + file.Log);
+        var report = JsonNode.Parse(file.Report!)!;
+        Assert.Equal("partial", report["status"]!.GetValue<string>());
+        Assert.Equal(0, report["counts"]!["invocations"]!.GetValue<int>());
+        Assert.Equal(0, report["counts"]!["forbidden"]!.GetValue<int>());
+        Assert.Empty(report["forbidden-invocations"]!.AsArray());
+        var possible = Assert.Single(report["possible-dispatches"]!.AsArray())!;
+        Assert.True(possible["possibly-forbidden"]!.GetValue<bool>());
+        Assert.True(possible["possibly-flagged"]!.GetValue<bool>());
+        Assert.Equal(17, possible["evidence"]!["origin"]!["offset"]!.GetValue<int>());
+        var relaxed = Run(Encoding.UTF8.GetString(bytes), extra: ["--fail-on-incomplete", "false"]);
+        Assert.Equal(0, relaxed.Exit); // Existing opt-out remains explicit, not a new forbid gate.
+        Assert.Equal(file.Report, relaxed.Report);
+    }
+
+    [Fact]
+    public void AddingIndirectEvidencePreservesDirectFindingIdsAndCounts()
+    {
+        var original = Run();
+        var added = Run(Encoding.UTF8.GetString(FactsCodec.Write(Facts(new([Fact()], [], [Indirect()])))));
+        var before = JsonNode.Parse(original.Report!)!;
+        var after = JsonNode.Parse(added.Report!)!;
+        foreach (var key in new[] { "counts", "flagged-invocations", "forbidden-invocations" })
+            Assert.True(JsonNode.DeepEquals(before[key], after[key]));
+    }
+
+    [Fact]
+    public void PossibleDispatchReportsCanonicalizeCandidateAndDiagnosticOrder()
+    {
+        var dispatch = Indirect() with { Candidates = [new("/Script/Engine.Other", "Destroy", "local-function"), Indirect().Candidates[0]] };
+        var policy = new PolicyEvaluator(PolicyYaml.Parse(Policy));
+        var facts = Facts(new([], [], [dispatch]));
+        var reversed = Facts(new([], [], [dispatch with { Candidates = dispatch.Candidates.Reverse().ToImmutableArray(), Diagnostics = dispatch.Diagnostics.Reverse().ToImmutableArray() }]));
+        Assert.Equal(JsonSerializer.Serialize(RiskReport.Create(facts, policy.Evaluate(facts.Analysis), false, null), RiskReport.JsonOptions),
+            JsonSerializer.Serialize(RiskReport.Create(reversed, policy.Evaluate(reversed.Analysis), false, null), RiskReport.JsonOptions));
+    }
+
+    [Theory]
+    [InlineData("schema-version", "2")]
+    [InlineData("kind", "0")]
+    [InlineData("kind", "\"Virtual\"")]
+    [InlineData("opcode", "\"EX_FinalFunction\"")]
+    [InlineData("receiver", "\"closed-world\"")]
+    [InlineData("resolution", "\"resolved\"")]
+    [InlineData("source", "\"game-catalog\"")]
+    [InlineData("unknown", "true")]
+    [InlineData("diagnostics", "[]")]
+    [InlineData("diagnostics", "[\"open-world\",\"open-world\"]")]
+    [InlineData("diagnostics", "[\"open-world\",0]")]
+    [InlineData("diagnostics", "[\"open-world\",\"OPEN-WORLD\"]")]
+    public void DispatchEvidenceUsesClosedVersionedBoundedContract(string key, string value)
+    {
+        var node = JsonNode.Parse(FactsCodec.Write(Facts(new([], [], [Indirect()]))))!;
+        node["analysis"]!["dispatches"]![0]![key] = JsonNode.Parse(value);
+        Assert.Throws<FactsException>(() => FactsCodec.Read(Encoding.UTF8.GetBytes(node.ToJsonString())));
+    }
+
+    [Fact]
+    public void DispatchCandidatesAndOriginsHaveStrictIndependentBudgets()
+    {
+        void Reject(params IndirectDispatch[] values) => Assert.Throws<FactsException>(() => FactsCodec.Write(Facts(new([], [], values))));
+        Reject(Indirect(), Indirect());
+        Reject(Indirect() with { Candidates = Enumerable.Range(0, 257).Select(i => new DispatchCandidate("/Script/Engine.Actor", "Function" + i, "local-function")).ToImmutableArray() });
+        Reject(Indirect() with { Candidates = [new("/Script/Engine.Actor", "Destroy", "name-guess")] });
+        Reject(Indirect() with { Candidates = [new("/Script/Engine.Actor", "Destroy\n", "local-function")] });
+        Reject(Indirect() with { Candidates = [Indirect().Candidates[0], Indirect().Candidates[0]] });
+        Reject(Indirect() with { Kind = "timer", Opcode = "EX_FinalFunction", Source = "ue425plus-2d1aae-kismet-timer" });
+        var candidates = Enumerable.Range(0, 256).Select(i => new DispatchCandidate("/Script/Engine.Actor" + i, "Destroy", "local-function")).ToImmutableArray();
+        Reject(Enumerable.Range(0, 40).Select(i => Indirect() with { Origin = new("/Game/Callback", "Bind", i), Candidates = candidates }).ToArray());
+        var node = JsonNode.Parse(FactsCodec.Write(Facts(new([], [], [Indirect()]))))!;
+        node["analysis"]!["dispatches"] = null;
+        Assert.Throws<FactsException>(() => FactsCodec.Read(Encoding.UTF8.GetBytes(node.ToJsonString())));
+    }
     public void Dispose() => Directory.Delete(directory, recursive: true);
     private string FileAt(string name) => Path.Combine(directory, name);
 

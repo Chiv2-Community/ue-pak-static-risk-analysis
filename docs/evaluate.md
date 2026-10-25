@@ -76,6 +76,8 @@ Producer version and dependency kinds are nonempty bounded ASCII identity tokens
 
 Core constructor fields are required. Optional `inspection` carries bounded
 inventory/member hashes and inspection states; it contains no storage paths.
+Optional `analysis.dispatches` adds independently versioned, bounded possible
+target evidence; it never inserts callback invocations or changes YAML v1.
 Closed `kind` tags cover resolved/unresolved
 targets; known/unavailable argument metadata; constant/dynamic/missing values;
 and string/integer/boolean/null literals. Enums are names, never integers. Keys
@@ -127,6 +129,9 @@ dependencies sort by ordinal kind; detail IDs sort ordinally. Reordering facts
 or rules does not alter reports. No timestamps, worker order or source paths
 are emitted. Public locations/targets and argument availability/counts come
 from facts, not policy. Argument values and names are not emitted.
+The optional [possible-dispatches](indirect-dispatch.md) section exposes validated
+callback function-name operands as target evidence, not arbitrary argument literals.
+Its possible effects and open-world diagnostics never count as direct findings.
 
 | Exit | Meaning |
 | --- | --- |
