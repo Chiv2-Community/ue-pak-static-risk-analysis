@@ -1,8 +1,8 @@
 # Shared policy input boundary
 
 `src/PolicyInput` supplies trusted policy transport for the [evaluate CLI](evaluate.md)
-and the [Docker scan wrapper](container.md). Action integration and its workflow
-lifecycle remain pending in #13/#14.
+and the [Docker scan wrapper](container.md). The [Action](action.md) uses the same
+boundary. External private consumer access remains open in #13.
 
 ## API
 
@@ -88,9 +88,9 @@ rules:
 
 The evaluate CLI reads the variable directly. The Docker wrapper forwards the
 existing variable with `--env UE_PAK_POLICY_RULES` to trusted evaluators only,
-never expands YAML into argv or bakes it into an image. Future Action configuration
+never expands YAML into argv or bakes it into an image. Action configuration
 can supply ordinary multiline `env: UE_PAK_POLICY_RULES: |` YAML; no GitHub secret
-is required. See the working [Docker usage](container.md); Action integration is pending.
+is required. See the working [Docker usage](container.md) and [Action guide](action.md).
 
 Environment variables are **not secrets**. GitHub may display them in step setup
 logs; host/container administrators and authorized processes can inspect them.

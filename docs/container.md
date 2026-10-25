@@ -6,6 +6,9 @@ and the local Docker daemon at `/var/run/docker.sock`. Docker access is a
 host-administrator privilege. Use trusted scanner code and a disposable worker.
 There is no uncontained fallback if Docker is unavailable.
 
+See [fresh setup and public-canary examples](operators.md), the
+[complete input table](inputs.md#host-scanner), and [security boundaries](security.md).
+
 ```bash
 git submodule update --init --recursive
 docker build -t ue-pak-static-risk-analysis:dev .

@@ -137,7 +137,8 @@ produce a clean result.
 `PackageReader` and upstream bytecode deserialization can allocate/recurse before
 preflight. Do not expose this in-process API to hostile production inputs.
 Ingestion quotas and externally supervised memory, CPU, filesystem, and process
-containment remain required in #3/#11/#12. Dependency loading, native behavior,
+containment remain required; the [host wrapper](container.md) implements those
+external controls. Dependency loading, native behavior,
 dynamic dispatch, and runtime argument computation remain unknown.
 
 ## Validation and remaining acceptance work
@@ -154,5 +155,7 @@ valid surrogate pairs remain known constants. FString replacement-bearing
 target and parameter names remain unresolved/unavailable.
 Synthetic tests do not establish cooked-editor compatibility or actual engine VM
 offset correctness for every opcode. Engine-cooked nested/event-graph/map/local/
-native/name-collision fixtures and provenance remain issue #2 work. Issue #4's
-fixture acceptance criteria are not complete on this evidence alone.
+native/name-collision fixture breadth and exact-game provenance remain issue #2
+work. #4 is closed following integrated owned/synthetic regression and independent
+review; that does not claim every opcode or game producer is covered. See the
+[completed integrated evidence](regression-corpus.md).

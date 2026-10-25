@@ -7,6 +7,8 @@ policy-bearing job to manufacture facts from untrusted assets.
 
 ## Usage
 
+See the [complete shared CLI input reference](inputs.md#shared-evaluator).
+
 Linux and .NET 10:
 
 ```sh
@@ -30,7 +32,9 @@ source is required, including when an environment variable is empty. The shared
 - Gate values are exactly `true` or `false`; defaults are shown above.
 - Log levels are exactly `error`, `warn`, `info` (default), `verbose`.
 - **Verbose prints the entire supplied policy, including malformed YAML, after
-  a disclosure warning.** PolicyLoader escapes controls and workflow commands.
+  a disclosure warning; anyone with log access can read it.** Ordinary env is
+  not masked; runner setup and administrators can expose it independently.
+  PolicyLoader escapes controls and workflow commands.
   It never puts policy YAML into reports. Other levels never print policy.
 - `--moderator-detail` includes matched rule IDs per effect. Authorize access
   outside this CLI; the switch itself is not authentication. Descriptions,

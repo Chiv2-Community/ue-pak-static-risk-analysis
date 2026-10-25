@@ -2,8 +2,9 @@
 
 ## Stack decision
 
-Use the following stack for the compatibility probe, pending hostile-input
-hardening and broader fixture coverage:
+Use the following stack for the trusted-input compatibility probe. The separate
+[host scanner](container.md) implements bounded ingestion/container isolation;
+this historical probe does not inherit that boundary.
 
 | Component | Evaluated revision | Role |
 | --- | --- | --- |
@@ -100,7 +101,7 @@ does not establish target-game Windows compatibility.
 | Case | Evidence and behavior |
 | --- | --- |
 | V9 legacy pak, Zlib, unencrypted index | Verified on local mod and base-game containers |
-| Plain V9 pak | Accepted by format guard; synthetic round-trip still needed |
+| Plain V9 pak | Accepted by experiment guard; separate bounded scanner has synthetic round-trip/corpus coverage |
 | `.uasset` + `.uexp` | Verified across mod and selected game samples |
 | `.ubulk` | Local mod sidecars extracted and hashed; not decoded |
 | Blueprint event graphs and nested calls | Real mod functions parsed; nested visitor regression tests |
@@ -116,7 +117,7 @@ does not establish target-game Windows compatibility.
 | Unknown/corrupt exports or bytecode | Raw-export, raw-bytecode, visit-failure, or read-failure diagnostics; never silently clean |
 
 `parse-complete` only describes the probe's tracked parsing/resolution gaps.
-`analysis-complete` is always false. No reachability filtering, policy evaluation,
+`analysis-complete` is always false **in this probe**. No reachability filtering, policy evaluation,
 argument analysis, virtual/delegate resolution, transitive analysis, or
 data/default-driven behavior analysis is implemented.
 
@@ -157,7 +158,8 @@ data/default-driven behavior analysis is implemented.
 - Complete the dependency/native redistribution inventory before packaging.
 
 Keep issue #2 open until these gaps have explicit evidence or agreed scope
-adjustments. Issue #3 owns production hostile-input ingestion and containment.
+adjustments. The closed #3 delivery adds bounded ingestion/content settings via
+the [host wrapper](container.md); it does not broaden these fidelity claims.
 
 ## Sources
 

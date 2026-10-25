@@ -3,12 +3,12 @@
 The host `scan` CLI and shared `evaluate`/`validate` CLI accept optional operator
 settings, separate from the closed invocation YAML grammar:
 
-| Flag | Meaning |
-| --- | --- |
-| `--allowed-path PREFIX` | Repeatable allowed virtual namespaces; a nonmatching member is rejected. |
-| `--allowed-class IDENTITY` | Repeatable exact parsed export class identities; a known nonmatching class is rejected. |
-| `--protected-path PREFIX` | Repeatable protected virtual namespaces; matching members are replacement candidates. |
-| `--replacement-policy allow\|review\|reject` | Candidate handling; defaults to `review` when protection is configured. Requires a protected prefix. |
+| Input | Type | Default | Example | Description |
+| --- | --- | --- | --- | --- |
+| `--allowed-path` | repeatable virtual prefix | empty | `Owned/Content` | Nonmatching members rejected. |
+| `--allowed-class` | repeatable exact class identity | empty | `/Script/CoreUObject.Function` | Known nonmatching class rejected. |
+| `--protected-path` | repeatable virtual prefix | empty | `Owned/Content/Base` | Matching members are replacement candidates. |
+| `--replacement-policy` | enum: `allow`, `review`, `reject` | `review` when protection configured | `review` | Requires protected prefix; exactly one setting. |
 
 ```bash
 python3 scripts/scan.py scan --pak /approved/submission.pak \
