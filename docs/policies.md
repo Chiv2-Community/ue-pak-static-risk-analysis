@@ -1,7 +1,8 @@
 # Policy YAML v1
 
-The policy parser and typed model are implemented. **Evaluation, environment
-loading, CLI gates, and the reusable Action are not implemented yet.**
+The policy parser, typed model, and standalone evaluator are implemented.
+**Fact extraction, probe integration, environment loading, CLI gates, and the
+reusable Action are not implemented yet.**
 
 Start with [the illustrative policy](../examples/starter-policy.yaml). It is not
 a complete security policy for any game. Editor integrations can use
@@ -111,10 +112,90 @@ evaluate URLs or claim that a destination is safe.
 
 ## Evaluation boundary
 
-The next evaluator uses `Match`, `NoMatch`, and `Unknown`. In particular,
+`PolicyEvaluator` uses `Match`, `NoMatch`, and `Unknown`. In particular,
 `not Unknown` stays `Unknown`; an unresolved URL cannot become approved through
 negation. All matching rules apply, and a flag cannot cancel a forbid. These are
-the interface contract for issue #6, not behavior implemented by this parser.
+implemented by the evaluator, not by the YAML parser.
+
+| Inputs | `all` | `any` |
+| --- | --- | --- |
+| Match, Match | Match | Match |
+| Match, NoMatch | NoMatch | Match |
+| Match, Unknown | Unknown | Match |
+| NoMatch, NoMatch | NoMatch | NoMatch |
+| NoMatch, Unknown | NoMatch | Unknown |
+| Unknown, Unknown | Unknown | Unknown |
+
+Operand order does not matter. `not` swaps Match/NoMatch and preserves Unknown.
+Decisive operands discard irrelevant uncertainty. A nonmatching target in `all`
+does not become incomplete because another operand has a dynamic argument.
+Known values of different literal kinds produce NoMatch, without coercion.
+String comparisons are ordinal and case-sensitive.
+
+URL matching requires an absolute, well-formed HTTPS URL. Scheme and DNS host
+case are normalized. Only an omitted port or literal `:443` is accepted.
+Credentials (including empty userinfo), trailing host dots, IP literals,
+Unicode authorities, percent-encoded authorities, backslashes, whitespace, and
+control characters are rejected. ASCII/Punycode hosts must match exactly;
+Unicode URLs are not silently IDNA-converted. Subdomains require explicit policy
+entries. Paths, queries, and fragments do not affect host matching. Invalid or
+disallowed known URLs produce NoMatch; dynamic URLs remain Unknown, even under
+negation. Host approval is not proof of destination safety or redirect behavior.
+
+### Normalized invocation contract
+
+`InvocationAnalysis` is the shared boundary for the future issue #4 extractor.
+The compatibility probe does **not** supply it yet. Each `InvocationFact` has:
+
+- `InvocationLocation`: canonical asset identity, containing function identity,
+  and nonnegative bytecode offset. The producer must supply stable identities.
+- `InvocationTarget`: complete `Resolved` owner/function or `Unresolved`.
+  Owner/function matching is exact, ordinal, and case-sensitive.
+- `ArgumentMetadata`: a complete `Known` named-parameter table or `Unavailable`.
+  Names are unique and case-sensitive. Do not invent names from positions.
+- `ArgumentValue`: typed `Constant`, `Dynamic`, or `Missing`. Known null uses
+  `Constant(new PolicyLiteral.Null())`, never a C# null reference. An absent name
+  in a known table means Missing; neither missing nor unavailable metadata means
+  known null. All three unresolved argument states produce distinct fixed reasons.
+
+The producer must mark unsupported parsing, unresolved dispatch that may hide
+invocations, and incomplete extraction in `CoverageGaps`. These global gaps are
+separate from rule-specific uncertainty and do not manufacture findings. An empty
+invocation array is valid only when it honestly represents the producer's coverage.
+The evaluator cannot detect omitted calls or false claims of complete extraction.
+
+All matching rules are retained as ID/effect pairs, sorted by ordinal ID, in one
+finding per location. Locations sort by ordinal asset/function, then offset.
+Equivalent duplicate facts are deduplicated; conflicting facts at one location
+reject the entire analysis. Argument table order is irrelevant. Unknown results
+are separate location/rule records with sorted, fixed `UncertaintyReason` codes;
+they expose no predicate literals, values, descriptions, or parser exception text.
+Rule IDs and locations remain report identifiers, not redacted secrets.
+
+`IsIncomplete` combines rule uncertainty and global coverage gaps.
+`ShouldFail(failOnIncomplete)` fails for any forbid finding, or for incomplete
+analysis when requested. Flags do not fail this gate. Changing the gate does not
+change findings or uncertainties. There is no clean/safe verdict.
+
+### Validation and evaluation limits
+
+The constructor revalidates public ASTs through the existing YAML contract after
+bounded iterative preflight. Nulls, invalid variants, duplicate IDs, empty/default
+arrays, and oversized/deep trees are rejected with fixed `ArgumentException`
+text. Preflight bounds expression/string/literal visits to 8,192, depth to 32,
+individual strings to 4,096 UTF-16 units, and total string units to 256 KiB;
+canonical serialization must also satisfy the parser's stricter byte/node budgets.
+
+Every fact is validated before any rule runs, even if no target would match.
+Invalid input rejects the whole batch with `Invalid invocation analysis.`; callers
+must treat exceptions as evaluation failure, never as an empty result. Limits:
+10,000 facts per batch, 256 arguments per fact, 256 coverage entries, and 4,096
+UTF-16 units per string. Default immutable arrays, null references, malformed
+Unicode, duplicate argument names, invalid target syntax, negative offsets, and
+unknown coverage enum values are rejected. Constant strings may contain controls
+(URL predicates reject them); location identifiers may not. These are evaluator
+budgets, not a parser sandbox or transport resource limit. Evaluation is bounded
+by facts times validated policy size; callers must bound batch count externally.
 
 Defaults, asset replacement, call chains, and capability predicates are not v1
 expression variants. They need versioned extensions and corresponding analysis.
@@ -148,6 +229,10 @@ workflow-command rendering belong to the later transport/logging work.
 ```csharp
 var document = PolicyYaml.Parse(yaml);
 var canonicalYaml = PolicyYaml.Write(document);
+var evaluator = new PolicyEvaluator(document);
+// analysis must come from a trusted normalizer, not the compatibility report.
+PolicyEvaluation result = evaluator.Evaluate(analysis);
+bool gateFailed = result.ShouldFail(failOnIncomplete: true);
 ```
 
 The model uses sealed variants and immutable arrays. YamlDotNet 18.1.0 is pinned
