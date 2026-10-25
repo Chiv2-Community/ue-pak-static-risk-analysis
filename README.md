@@ -20,6 +20,8 @@ dotnet restore tests/CompatibilityProbe.Tests/CompatibilityProbe.Tests.csproj --
 dotnet test tests/CompatibilityProbe.Tests/CompatibilityProbe.Tests.csproj -c Release --no-restore
 dotnet restore tests/Policy.Tests/Policy.Tests.csproj --locked-mode
 dotnet test tests/Policy.Tests/Policy.Tests.csproj -c Release --no-restore
+dotnet restore tests/PolicyInput.Tests/PolicyInput.Tests.csproj --locked-mode
+dotnet test tests/PolicyInput.Tests/PolicyInput.Tests.csproj -c Release --no-restore
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_cli --no-default-features
 ```
@@ -83,6 +85,10 @@ See [the starter example](examples/starter-policy.yaml) and
 [machine-readable structural schema](schemas/policy-v1.schema.json).
 
 ### Planned transport and integration
+
+The Linux [shared policy input boundary](docs/policy-input.md) implements bounded
+file/environment loading and safe verbose rendering. It is not wired into the
+probe, CLI, Docker, or Action; issue #14 remains open pending integration.
 
 The evaluator is not connected to asset extraction or a CLI gate. The planned transport is a
 `policy-rules` file or raw YAML in `UE_PAK_POLICY_RULES`, with exactly one source.
