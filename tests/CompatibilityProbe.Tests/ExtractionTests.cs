@@ -109,6 +109,69 @@ public sealed class ExtractionTests
     }
 
     [Theory]
+    [InlineData("00D8", "\ufffd", false)] // Unpaired high surrogate.
+    [InlineData("00DC", "\ufffd", false)] // Unpaired low surrogate.
+    [InlineData("00D800D8", "\ufffd\ufffd", false)]
+    [InlineData("00DC00D8", "\ufffd\ufffd", false)]
+    [InlineData("00D84100", "\ufffdA", false)]
+    [InlineData("FDFF", "\ufffd", false)] // Genuine U+FFFD is indistinguishable after Read.
+    [InlineData("3DD800DE", "😀", true)]
+    [InlineData("164E4C75", "世界", true)]
+    public void SerializedUnicodeReplacementCannotBecomeTrustedArgument(string hex, string decoded, bool supported)
+    {
+        var asset = Asset();
+        var target = Function(asset, [], "Target");
+        target.LoadedProperties = [Parameter(asset, "Value")];
+        byte[] bytes = [(byte)EExprToken.EX_UnicodeStringConst, .. Convert.FromHexString(hex), 0, 0];
+        using var stream = new MemoryStream(bytes);
+        using var reader = new AssetBinaryReader(stream, asset);
+        var literal = Assert.IsType<EX_UnicodeStringConst>(ExpressionSerializer.ReadExpression(reader));
+        Assert.Equal(decoded, literal.Value);
+        Assert.Equal(bytes.Length, stream.Position);
+        EX_FinalFunction Local(KismetExpression argument) => new() { StackNode = new(2), Parameters = [argument] };
+        Function(asset, [Local(new EX_IntOne()), Local(literal), Local(new EX_IntZero())]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        var evaluation = new PolicyEvaluator(new PolicyDocument(1, [new("decoded", "Decoded", RuleEffect.Forbid,
+            new MatchExpression.Argument("Value", new ValuePredicate.EqualTo(new PolicyLiteral.String(decoded))))])).Evaluate(report.Analysis);
+        Assert.Equal(supported, report.Complete);
+        Assert.Equal(supported, evaluation.HasForbiddenFindings);
+        Assert.Equal(!supported, evaluation.IsIncomplete);
+        Assert.Equal(supported ? 3 : 1, report.Invocations.Length);
+        Assert.Equal(0, report.Invocations[0].Offset); // Earlier-root evidence survives.
+        if (supported) Assert.Empty(report.Analysis.CoverageGaps);
+        else
+        {
+            Assert.Contains(report.Functions[1].Diagnostics, d => d.Code == "unsupported-unicode-string-literal-encoding");
+            Assert.Contains(CoverageGap.UnsupportedParsing, report.Analysis.CoverageGaps);
+            Assert.Contains(CoverageGap.IncompleteExtraction, report.Analysis.CoverageGaps);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void LossyFStringNamesCannotBecomeKnownTargetsOrParameterNames(bool unicode, bool parameter)
+    {
+        var asset = Asset();
+        byte[] bytes = unicode ? [0xfe, 0xff, 0xff, 0xff, 0, 0xd8, 0, 0] : [2, 0, 0, 0, 0xff, 0];
+        using var stream = new MemoryStream(bytes);
+        using var reader = new AssetBinaryReader(stream, asset);
+        var decoded = reader.ReadFString().Value;
+        Assert.Equal("\ufffd", decoded);
+        var target = Function(asset, [], parameter ? "Target" : decoded);
+        target.LoadedProperties = [Parameter(asset, parameter ? decoded : "Value")];
+        Function(asset, [new EX_FinalFunction { StackNode = new(2), Parameters = [new EX_IntOne()] }]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        var call = Assert.Single(report.Invocations);
+        if (parameter) Assert.IsType<ArgumentMetadata.Unavailable>(call.Fact.Arguments);
+        else Assert.IsType<InvocationTarget.Unresolved>(call.Target);
+        Assert.False(report.Complete);
+        Assert.True(Evaluate(report, new MatchExpression.Argument("Value", new ValuePredicate.EqualTo(new PolicyLiteral.Integer(1)))).IsIncomplete);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void EmbeddedStringTerminatorsRejectSyntheticRootBeforeEmittingCalls(bool unicode)
