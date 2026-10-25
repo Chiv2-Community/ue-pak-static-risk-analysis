@@ -22,8 +22,9 @@ Compatibility and legal-fidelity limits remain tracked in [issue #2](https://git
 
 Start with the [operator guide](docs/operators.md), [CLI/Action input tables](docs/inputs.md),
 [security boundaries](docs/security.md) and [controlled release checklist](docs/releases.md).
-No release/publication or expanded access is approved. Indirect/transitive/data
-effects (#8–10) and native implementation analysis are not shipped; exact
+No release/publication or expanded access is approved. [Partial indirect evidence](docs/indirect-dispatch.md)
+does not close #8; transitive/data effects (#9–10) and native implementation analysis
+are not shipped; exact
 Windows/game fidelity and broader redistribution rights remain open.
 
 ## Build and test

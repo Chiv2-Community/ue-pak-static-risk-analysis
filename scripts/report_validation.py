@@ -135,6 +135,24 @@ def load(data, root):
             require(item["id"] not in by_id or by_id[item["id"]] == item)
             by_id[item["id"]] = item
     require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
+    dispatch_origins = set()
+    candidate_count = 0
+    for dispatch in report.get("possible-dispatches", []):
+        evidence = dispatch["evidence"]
+        origin = tuple(evidence["origin"][key] for key in ("asset", "function", "offset"))
+        require(origin not in dispatch_origins)
+        dispatch_origins.add(origin)
+        require("open-world" in evidence["diagnostics"])
+        require("unresolved-dispatch" in report["coverage"]["gaps"])
+        require(evidence["source"] == ("ue425plus-2d1aae-kismet-timer" if evidence["kind"] == "timer" else "kismet-serialized-v1"))
+        if evidence["kind"] == "timer":
+            require("native-build-unverified" in evidence["diagnostics"])
+        require(len({(c["owner"], c["function"]) for c in evidence["candidates"]}) == len(evidence["candidates"]))
+        require(all(evidence["function-name"] is not None and c["function"].lower() == evidence["function-name"].lower()
+                    for c in evidence["candidates"]))
+        candidate_count += len(evidence["candidates"])
+        require(candidate_count <= 10000)
+        require(bool(evidence["candidates"]) or not (dispatch["possibly-flagged"] or dispatch["possibly-forbidden"]))
     incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
                       or report.get("content-policy", {}).get("incomplete", False))
     require(report["analysis-complete"] == (not incomplete))

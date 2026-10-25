@@ -160,6 +160,7 @@ public static class FactsCodec
         while (reader.Read())
         {
             if (++nodes > MaxNodes) throw new FactsException();
+            if (property == "dispatches" && reader.TokenType != JsonTokenType.StartArray) throw new FactsException();
             if (reader.TokenType is JsonTokenType.PropertyName or JsonTokenType.String)
             {
                 if (reader.ValueSpan.Length > PolicyEvaluator.MaxFactStringLength * 6) throw new FactsException();
@@ -178,7 +179,7 @@ public static class FactsCodec
                 throw new FactsException();
             if (reader.TokenType == JsonTokenType.StartObject) frames.Push(new Frame(new HashSet<string>(StringComparer.Ordinal), 0));
             if (reader.TokenType == JsonTokenType.StartArray)
-                frames.Push(new Frame(null, property is "arguments" or "coverage-gaps" or "dependencies" ? 256 : PolicyEvaluator.MaxInvocations));
+                frames.Push(new Frame(null, property is "arguments" or "coverage-gaps" or "dependencies" or "candidates" ? 256 : property == "diagnostics" ? 16 : PolicyEvaluator.MaxInvocations));
             property = null;
         }
     }

@@ -38,6 +38,11 @@
     "forbidden-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
     "diagnostics": {"type": "array", "maxItems": 1, "items": {"enum": ["invalid-configuration", "analysis-failed", "parser-failed", "parser-output-limit", "wall-timeout", "cancelled", "container-unavailable", "input-failed"]}},
     "inspection": {"$ref": "facts-v1.schema.json#/$defs/inspection"},
+    "possible-dispatches": {"type": "array", "maxItems": 10000, "items": {
+      "type": "object", "additionalProperties": false, "required": ["evidence", "possibly-flagged", "possibly-forbidden"],
+      "properties": {"evidence": {"$ref": "facts-v1.schema.json#/$defs/dispatch"},
+        "possibly-flagged": {"type": "boolean"}, "possibly-forbidden": {"type": "boolean"}}
+    }},
     "content-policy": {
       "type": "object", "additionalProperties": false,
       "required": ["schema-version", "decision", "incomplete", "findings"],

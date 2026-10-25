@@ -1,5 +1,14 @@
 schema-version: 1
 rules:
+  - id: corpus-possible-dispatch
+    description: corpus-policy-canary possible callback
+    effect: forbid
+    match:
+      kind: invocation
+      target:
+        kind: exact
+        owner: /Game/Unresolved.BP_Corpus_C
+        function: DynamicDispatch
   - id: corpus-policy-canary
     description: 'corpus-policy-canary ::warning:: ##[error] $() `not executed`'
     effect: forbid

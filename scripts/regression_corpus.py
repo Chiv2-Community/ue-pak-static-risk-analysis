@@ -62,6 +62,10 @@ def facts_oracle(facts, expected):
             value = {"kind": "constant", "value": {"kind": "integer", "value": 1}} if offset == 45 else {"kind": "dynamic"}
             require(arguments["arguments"] == [{"name": "Value", "value": value}], "constant/dynamic argument mismatch")
     require(facts["analysis"]["coverage-gaps"] == expected["coverage"]["gaps"], "normalized coverage mismatch")
+    dispatch = facts["analysis"]["dispatches"]
+    require(len(dispatch) == 1, "normalized indirect evidence count")
+    require(dispatch[0]["origin"] == location_for("Unresolved", 10), "normalized indirect origin")
+    require(dispatch[0]["candidates"] == [{"owner": "/Game/Unresolved.BP_Corpus_C", "function": "DynamicDispatch", "provenance": "local-function"}], "normalized indirect candidates")
 
 
 def oracle(report, expected, pak_hash):
@@ -80,6 +84,11 @@ def oracle(report, expected, pak_hash):
                              "argument-metadata": metadata, "known-argument-count": count})
         findings.sort(key=lambda f: (f["location"]["asset"], f["location"]["function"], f["location"]["offset"]))
         require(report[kind + "-invocations"] == findings, "expectation mismatch: " + kind)
+    possible = report.get("possible-dispatches", [])
+    require(len(possible) == 1, "possible dispatch lost")
+    require(possible[0]["evidence"]["origin"] == location_for("Unresolved", 10), "possible dispatch origin changed")
+    require(possible[0]["possibly-forbidden"] and not possible[0]["possibly-flagged"], "possible policy match lost or made definite")
+    require(possible[0]["evidence"]["resolution"] == "possible" and "open-world" in possible[0]["evidence"]["diagnostics"], "indirect uncertainty lost")
 
 
 def mutation_gate(report, expected, pak_hash):
@@ -91,7 +100,10 @@ def mutation_gate(report, expected, pak_hash):
     missing["counts"]["affected-union"] -= 1
     suppressed = copy.deepcopy(report)
     suppressed["coverage"]["gaps"].remove("unsupported-parsing")
-    for name, mutant in (("removed-sensitive-finding", missing), ("suppressed-coverage-diagnostic", suppressed)):
+    indirect = copy.deepcopy(report)
+    indirect.pop("possible-dispatches")
+    for name, mutant in (("removed-sensitive-finding", missing), ("suppressed-coverage-diagnostic", suppressed),
+                         ("removed-possible-dispatch", indirect)):
         report_validation.load(json.dumps(mutant).encode(), ROOT)
         try:
             oracle(mutant, expected, pak_hash)
@@ -281,7 +293,7 @@ def components(run, image=None, evidence=None):
         env["OWNED_FIXTURE_EVIDENCE"] = str(evidence)
     # One serial suite: component Docker ownership assertions cannot race each other.
     run.command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
-                env=env, timeout=900)
+                env=env, timeout=1200)
 
 
 def main():
@@ -352,7 +364,7 @@ def main():
         if args.components:
             components(run, args.docker_image, args.owned_evidence)
         completed = True
-        print("PASS: integrated synthetic corpus; both removal mutations rejected; Docker=" + str(bool(args.docker_image))
+        print("PASS: integrated synthetic corpus; three removal mutations rejected; Docker=" + str(bool(args.docker_image))
               + "; external owned cook=" + str(bool(args.owned_evidence)))
         return 0
     finally:

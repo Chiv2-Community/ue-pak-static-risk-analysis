@@ -38,7 +38,10 @@ Bulk payloads are not decoded or certified. Signatures identify possible native,
 script/config or unknown content, not harmlessness. ClassIndex identities are
 recorded symbols, not an authenticated hierarchy or native capability catalog.
 
-Not shipped: indirect/virtual/delegate resolution (#8), transitive dependency or
+Partial [open-world indirect evidence](indirect-dispatch.md) ships for #8, not
+exhaustive resolution or callback execution proof. Source-scoped engine timer
+hypotheses explicitly retain unverified game-build applicability.
+Not shipped: complete indirect resolution (#8), transitive dependency or
 call-chain behavior (#9), data/default/configuration-driven effects (#10), native
 implementation analysis/nativized behavior, reachability, exploit detection,
 full serialization coverage, runtime computed arguments, or complete reconstruction.
@@ -64,7 +67,8 @@ reflection plus reviewed native implementation summaries. Record build/source
 identities, symbol owners, parameter types, inheritance evidence, reviewer and
 uncertainty for each entry. Verify against authorized bytes/reflection; do not
 invent game APIs from names, parser classes, pseudocode or this starter policy.
-No catalog loader, capability predicate or native summary evaluator is shipped.
+No exact-game catalog loader, capability predicate or authoritative native summary
+evaluator is shipped; the narrow timer hypothesis remains build-unverified.
 
 Treat a catalog, native summary, parser, dependency, game build, invocation policy
 or content-setting change as new analysis context. Assign a new opaque policy

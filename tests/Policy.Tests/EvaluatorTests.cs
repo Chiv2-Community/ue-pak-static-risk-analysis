@@ -26,6 +26,32 @@ public sealed class EvaluatorTests
         _ => Argument()
     };
 
+    [Theory]
+    [InlineData("exact", true)]
+    [InlineData("other", false)]
+    [InlineData("argument", true)]
+    [InlineData("not", true)]
+    [InlineData("decisive", false)]
+    public void IndirectCandidatesArePossibleNotDefinitiveEvenForMatchingForbid(string mode, bool possible)
+    {
+        MatchExpression expression = mode switch
+        {
+            "exact" => Target(), "other" => Target("Other"), "argument" => Argument(),
+            "not" => new MatchExpression.Not(Target("Other")),
+            _ => new MatchExpression.All([Target("Other"), Argument()])
+        };
+        var dispatch = new IndirectDispatch(1, Fact.Location, "EX_InstanceDelegate", "delegate-binding", "LaunchURL", "self", "possible",
+            [new(Owner, "LaunchURL", "local-function")], ["open-world", "binding-flow-unresolved"], "kismet-serialized-v1");
+        var result = new PolicyEvaluator(Document(Rule(expression))).Evaluate(new([], [], [dispatch]));
+        Assert.Empty(result.Findings);
+        Assert.False(result.HasForbiddenFindings);
+        Assert.True(result.IsIncomplete);
+        Assert.Contains(CoverageGap.UnresolvedDispatch, result.CoverageGaps);
+        Assert.Equal(possible, !Assert.Single(result.PossibleDispatches).Rules.IsEmpty);
+        Assert.True(result.ShouldFail(failOnIncomplete: true));
+        Assert.False(result.ShouldFail(failOnIncomplete: false));
+    }
+
     public static IEnumerable<object[]> TruthTables()
     {
         foreach (var left in Enum.GetValues<MatchResult>())

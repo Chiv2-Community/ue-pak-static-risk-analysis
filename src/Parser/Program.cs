@@ -21,6 +21,8 @@ try
     using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(root, "inspection.json")));
     var report = manifest.RootElement;
     var calls = ImmutableArray.CreateBuilder<InvocationFact>();
+    var dispatches = new List<IndirectDispatch>();
+    var candidateCount = 0;
     var gaps = new HashSet<CoverageGap>();
     if (report.GetProperty("ingestion_status").GetString() != "validated") gaps.Add(CoverageGap.IncompleteExtraction);
     var records = report.GetProperty("records").EnumerateArray().ToArray();
@@ -76,9 +78,31 @@ try
             // Bulk payload inspection is not implemented; it must not become clean.
             var input = new PackageInput("submission", path, logical, Payload(record));
             var extraction = InvocationExtractor.Inspect(asset, input);
+            PolicyEvaluator.Validate(extraction.Analysis);
             var id = record.GetProperty("id").GetString()!;
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
+            foreach (var dispatch in extraction.Analysis.Dispatches ?? [])
+            {
+                if (dispatches.Count == PolicyEvaluator.MaxInvocations)
+                {
+                    gaps.UnionWith([CoverageGap.UnresolvedDispatch, CoverageGap.IncompleteExtraction]);
+                    break;
+                }
+                var remaining = PolicyEvaluator.MaxInvocations - candidateCount;
+                var retained = dispatch;
+                if (dispatch.Candidates.Length > remaining)
+                {
+                    retained = dispatch with
+                    {
+                        Candidates = dispatch.Candidates.Take(remaining).ToImmutableArray(),
+                        Diagnostics = dispatch.Diagnostics.Append("target-expansion-limit").Distinct().Order(StringComparer.Ordinal).ToImmutableArray()
+                    };
+                    gaps.UnionWith([CoverageGap.UnresolvedDispatch, CoverageGap.IncompleteExtraction]);
+                }
+                dispatches.Add(retained);
+                candidateCount += retained.Candidates.Length;
+            }
             foreach (var gap in extraction.Analysis.CoverageGaps) gaps.Add(gap);
             var classTargets = asset.Exports.Select(e => TargetResolver.ResolveIdentity(asset, e.ClassIndex, logical)).ToArray();
             var classNames = classTargets.Where(c => c is not null).Select(c => c!.Function)
@@ -123,10 +147,39 @@ try
             r.TryGetProperty("virtual_path", out _));
     }).ToImmutableArray();
     var facts = new FactsDocument(1, pakHash, "4.25", "container-v1",
-        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray()),
+        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray()),
         new InspectionEvidence(report.GetProperty("ingestion_status").GetString()!,
             report.GetProperty("diagnostic").GetString()!, evidence));
-    Console.OpenStandardOutput().Write(FactsCodec.Write(facts));
+    // Indirect evidence is additive: transport exhaustion must not erase direct facts
+    // or inventory. Validate before trimming so malformed evidence cannot be hidden.
+    PolicyEvaluator.Validate(facts.Analysis);
+    byte[] bytes;
+    try { bytes = FactsCodec.Write(facts); }
+    catch (FactsException) when (dispatches.Count > 0)
+    {
+        var partial = facts with { Analysis = facts.Analysis with
+        {
+            Dispatches = null,
+            CoverageGaps = facts.Analysis.CoverageGaps.Append(CoverageGap.UnresolvedDispatch)
+                .Append(CoverageGap.IncompleteExtraction).Distinct().Order().ToImmutableArray()
+        }};
+        bytes = FactsCodec.Write(partial); // Mandatory facts must fit independently.
+        var low = 0;
+        var high = dispatches.Count;
+        while (low < high)
+        {
+            var count = low + (high - low + 1) / 2;
+            try
+            {
+                var candidate = FactsCodec.Write(partial with { Analysis = partial.Analysis with
+                    { Dispatches = dispatches.Take(count).ToArray() } });
+                bytes = candidate;
+                low = count;
+            }
+            catch (FactsException) { high = count - 1; }
+        }
+    }
+    Console.OpenStandardOutput().Write(bytes);
     return 0;
 }
 catch (Exception) { return 3; }

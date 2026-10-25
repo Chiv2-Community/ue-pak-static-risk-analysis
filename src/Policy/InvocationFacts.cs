@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 namespace PakRisk.Policy;
 
@@ -30,4 +31,10 @@ public abstract record ArgumentValue
 }
 
 public enum CoverageGap { UnsupportedParsing, UnresolvedDispatch, IncompleteExtraction }
-public sealed record InvocationAnalysis(ImmutableArray<InvocationFact> Invocations, ImmutableArray<CoverageGap> CoverageGaps);
+public sealed record DispatchCandidate(string Owner, string Function, string Provenance);
+// Origins are actual instructions, including bindings; candidates are not invocation occurrences.
+public sealed record IndirectDispatch(int SchemaVersion, InvocationLocation Origin, string Opcode, string Kind,
+    string? FunctionName, string Receiver, string Resolution, ImmutableArray<DispatchCandidate> Candidates,
+    ImmutableArray<string> Diagnostics, string Source);
+public sealed record InvocationAnalysis(ImmutableArray<InvocationFact> Invocations, ImmutableArray<CoverageGap> CoverageGaps,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IndirectDispatch[]? Dispatches = null);

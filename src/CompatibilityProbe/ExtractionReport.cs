@@ -30,12 +30,12 @@ public sealed record ExtractionReport(PackageInput Input, int ExportCount, int I
 }
 
 public sealed record ExtractionLimits(int MaxExports = 100_000, int MaxOccurrences = 100_000,
-    int MaxDepth = 128, int MaxArray = 10_000, int MaxLiteral = 4096)
+    int MaxDepth = 128, int MaxArray = 10_000, int MaxLiteral = 4096, int MaxTargets = 256)
 {
     internal void Validate()
     {
         if (MaxExports is < 1 or > 100_000 || MaxOccurrences is < 1 or > 100_000 ||
-            MaxDepth is < 1 or > 128 || MaxArray is < 1 or > 10_000 || MaxLiteral is < 1 or > 4096)
+            MaxDepth is < 1 or > 128 || MaxArray is < 1 or > 10_000 || MaxLiteral is < 1 or > 4096 || MaxTargets is < 1 or > 256)
             throw new ArgumentOutOfRangeException(nameof(ExtractionLimits));
     }
 }

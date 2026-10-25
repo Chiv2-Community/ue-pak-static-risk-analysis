@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from indirect_fixture import dispatch
 
 try:
     from jsonschema import Draft202012Validator
@@ -35,6 +36,40 @@ def sha(data):
 
 
 class ModerationTests(unittest.TestCase):
+    def test_reordered_duplicate_dispatch_origin_rejected_at_handoff(self):
+        report = self.report(incomplete=True)
+        report["coverage"]["gaps"] = ["unresolved-dispatch"]
+        first, second = dispatch(), dispatch()
+        second["origin"] = dict(reversed(list(second["origin"].items())))
+        report["possible-dispatches"] = [
+            {"evidence": evidence, "possibly-flagged": False, "possibly-forbidden": True}
+            for evidence in (first, second)]
+        single = deepcopy(report)
+        single["possible-dispatches"] = [single["possible-dispatches"][1]]
+        self.assertEqual(["analysis-incomplete"], mod.handoff(
+            encoded(single), self.context, self.pak, self.dependencies)["routes"])
+        with self.assertRaises(reports.InvalidReport):
+            mod.handoff(encoded(report), self.context, self.pak, self.dependencies)
+
+    def test_possible_callbacks_route_incomplete_and_exact_evidence_changes_invalidate_review(self):
+        report = self.report(incomplete=True)
+        report["coverage"]["gaps"] = ["unresolved-dispatch"]
+        report["possible-dispatches"] = [{"evidence": dispatch(), "possibly-flagged": False, "possibly-forbidden": True}]
+        raw = encoded(report)
+        value = mod.handoff(raw, self.context, self.pak, self.dependencies)
+        self.assertEqual(["analysis-incomplete"], value["routes"])
+        review = self.review(value)
+        self.assertTrue(mod.verify(review, self.context, self.pak, self.dependencies, raw))
+        report["possible-dispatches"][0]["evidence"]["receiver"] = "object"
+        with self.assertRaises(reports.InvalidReport):
+            mod.verify(review, self.context, self.pak, self.dependencies, encoded(report))
+        for key, replacement in (("diagnostics", ["binding-flow-unresolved"]), ("schema-version", 2),
+                                 ("opcode", "EX_FinalFunction")):
+            changed = json.loads(raw)
+            changed["possible-dispatches"][0]["evidence"][key] = replacement
+            with self.assertRaises(reports.InvalidReport):
+                reports.load(encoded(changed), ROOT)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="moderation-test-")
         self.addCleanup(self.directory.cleanup)

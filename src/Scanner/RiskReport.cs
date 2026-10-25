@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PakRisk.Policy;
@@ -18,6 +19,7 @@ public sealed record ReportFinding(string Id, InvocationLocation Location, Publi
     string ArgumentMetadata, int? KnownArgumentCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? RuleIds);
 public sealed record ReportCounts(int Invocations, int Flagged, int Forbidden, int AffectedUnion);
+public sealed record ReportPossibleDispatch(IndirectDispatch Evidence, bool PossiblyFlagged, bool PossiblyForbidden);
 public sealed record ReportCoverage(string[] Gaps, bool EvaluationIncomplete);
 public sealed record ReportContext(string ToolVersion, string EngineVersion, string? PakSha256,
     string? ProducerVersion, DependencyIdentity[] Dependencies,
@@ -26,7 +28,8 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
     ReportContext Context, ReportCounts Counts, ReportCoverage Coverage,
     ReportFinding[] FlaggedInvocations, ReportFinding[] ForbiddenInvocations, string[] Diagnostics,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContentResult? ContentPolicy = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContentResult? ContentPolicy = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReportPossibleDispatch[]? PossibleDispatches = null)
 {
     public RiskReport WithContent(ContentResult? result) => result is null ? this : this with
     {
@@ -43,6 +46,10 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
     public static RiskReport Create(FactsDocument facts, PolicyEvaluation evaluation, bool detail, string? revision)
     {
         var byLocation = facts.Analysis.Invocations.DistinctBy(f => f.Location).ToDictionary(f => f.Location);
+        var possibleByOrigin = evaluation.PossibleDispatches.IsDefault
+            ? new Dictionary<InvocationLocation, PossibleDispatchFinding>() : evaluation.PossibleDispatches.ToDictionary(d => d.Origin);
+        bool PossibleEffect(IndirectDispatch dispatch, RuleEffect effect) => possibleByOrigin.TryGetValue(dispatch.Origin, out var finding)
+            && finding.Rules.Any(r => r.Effect == effect);
         ReportFinding[] Findings(RuleEffect effect) => evaluation.Findings
             .Where(f => f.Rules.Any(r => r.Effect == effect))
             .OrderBy(f => f.Location.Asset, StringComparer.Ordinal)
@@ -63,7 +70,13 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
         return new(1, evaluation.IsIncomplete ? "partial" : "successful", !evaluation.IsIncomplete,
             ContextFor(facts, revision), new(byLocation.Count, flagged.Length, forbidden.Length, evaluation.Findings.Length),
             new(evaluation.CoverageGaps.Select(g => JsonNamingPolicy.KebabCaseLower.ConvertName(g.ToString())).ToArray(),
-                !evaluation.Uncertainties.IsEmpty), flagged, forbidden, [], facts.Inspection);
+                 !evaluation.Uncertainties.IsEmpty), flagged, forbidden, [], facts.Inspection, PossibleDispatches:
+             facts.Analysis.Dispatches is { Length: > 0 } dispatches ? dispatches
+                 .OrderBy(d => d.Origin.Asset, StringComparer.Ordinal).ThenBy(d => d.Origin.Function, StringComparer.Ordinal).ThenBy(d => d.Origin.Offset)
+                 .Select(d => new ReportPossibleDispatch(d with
+                     { Candidates = d.Candidates.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),
+                       Diagnostics = d.Diagnostics.Order(StringComparer.Ordinal).ToImmutableArray() },
+                     PossibleEffect(d, RuleEffect.Flag), PossibleEffect(d, RuleEffect.Forbid))).ToArray() : null);
     }
 
     public static RiskReport Failed(string code, FactsDocument? facts = null, string? revision = null) =>

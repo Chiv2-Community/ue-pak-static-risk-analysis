@@ -8,6 +8,7 @@ public sealed class PolicyEvaluator
     public const int MaxInvocations = 10_000;
     public const int MaxArguments = 256;
     public const int MaxFactStringLength = 4096;
+    public const int MaxDispatchCandidates = 256;
     private readonly PolicyDocument policy;
 
     // Validate public AST construction before recursive serialization or evaluation.
@@ -127,39 +128,55 @@ public sealed class PolicyEvaluator
             if (matches.Count != 0)
                 findings.Add(new InvocationFinding(fact.Location, matches.ToImmutable()));
         }
+        var possible = ImmutableArray.CreateBuilder<PossibleDispatchFinding>();
+        foreach (var dispatch in (analysis.Dispatches ?? []).OrderBy(d => d.Origin.Asset, StringComparer.Ordinal)
+            .ThenBy(d => d.Origin.Function, StringComparer.Ordinal).ThenBy(d => d.Origin.Offset))
+        {
+            var matches = ImmutableArray.CreateBuilder<RuleMatch>();
+            foreach (var rule in policy.Rules.OrderBy(r => r.Id, StringComparer.Ordinal))
+                if (dispatch.Candidates.Any(c => Evaluate(rule.Match,
+                    new InvocationTarget.Resolved(c.Owner, c.Function), new ArgumentMetadata.Unavailable()).Result != MatchResult.NoMatch))
+                    matches.Add(new(rule.Id, rule.Effect));
+            possible.Add(new(dispatch.Origin, matches.ToImmutable()));
+        }
+        // Evidence is never exhaustive: callers cannot suppress this gap by dropping a transport flag.
+        var gaps = analysis.CoverageGaps.AsEnumerable();
+        if (analysis.Dispatches is { Length: > 0 }) gaps = gaps.Append(CoverageGap.UnresolvedDispatch);
         return new PolicyEvaluation(findings.ToImmutable(), uncertainties.ToImmutable(),
-            analysis.CoverageGaps.Distinct().Order().ToImmutableArray());
+            gaps.Distinct().Order().ToImmutableArray(), possible.ToImmutable());
     }
 
     private sealed record Outcome(MatchResult Result, ImmutableArray<UncertaintyReason> Reasons);
     private static Outcome Known(bool matches) => new(matches ? MatchResult.Match : MatchResult.NoMatch, []);
     private static Outcome Unknown(UncertaintyReason reason) => new(MatchResult.Unknown, [reason]);
 
-    private static Outcome Evaluate(MatchExpression expression, InvocationFact fact) => expression switch
+    private static Outcome Evaluate(MatchExpression expression, InvocationFact fact) => Evaluate(expression, fact.Target, fact.Arguments);
+
+    private static Outcome Evaluate(MatchExpression expression, InvocationTarget target, ArgumentMetadata arguments) => expression switch
     {
-        MatchExpression.All all => Combine(all.Expressions, fact, all: true),
-        MatchExpression.Any any => Combine(any.Expressions, fact, all: false),
-        MatchExpression.Not not => Negate(Evaluate(not.Expression, fact)),
-        MatchExpression.Invocation invocation => fact.Target is InvocationTarget.Resolved target
+        MatchExpression.All all => Combine(all.Expressions, target, arguments, all: true),
+        MatchExpression.Any any => Combine(any.Expressions, target, arguments, all: false),
+        MatchExpression.Not not => Negate(Evaluate(not.Expression, target, arguments)),
+        MatchExpression.Invocation invocation => target is InvocationTarget.Resolved resolved
             ? Known(invocation.Target switch
             {
-                TargetMatcher.Exact exact => exact.Owner == target.Owner && exact.Function == target.Function,
-                TargetMatcher.ByOwner owner => owner.Owner == target.Owner,
+                TargetMatcher.Exact exact => exact.Owner == resolved.Owner && exact.Function == resolved.Function,
+                TargetMatcher.ByOwner owner => owner.Owner == resolved.Owner,
                 _ => false
             }) : Unknown(UncertaintyReason.UnresolvedTarget),
-        MatchExpression.Argument argument => Evaluate(argument, fact.Arguments),
+        MatchExpression.Argument argument => Evaluate(argument, arguments),
         _ => throw new InvalidOperationException("Invalid policy document.")
     };
 
     private static Outcome Negate(Outcome outcome) => outcome.Result == MatchResult.Unknown
         ? outcome : Known(outcome.Result == MatchResult.NoMatch);
 
-    private static Outcome Combine(ImmutableArray<MatchExpression> expressions, InvocationFact fact, bool all)
+    private static Outcome Combine(ImmutableArray<MatchExpression> expressions, InvocationTarget target, ArgumentMetadata arguments, bool all)
     {
         var reasons = new HashSet<UncertaintyReason>();
         foreach (var expression in expressions)
         {
-            var outcome = Evaluate(expression, fact);
+            var outcome = Evaluate(expression, target, arguments);
             if (outcome.Result == (all ? MatchResult.NoMatch : MatchResult.Match))
                 return Known(!all);
             reasons.UnionWith(outcome.Reasons);
@@ -215,6 +232,34 @@ public sealed class PolicyEvaluator
             || analysis.CoverageGaps.Any(gap => !Enum.IsDefined(gap)))
             InvalidFacts();
         var locations = new Dictionary<InvocationLocation, InvocationFact>();
+        var origins = new HashSet<InvocationLocation>();
+        var candidates = 0;
+        if (analysis.Dispatches is { } dispatches)
+        {
+            if (dispatches.Length > MaxInvocations) InvalidFacts();
+            foreach (var dispatch in dispatches)
+            {
+                if (dispatch is null || dispatch.SchemaVersion != 1 || dispatch.Origin is null
+                    || !Text(dispatch.Origin.Asset) || !Text(dispatch.Origin.Function) || dispatch.Origin.Offset < 0
+                    || !origins.Add(dispatch.Origin) || !ValidDispatchOpcode(dispatch.Opcode, dispatch.Kind)
+                    || dispatch.FunctionName is not null && !PolicyYaml.IsIdentifier(dispatch.FunctionName)
+                    || dispatch.Receiver is not ("self" or "object" or "interface" or "unknown")
+                    || dispatch.Resolution != "possible" || dispatch.Candidates.IsDefault
+                    || dispatch.Candidates.Length > MaxDispatchCandidates || (candidates += dispatch.Candidates.Length) > MaxInvocations
+                    || dispatch.Diagnostics.IsDefaultOrEmpty || dispatch.Diagnostics.Length > 16
+                    || dispatch.Diagnostics.Distinct().Count() != dispatch.Diagnostics.Length
+                    || dispatch.Diagnostics.Any(d => !DispatchDiagnostic(d))
+                    || !dispatch.Diagnostics.Contains("open-world")
+                    || dispatch.Source != (dispatch.Kind == "timer" ? "ue425plus-2d1aae-kismet-timer" : "kismet-serialized-v1")
+                    || dispatch.Kind == "timer" && !dispatch.Diagnostics.Contains("native-build-unverified")) InvalidFacts();
+                var seen = new HashSet<(string, string)>();
+                foreach (var candidate in dispatch!.Candidates)
+                    if (candidate is null || !PolicyYaml.IsOwner(candidate.Owner) || !PolicyYaml.IsIdentifier(candidate.Function)
+                        || !string.Equals(candidate.Function, dispatch.FunctionName, StringComparison.OrdinalIgnoreCase)
+                        || !seen.Add((candidate.Owner, candidate.Function))
+                        || candidate.Provenance is not ("local-function" or "inherited-function" or "override" or "interface-implementation" or "imported-function")) InvalidFacts();
+            }
+        }
         foreach (var fact in analysis!.Invocations)
         {
             if (fact is null || fact.Location is null || !Text(fact.Location.Asset) || !Text(fact.Location.Function) || fact.Location.Offset < 0)
@@ -255,6 +300,19 @@ public sealed class PolicyEvaluator
 
     private static bool Text(string? value) => !string.IsNullOrWhiteSpace(value) && value.Length <= MaxFactStringLength
         && !value.Any(char.IsControl) && ValidUnicode(value);
+    public static bool DispatchDiagnostic(string? code) => code is "open-world" or "receiver-unavailable" or "parent-unavailable"
+        or "class-cycle" or "target-name-unavailable" or "target-metadata-unavailable" or "target-expansion-limit"
+        or "native-build-unverified" or "binding-flow-unresolved" or "dependency-context-unavailable"
+        or "interface-context-unavailable" or "class-metadata-unavailable" or "unbound-delegate";
+    private static bool ValidDispatchOpcode(string? opcode, string? kind) => kind switch
+    {
+        "virtual" => opcode is "EX_VirtualFunction" or "EX_LocalVirtualFunction",
+        "delegate-binding" => opcode is "EX_BindDelegate" or "EX_InstanceDelegate",
+        "delegate-mutation" => opcode is "EX_AddMulticastDelegate" or "EX_RemoveMulticastDelegate" or "EX_ClearMulticastDelegate" or "EX_LetDelegate" or "EX_LetMulticastDelegate",
+        "multicast" => opcode == "EX_CallMulticastDelegate",
+        "timer" => opcode is "EX_FinalFunction" or "EX_LocalFinalFunction" or "EX_CallMath",
+        _ => false
+    };
     private static bool ValidUnicode(string value)
     {
         for (var index = 0; index < value.Length; index++)

@@ -157,6 +157,11 @@ cannot create a report; missing output is not a clean scan. Disabling gates does
 not remove findings or turn uncertainty into safety. `successful` describes
 analysis completion, not policy approval.
 
+`possible-dispatches` records uncertain virtual/callback targets separately from
+direct invocation counts. A possible forbid is not a definite forbidden occurrence;
+it retains incomplete coverage and fails the default incomplete gate. See the
+[partial indirect scope and source provenance](indirect-dispatch.md).
+
 Use [moderation handoff](moderation.md) to bind original pak/dependency bytes,
 retained report bytes, actual scanner identity, explicit game build and opaque
 policy revision. Authenticate reviewer decisions outside this tool. Changed
