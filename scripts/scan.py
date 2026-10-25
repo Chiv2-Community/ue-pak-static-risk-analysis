@@ -182,7 +182,7 @@ def options(argv):
         parser.add_argument("--" + key, required=True)
     parser.add_argument("--image", default="ue-pak-static-risk-analysis:dev")
     parser.add_argument("--timeout", type=float, default=60)
-    for key in ("policy-rules", "log-level", "policy-revision", "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "mapping", "content-root"):
+    for key in ("policy-rules", "log-level", "policy-revision", "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "mapping", "content-root", "capability-summaries"):
         parser.add_argument("--" + key)
     parser.add_argument("--moderator-detail", action="store_true")
     for key in ("allowed-path", "allowed-class", "protected-path"):
@@ -229,6 +229,11 @@ def main(argv=None):
                 raise Failure("invalid-configuration") from None
         with tempfile.TemporaryDirectory(prefix="pak-scan-") as stage:
             stage = Path(stage)
+            if args.capability_summaries is not None:
+                catalog = stage / "summaries"
+                snapshot(args.capability_summaries, catalog, 256 * 1024)
+                policy_mount += mount(catalog, "/catalog/summaries")
+                shared += ["--capability-summaries", "/catalog/summaries"]
             config = stage / "docker"
             config.mkdir()
             docker = Docker(config, args.image, args.timeout)

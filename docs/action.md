@@ -19,6 +19,13 @@ It runs neither the game nor Unreal Editor. Analysis is not a safety verdict.
 - Reports/outputs omit private rule IDs and descriptions. They still reveal
   findings and package metadata. There is no moderator-detail Action profile.
 
+Optional `capability-summaries` accepts only a trusted **nonsecret** catalog path;
+never accept it from a submission. Exact bytes/revision bind report context and
+matches always require review, even with all three gate flags disabled. The full
+report adds [bounded call chains](call-chains.md), including public capability IDs;
+direct Action arrays/counts and their budgets do not include caller witnesses.
+No production game catalog or capability policy predicate is bundled.
+
 **Private consumer gate remains open.** On 2026-10-25 the read-only API call
 `gh api repos/Chiv2-Community/ue-pak-static-risk-analysis/actions/permissions/access`
 returned `{"access_level":"none"}`. No authorized external consumer was supplied

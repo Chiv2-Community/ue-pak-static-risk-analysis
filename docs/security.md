@@ -41,8 +41,11 @@ recorded symbols, not an authenticated hierarchy or native capability catalog.
 Partial [open-world indirect evidence](indirect-dispatch.md) ships for #8, not
 exhaustive resolution or callback execution proof. Source-scoped engine timer
 hypotheses explicitly retain unverified game-build applicability.
-Not shipped: complete indirect resolution (#8), transitive dependency or
-call-chain behavior (#9), data/default/configuration-driven effects (#10), native
+Partial [bounded call chains](call-chains.md) use actual matched endpoints and
+explicit nonsecret, provenance-bearing operator summaries; they do not prove #7–9
+complete. Missing context/summaries and possible edges remain incomplete.
+Not shipped: complete indirect resolution (#8), complete cross-package call-chain
+behavior (#9), data/default/configuration-driven effects (#10), native
 implementation analysis/nativized behavior, reachability, exploit detection,
 full serialization coverage, runtime computed arguments, or complete reconstruction.
 Imported signatures can remain unavailable: exact invocation-only rules may
@@ -67,8 +70,13 @@ reflection plus reviewed native implementation summaries. Record build/source
 identities, symbol owners, parameter types, inheritance evidence, reviewer and
 uncertainty for each entry. Verify against authorized bytes/reflection; do not
 invent game APIs from names, parser classes, pseudocode or this starter policy.
-No exact-game catalog loader, capability predicate or authoritative native summary
-evaluator is shipped; the narrow timer hypothesis remains build-unverified.
+A bounded explicit nonsecret summary loader is available; its original fixture
+catalog supplies no exact-game proof. No capability policy predicate or
+authoritative native-code analyzer is shipped. The timer hypothesis remains
+build-unverified. Never feed confidential catalogs to this nonsecret profile.
+The parser receives neither summaries nor private policy. Catalog digest/revision
+bind report context; default reports expose matched opaque capability IDs, not
+catalog prose/paths or private policy. See [disclosure and bounds](call-chains.md).
 
 Treat a catalog, native summary, parser, dependency, game build, invocation policy
 or content-setting change as new analysis context. Assign a new opaque policy

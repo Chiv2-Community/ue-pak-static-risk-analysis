@@ -20,7 +20,8 @@
           "type": "object", "additionalProperties": false, "required": ["kind", "sha256"],
           "properties": {"kind": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
         }},
-        "policy-revision": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._\\-]+$"}
+        "policy-revision": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._\\-]+$"},
+        "capability-catalog-revision": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._\\-]+$"}
       }
     },
     "counts": {
@@ -38,6 +39,7 @@
     "forbidden-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
     "diagnostics": {"type": "array", "maxItems": 1, "items": {"enum": ["invalid-configuration", "analysis-failed", "parser-failed", "parser-output-limit", "wall-timeout", "cancelled", "container-unavailable", "input-failed"]}},
     "inspection": {"$ref": "facts-v1.schema.json#/$defs/inspection"},
+    "call-chains": {"$ref": "#/$defs/call-chains"},
     "possible-dispatches": {"type": "array", "maxItems": 10000, "items": {
       "type": "object", "additionalProperties": false, "required": ["evidence", "possibly-flagged", "possibly-forbidden"],
       "properties": {"evidence": {"$ref": "facts-v1.schema.json#/$defs/dispatch"},
@@ -67,6 +69,43 @@
     {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"properties": {"diagnostics": {"minItems": 1}, "flagged-invocations": {"maxItems": 0}, "forbidden-invocations": {"maxItems": 0}}}}
   ],
   "$defs": {
+    "chain-target": {
+      "type": "object", "additionalProperties": false, "required": ["owner", "function"],
+      "properties": {"owner": {"type": "string", "maxLength": 4096}, "function": {"type": "string", "maxLength": 4096}}
+    },
+    "call-chains": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "complete", "needs-review", "catalog-revision", "catalog-sha256", "witnesses", "diagnostics"],
+      "properties": {
+        "schema-version": {"const": 1}, "complete": {"type": "boolean"}, "needs-review": {"type": "boolean"},
+        "catalog-revision": {"type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._\\-]+$"},
+        "catalog-sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "diagnostics": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"enum": [
+          "graph-context-unavailable", "graph-context-incomplete", "extraction-incomplete", "indirect-open-world", "native-summary-unavailable", "graph-work-limit", "source-identity-unavailable", "external-summary-unavailable", "target-identity-ambiguous", "graph-edge-limit", "target-unresolved", "witness-limit", "evidence-byte-limit", "witness-depth-limit"
+        ]}},
+        "witnesses": {"type": "array", "maxItems": 256, "items": {
+          "type": "object", "additionalProperties": false, "required": ["endpoint", "resolution", "callers"],
+          "properties": {
+            "resolution": {"enum": ["direct", "possible"]},
+            "endpoint": {
+              "type": "object", "additionalProperties": false, "required": ["origin", "target", "resolution", "flagged", "forbidden", "capability"],
+              "properties": {
+                "origin": {"$ref": "facts-v1.schema.json#/$defs/location"}, "target": {"$ref": "#/$defs/chain-target"},
+                "resolution": {"enum": ["direct", "possible"]}, "flagged": {"type": "boolean"}, "forbidden": {"type": "boolean"},
+                "capability": {"type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._\\-]+$"}
+              }
+            },
+            "callers": {"type": "array", "maxItems": 16, "items": {
+              "type": "object", "additionalProperties": false, "required": ["origin", "target", "resolution", "kind"],
+              "properties": {
+                "origin": {"$ref": "facts-v1.schema.json#/$defs/location"}, "target": {"$ref": "#/$defs/chain-target"},
+                "resolution": {"enum": ["direct", "possible"]}, "kind": {"enum": ["invocation", "virtual", "delegate-binding", "delegate-mutation", "multicast", "timer"]}
+              }
+            }}
+          }
+        }}
+      }
+    },
     "count": {"type": "integer", "minimum": 0, "maximum": 10000},
     "finding": {
       "type": "object", "additionalProperties": false,

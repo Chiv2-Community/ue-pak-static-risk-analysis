@@ -103,15 +103,25 @@ public static class FactsCodec
         try
         {
             Validate(document);
-            using var stream = new BoundedStream();
-            JsonSerializer.Serialize(stream, document, Options);
-            var bytes = stream.ToArray();
-            Preflight(bytes);
-            return bytes;
+            try { return Serialize(document); }
+            catch (FactsException) when (document.Analysis.CallGraph is { Functions.Length: > 0 })
+            {
+                // The additive graph must not evict already extracted invocations at the transport limit.
+                return Serialize(document with { Analysis = document.Analysis with { CallGraph = new(1, false, []) } });
+            }
         }
         catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException
             or NotSupportedException or NullReferenceException)
         { throw new FactsException(); }
+    }
+
+    private static byte[] Serialize(FactsDocument document)
+    {
+        using var stream = new BoundedStream();
+        JsonSerializer.Serialize(stream, document, Options);
+        var bytes = stream.ToArray();
+        Preflight(bytes);
+        return bytes;
     }
 
     private static void Validate(FactsDocument document)
@@ -150,17 +160,24 @@ public static class FactsCodec
         && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or '+');
 
     // Bound allocations before deserializing; duplicate names are forbidden at every depth.
-    private static void Preflight(ReadOnlySpan<byte> bytes)
+    internal static T ReadClosed<T>(ReadOnlySpan<byte> bytes, int maxBytes, int maxNodes)
     {
-        if (bytes.Length is 0 or > MaxBytes) throw new FactsException();
+        Preflight(bytes, maxBytes, maxNodes);
+        return JsonSerializer.Deserialize<T>(bytes, Options) ?? throw new FactsException();
+    }
+
+    private static void Preflight(ReadOnlySpan<byte> bytes, int maxBytes = MaxBytes, int maxNodes = MaxNodes)
+    {
+        if (bytes.Length == 0 || bytes.Length > maxBytes) throw new FactsException();
         var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { MaxDepth = MaxDepth });
         var frames = new Stack<Frame>();
         var nodes = 0;
         string? property = null;
         while (reader.Read())
         {
-            if (++nodes > MaxNodes) throw new FactsException();
+            if (++nodes > maxNodes) throw new FactsException();
             if (property == "dispatches" && reader.TokenType != JsonTokenType.StartArray) throw new FactsException();
+            if (property == "call-graph" && reader.TokenType != JsonTokenType.StartObject) throw new FactsException();
             if (reader.TokenType is JsonTokenType.PropertyName or JsonTokenType.String)
             {
                 if (reader.ValueSpan.Length > PolicyEvaluator.MaxFactStringLength * 6) throw new FactsException();
@@ -179,7 +196,7 @@ public static class FactsCodec
                 throw new FactsException();
             if (reader.TokenType == JsonTokenType.StartObject) frames.Push(new Frame(new HashSet<string>(StringComparer.Ordinal), 0));
             if (reader.TokenType == JsonTokenType.StartArray)
-                frames.Push(new Frame(null, property is "arguments" or "coverage-gaps" or "dependencies" or "candidates" ? 256 : property == "diagnostics" ? 16 : PolicyEvaluator.MaxInvocations));
+                frames.Push(new Frame(null, property is "arguments" or "coverage-gaps" or "dependencies" or "candidates" ? 256 : property == "functions" ? 4096 : property == "diagnostics" ? 16 : PolicyEvaluator.MaxInvocations));
             property = null;
         }
     }
@@ -205,7 +222,7 @@ public static class FactsCodec
         }
     }
 
-    private static bool Unicode(string text)
+    internal static bool Unicode(string text)
     {
         for (var i = 0; i < text.Length; i++)
             if (char.IsSurrogate(text[i]) && (!char.IsHighSurrogate(text[i])

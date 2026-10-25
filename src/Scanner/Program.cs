@@ -36,6 +36,8 @@ public static class Program
             revision = suppliedRevision;
             var gates = new GateOptions(Boolean(options, "fail-on-any-forbidden", true),
                 Boolean(options, "fail-on-any-flagged", false), Boolean(options, "fail-on-incomplete", true));
+            // Validate public catalog input before any verbose policy output.
+            var catalog = options.TryGetValue("capability-summaries", out var catalogPath) ? CapabilityCatalog.Load(catalogPath) : null;
             var loaded = PolicyLoader.Load(options.GetValueOrDefault("policy-rules"), options.GetValueOrDefault("log-level"),
                 Console.Error.WriteLine);
             if (args[0] == "validate") return 0;
@@ -45,11 +47,11 @@ public static class Program
                 options.GetValueOrDefault("expected-mapping-sha256"));
             facts = candidate;
             var evaluation = new PolicyEvaluator(loaded.Document).Evaluate(facts.Analysis);
-            report = RiskReport.Create(facts, evaluation, options.ContainsKey("moderator-detail"), revision);
+            report = RiskReport.Create(facts, evaluation, options.ContainsKey("moderator-detail"), revision, catalog);
             report = report.WithContent(contentPolicy?.Evaluate(facts.Inspection));
             exit = gates.Fails(report) ? 1 : 0;
         }
-        catch (Exception error) when (error is ConfigurationException or ContentConfigurationException or PolicyInputException or PolicyException)
+        catch (Exception error) when (error is ConfigurationException or ContentConfigurationException or CapabilityConfigurationException or PolicyInputException or PolicyException)
         {
             Console.Error.WriteLine("Invalid configuration.");
             report = RiskReport.Failed("invalid-configuration", facts, revision);
@@ -115,7 +117,7 @@ public static class Program
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
         var allowed = new HashSet<string> { "facts", "report", "engine-version", "policy-rules", "log-level", "policy-revision",
             "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "moderator-detail",
-            "expected-pak-sha256", "expected-mapping-sha256", "reason" };
+            "expected-pak-sha256", "expected-mapping-sha256", "reason", "capability-summaries" };
         for (var i = 1; i < args.Length; i++)
         {
             if (!args[i].StartsWith("--", StringComparison.Ordinal)) throw new ConfigurationException();

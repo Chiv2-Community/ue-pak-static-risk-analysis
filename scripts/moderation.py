@@ -75,7 +75,8 @@ def validate(value, profile):
         reports.require(max(counts["flagged"], counts["forbidden"]) <= counts["affected-union"] <=
                         min(counts["invocations"], counts["flagged"] + counts["forbidden"]))
         incomplete = bool(coverage["gaps"] or coverage["evaluation-incomplete"]
-                          or value.get("content-policy", {}).get("incomplete", False))
+                          or value.get("content-policy", {}).get("incomplete", False)
+                          or not value.get("call-chain-analysis", {}).get("complete", True))
         reports.require(value["analysis-complete"] == (not incomplete))
         if value["status"] == "failed":
             reports.require(incomplete and not any(counts.values()))
@@ -125,7 +126,8 @@ def routes(value):
     result = []
     if value["counts"]["forbidden"] or value.get("content-policy", {}).get("decision") == "reject":
         result.append("policy-violation")
-    if value["counts"]["flagged"] or value.get("content-policy", {}).get("decision") == "needs-review":
+    if (value["counts"]["flagged"] or value.get("content-policy", {}).get("decision") == "needs-review"
+            or value.get("call-chains", value.get("call-chain-analysis", {})).get("needs-review", False)):
         result.append("needs-review")
     if not value["analysis-complete"]:
         result.append("analysis-incomplete")
@@ -149,6 +151,8 @@ def handoff(report_data, context, pak, dependencies):
              "routes": routes(report)}
     if "content-policy" in report:
         value["content-policy"] = deepcopy(report["content-policy"])
+    if "call-chains" in report:
+        value["call-chain-analysis"] = {key: report["call-chains"][key] for key in ("complete", "needs-review")}
     return validate(value, "handoff")
 
 
@@ -175,6 +179,8 @@ def feedback(value):
     public["kind"] = "submitter-feedback"
     if "content-policy" in value:
         public["content-policy"] = deepcopy(value["content-policy"])
+    if "call-chain-analysis" in value:
+        public["call-chain-analysis"] = deepcopy(value["call-chain-analysis"])
     return validate(public, "feedback")
 
 

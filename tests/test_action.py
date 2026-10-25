@@ -98,6 +98,22 @@ class ActionTests(unittest.TestCase):
         self.assertTrue((self.workspace / outputs["report-path"]).exists())
         self.assertIn("Forbidden: 1", summary)
 
+    def test_call_chain_report_is_valid_but_witnesses_and_capabilities_are_not_action_outputs(self):
+        from test_call_chains import report as chain_report
+        value = chain_report()
+        value["context"]["capability-catalog-revision"] = "fixture-v1"
+        value["context"]["dependencies"].insert(0, {"kind": "capability-summaries", "sha256": "c" * 64})
+        value["call-chains"].update({"catalog-revision": "fixture-v1", "catalog-sha256": "c" * 64, "needs-review": True})
+        value["call-chains"]["witnesses"][0]["endpoint"]["capability"] = "public-capability-canary"
+        result, outputs, summary = self.invoke(value)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("true", outputs["report-available"])
+        self.assertEqual("1", outputs["forbidden-count"])
+        self.assertEqual(value["forbidden-invocations"], json.loads(outputs["forbidden-invocations"]))
+        self.assertNotIn("public-capability-canary", json.dumps(outputs) + summary)
+        self.assertNotIn("callers", json.dumps(outputs) + summary)
+        self.assertIn("call-chains", json.loads((self.workspace / outputs["report-path"]).read_bytes()))
+
     def test_metadata_output_delimiters_commands_and_summary_are_data(self):
         metadata = 'x\r\nFORGED=1\nEOF\n::error:: ##[error]\x1b[31m </summary> [link](https://bad) \U0001f600'
         result, outputs, summary = self.invoke(report([finding(metadata=metadata)]))

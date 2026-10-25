@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explicit nonsecret capability summaries v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema-version", "disclosure", "revision", "summaries"],
+  "properties": {
+    "schema-version": {"const": 1}, "disclosure": {"const": "nonsecret"}, "revision": {"$ref": "#/$defs/id"},
+    "summaries": {"type": "array", "maxItems": 256, "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner", "function", "capability", "provenance", "build-scope", "reviewed-limitations"],
+      "properties": {
+        "owner": {"type": "string", "maxLength": 4096, "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$"},
+        "function": {"type": "string", "maxLength": 4096, "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "capability": {"$ref": "#/$defs/id"}, "provenance": {"$ref": "#/$defs/text"},
+        "build-scope": {"$ref": "#/$defs/text"}, "reviewed-limitations": {"$ref": "#/$defs/text"}
+      }
+    }}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._\\-]+$"},
+    "text": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]+$"}
+  }
+}

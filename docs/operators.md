@@ -46,6 +46,17 @@ python3 -m venv /tmp/opencode/pak-test-venv
 
 ## File policy: recommended for private rules
 
+Optional [capability summaries/call chains](call-chains.md) use a separate trusted,
+explicitly nonsecret catalog, not private YAML or submitter-supplied configuration.
+Default: no catalog. Supply `--capability-summaries /approved/catalog.json` only
+after identity/build/provenance review; no game catalog is bundled. Matches always
+require review and leave direct counts unchanged. Missing summaries/graph context
+remain incomplete. Bind the exact catalog as a moderation dependency using
+`--dependency capability-summaries=/approved/catalog.json`; any byte change
+invalidates the old context/decision. Full reports expose public capability IDs,
+revision and digest, not catalog prose or private policy. Action outputs omit
+chains; retain the private full report.
+
 Obtain only the original pak through trusted transfer, never submission scripts
 or a submitter checkout. The policy owner controls rules, content settings, log
 level and a fresh opaque policy revision. Keep policy source provenance privately;

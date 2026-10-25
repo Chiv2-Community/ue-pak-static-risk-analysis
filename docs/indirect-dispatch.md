@@ -75,7 +75,9 @@ Reviewed source scope: local authorized UE4.25Plus commit
 
 This is not the #7 exact-game catalog, native-code certification or a summary
 loader. Authorized exact-build source/header/reflection plus reviewed summaries
-are still required to establish wrapper/native applicability. Source code and
+are still required to establish wrapper/native applicability. The separate
+[explicit catalog/call-chain slice](call-chains.md) does not verify this timer
+hypothesis or supply an exact-game catalog. Source code and
 engine-derived binaries are not redistributed.
 
 ## Bounds and proof scope

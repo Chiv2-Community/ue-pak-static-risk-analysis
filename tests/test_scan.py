@@ -13,6 +13,31 @@ SPEC.loader.exec_module(scan)
 
 
 class ScanTests(unittest.TestCase):
+    def test_capability_catalog_is_snapshotted_only_for_trusted_evaluator(self):
+        calls = []
+        class Docker:
+            def __init__(self, *args):
+                pass
+            def run(self, mounts, entry, arguments, **options):
+                calls.append((list(mounts), list(arguments), options))
+                return (0, b"{}")
+        with tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory:
+            root = Path(directory)
+            pak, catalog = root / "pak", root / "catalog"
+            pak.write_bytes(b"owned")
+            catalog.write_bytes(b"original nonsecret catalog")
+            with patch.object(scan, "Docker", Docker):
+                code = scan.main(["scan", "--pak", str(pak), "--report", str(root / "report"),
+                    "--engine-version", "4.25", "--capability-summaries", str(catalog)])
+            self.assertEqual(0, code)
+        self.assertEqual(3, len(calls))
+        for mounts, args, options in (calls[0], calls[2]):
+            self.assertIn("--capability-summaries", args)
+            self.assertIn("/catalog/summaries", args)
+            self.assertTrue(any("target=/catalog/summaries" in item for item in mounts))
+        self.assertNotIn("--capability-summaries", calls[1][1])
+        self.assertNotIn("/catalog/summaries", " ".join(calls[1][0]))
+
     def test_client_environment_allowlist(self):
         with patch.dict(os.environ, {"UE_PAK_POLICY_RULES": "private", "AWS_SECRET_ACCESS_KEY": "credential"}):
             self.assertEqual({"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}, scan.client_environment())

@@ -98,7 +98,7 @@ def destination():
     for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY", "GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"):
         if os.environ.get(key):
             require(target != Path(os.environ[key]).resolve())
-    for key in ("INPUT_PAK", "INPUT_POLICY_RULES", "INPUT_MAPPING"):
+    for key in ("INPUT_PAK", "INPUT_POLICY_RULES", "INPUT_MAPPING", "INPUT_CAPABILITY_SUMMARIES"):
         if os.environ.get(key):
             require(target != Path(os.environ[key]).resolve())
     return target, value
@@ -155,7 +155,7 @@ def scan():
                              ("fail-on-any-forbidden", "true"), ("fail-on-any-flagged", "false"),
                              ("fail-on-incomplete", "true")):
             args += ["--" + key, os.environ.get("INPUT_" + key.upper().replace("-", "_"), default)]
-        for key in ("policy-rules", "content-root", "mapping"):
+        for key in ("policy-rules", "content-root", "mapping", "capability-summaries"):
             value = os.environ.get("INPUT_" + key.upper().replace("-", "_"), "")
             if value:
                 args += ["--" + key, value]

@@ -7,6 +7,10 @@
     {"$ref": "#/$defs/review"}, {"$ref": "#/$defs/feedback"}
   ],
   "$defs": {
+    "call-chain-analysis": {
+      "type": "object", "additionalProperties": false, "required": ["complete", "needs-review"],
+      "properties": {"complete": {"type": "boolean"}, "needs-review": {"type": "boolean"}}
+    },
     "context": {
       "type": "object", "additionalProperties": false,
       "required": ["schema-version", "kind", "scanner-identity", "game-build", "report-context"],
@@ -33,7 +37,8 @@
         "counts": {"$ref": "report-v1.schema.json#/properties/counts"},
         "coverage": {"$ref": "report-v1.schema.json#/properties/coverage"},
         "routes": {"$ref": "#/$defs/routes"},
-        "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"}
+        "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
+        "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"}
       }
     },
     "review": {
@@ -58,7 +63,8 @@
         "counts": {"$ref": "report-v1.schema.json#/properties/counts"},
         "coverage": {"$ref": "report-v1.schema.json#/properties/coverage"},
         "routes": {"$ref": "#/$defs/routes"},
-        "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"}
+        "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
+        "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"}
       }
     }
   }

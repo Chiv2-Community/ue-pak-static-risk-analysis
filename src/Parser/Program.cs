@@ -22,6 +22,9 @@ try
     var report = manifest.RootElement;
     var calls = ImmutableArray.CreateBuilder<InvocationFact>();
     var dispatches = new List<IndirectDispatch>();
+    var graphFunctions = new List<CallGraphFunction>();
+    var graphCharacters = 0;
+    var graphComplete = true;
     var gaps = new HashSet<CoverageGap>();
     if (report.GetProperty("ingestion_status").GetString() != "validated") gaps.Add(CoverageGap.IncompleteExtraction);
     var records = report.GetProperty("records").EnumerateArray().ToArray();
@@ -81,6 +84,13 @@ try
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
             dispatches.AddRange(extraction.Analysis.Dispatches ?? []);
+            var graph = extraction.Analysis.CallGraph!;
+            graphComplete &= graph.Complete;
+            foreach (var function in graph.Functions)
+                if (graphFunctions.Count < CallGraphContext.MaxFunctions
+                    && graphCharacters + CallGraphContext.Characters(function) <= CallGraphContext.MaxCharacters)
+                { graphFunctions.Add(function); graphCharacters += CallGraphContext.Characters(function); }
+                else graphComplete = false;
             foreach (var gap in extraction.Analysis.CoverageGaps) gaps.Add(gap);
             var classTargets = asset.Exports.Select(e => TargetResolver.ResolveIdentity(asset, e.ClassIndex, logical)).ToArray();
             var classNames = classTargets.Where(c => c is not null).Select(c => c!.Function)
@@ -125,7 +135,8 @@ try
             r.TryGetProperty("virtual_path", out _));
     }).ToImmutableArray();
     var facts = new FactsDocument(1, pakHash, "4.25", "container-v1",
-        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray()),
+        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray(),
+            CallGraphContext.Bounded(graphFunctions, graphComplete && gaps.Count == 0)),
         new InspectionEvidence(report.GetProperty("ingestion_status").GetString()!,
             report.GetProperty("diagnostic").GetString()!, evidence));
     Console.OpenStandardOutput().Write(FactsCodec.Write(facts));

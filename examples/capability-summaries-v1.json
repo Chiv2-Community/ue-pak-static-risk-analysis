@@ -1,0 +1,15 @@
+{
+  "schema-version": 1,
+  "disclosure": "nonsecret",
+  "revision": "original-call-chain-fixture-v1",
+  "summaries": [
+    {
+      "owner": "/Script/Corpus.Utility",
+      "function": "Touch",
+      "capability": "fixture-opaque-boundary",
+      "provenance": "tests/Corpus.Generate/Program.cs Chains: original serialized symbolic fixture contract, not native implementation evidence",
+      "build-scope": "synthetic-call-chains-v1 only; no game or engine build applicability",
+      "reviewed-limitations": "Explicit test-model assertion only; Touch has no supplied native implementation, argument semantics or execution proof; never use as a production classification"
+    }
+  ]
+}

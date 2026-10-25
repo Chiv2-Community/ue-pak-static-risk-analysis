@@ -11,8 +11,9 @@ using UAssetAPI.Kismet.Bytecode.Expressions;
 using UAssetAPI.UnrealTypes;
 
 // Original synthetic serialization, not engine-cooked or game-derived content.
-if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties")) return 2;
+if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains")) return 2;
 if (args[0] == "properties") return Properties();
+if (args[0] == "chains") return Chains(args[1]);
 var root = Path.GetFullPath(args[1]);
 if (args[0] == "generate")
 {
@@ -46,6 +47,7 @@ if (args[0] == "generate")
 }
 var calls = ImmutableArray.CreateBuilder<InvocationFact>();
 var dispatches = new List<IndirectDispatch>();
+var graphs = new List<CallGraphContext>();
 var gaps = new HashSet<CoverageGap>();
 foreach (var path in Directory.GetFiles(root).Where(p => p.EndsWith(".uasset") || p.EndsWith(".umap")).Order())
 {
@@ -54,10 +56,12 @@ foreach (var path in Directory.GetFiles(root).Where(p => p.EndsWith(".uasset") |
     var extracted = InvocationExtractor.Read(input);
     calls.AddRange(extracted.Analysis.Invocations);
     dispatches.AddRange(extracted.Analysis.Dispatches ?? []);
+    graphs.Add(extracted.Analysis.CallGraph!);
     gaps.UnionWith(extracted.Analysis.CoverageGaps);
 }
 Console.OpenStandardOutput().Write(FactsCodec.Write(new FactsDocument(1, new string('a', 64), "4.25", "synthetic-corpus-v1", [],
-    new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray()))));
+    new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray(),
+        CallGraphContext.Bounded(graphs.SelectMany(g => g.Functions), graphs.All(g => g.Complete) && gaps.Count == 0)))));
 return 0;
 
 static UAsset Asset()
@@ -93,6 +97,32 @@ static void AddFunction(UAsset asset, string name, KismetExpression[] code) => a
     ScriptBytecode = code, ScriptBytecodeSize = code.Sum(e => (int)e.GetSize(asset)),
     LoadedProperties = [], Children = [], Data = [], Extras = [], Field = new(), SuperStruct = new(0)
 });
+
+static int Chains(string destination)
+{
+    if (Directory.Exists(destination)) return 2;
+    Directory.CreateDirectory(destination);
+    var asset = Asset();
+    asset.Imports.Add(new Import("/Script/CoreUObject", "Class", new(-1), "Utility", false, asset));
+    asset.Imports.Add(new Import("/Script/CoreUObject", "Function", new(-8), "Touch", false, asset));
+    asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "BP_Corpus_C"), OuterIndex = new(0),
+        ClassIndex = new(-6), Data = [], Extras = [] });
+    // Fixture contract: Touch is an opaque native boundary, classified ONLY by the explicit catalog.
+    // No implementation, engine applicability or real-world capability is asserted by its name.
+    AddFunction(asset, "Wrapper", [new EX_FinalFunction { StackNode = new(-9), Parameters = [] }]);
+    AddFunction(asset, "Helper", [new EX_FinalFunction { StackNode = new(2), Parameters = [] },
+        new EX_FinalFunction { StackNode = new(4), Parameters = [] }]);
+    AddFunction(asset, "Root", [new EX_FinalFunction { StackNode = new(3), Parameters = [] },
+        new EX_FinalFunction { StackNode = new(3), Parameters = [] }]);
+    AddFunction(asset, "Maybe", [new EX_VirtualFunction { VirtualFunctionName = new(asset, "Helper"), Parameters = [] }]);
+    var path = Path.Combine(destination, "CallChains.uasset");
+    asset.Write(path);
+    var input = new PackageInput("submission", "Content/CallChains.uasset", "/Game/CallChains", path);
+    var extraction = InvocationExtractor.Read(input);
+    var facts = new FactsDocument(1, new string('a', 64), "4.25", "synthetic-call-chains-v1", [], extraction.Analysis);
+    File.WriteAllBytes(Path.Combine(destination, "facts.json"), FactsCodec.Write(facts));
+    return 0;
+}
 
 static int Properties()
 {

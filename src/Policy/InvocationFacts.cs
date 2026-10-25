@@ -37,4 +37,28 @@ public sealed record IndirectDispatch(int SchemaVersion, InvocationLocation Orig
     string? FunctionName, string Receiver, string Resolution, ImmutableArray<DispatchCandidate> Candidates,
     ImmutableArray<string> Diagnostics, string Source);
 public sealed record InvocationAnalysis(ImmutableArray<InvocationFact> Invocations, ImmutableArray<CoverageGap> CoverageGaps,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IndirectDispatch[]? Dispatches = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IndirectDispatch[]? Dispatches = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallGraphContext? CallGraph = null);
+
+// LocationFunction is the exact containing-function key, not a parsed function-name guess.
+public sealed record CallGraphFunction(string Asset, string LocationFunction, string Owner, string Function, bool Native);
+public sealed record CallGraphContext(int SchemaVersion, bool Complete, CallGraphFunction[] Functions)
+{
+    public const int MaxFunctions = 4096;
+    public const int MaxCharacters = 65_536;
+    public static int Characters(CallGraphFunction function) => function.Asset.Length + function.LocationFunction.Length
+        + function.Owner.Length + function.Function.Length;
+
+    public static CallGraphContext Bounded(IEnumerable<CallGraphFunction> functions, bool complete)
+    {
+        var result = new List<CallGraphFunction>();
+        var characters = 0;
+        foreach (var function in functions)
+        {
+            if (result.Count >= MaxFunctions || characters + Characters(function) > MaxCharacters) { complete = false; continue; }
+            characters += Characters(function);
+            result.Add(function);
+        }
+        return new(1, complete, result.ToArray());
+    }
+}
