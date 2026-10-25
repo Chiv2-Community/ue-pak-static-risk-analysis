@@ -1,0 +1,52 @@
+{
+  "schema-version": 1,
+  "provenance": "Original synthetic UAssetAPI serialization; not engine-cooked or representative game content.",
+  "generator": "tests/Corpus.Generate/Program.cs",
+  "pak-builder": "tests/ingestion_fixture.py",
+  "pak-sha256": "b3671bcd5852eab3f773335dc228ae62f6f0a857880c320d27501017a1df8079",
+  "serialized-sha256": {
+    "Calls.uasset": "91e15529e39ea178138f79a0e931b79d9f8e5a188d741da55e072517e479ee41",
+    "Calls.uexp": "c3e077dd3036330c0e0723d3cf10786bd016dc9153d634ca3a8c3ba3f5380613",
+    "Map.uexp": "91bd9d0292835f10dd171209cc920179c643a50aa5c5ea8be3fcc09219b5d50e",
+    "Map.umap": "6f276f68246bfdc9cea34c2968c4b368b9cd0cf180879ff72b797c19587315dc",
+    "Unresolved.uasset": "31a578b537a127795c5ef9203003213f15b5b423975e727ecc21f0412ed86a06",
+    "Unresolved.uexp": "097981f1b6e44f2d084edc8367c18c2194a8466161ba793820b3f554d17785bb",
+    "Unsupported.uasset": "855af895ecdbbdcc1a72c69a4819a169756d910cac7b830fb31069e5ba6b4c25",
+    "Unsupported.uexp": "bfe0f5c729bd869b537b8d4351cd75a76fd4fe3fe89dabfc00e86e358efbfac5"
+  },
+  "status": "partial",
+  "analysis-complete": false,
+  "counts": {"invocations": 10, "flagged": 1, "forbidden": 6, "affected-union": 7},
+  "coverage": {"gaps": ["unsupported-parsing", "unresolved-dispatch", "incomplete-extraction"], "evaluation-incomplete": true},
+  "diagnostics": [],
+  "forbidden": [
+    ["Calls", 0, "/Script/Corpus.Sensitive", "Record", "unavailable", null],
+    ["Calls", 15, "/Script/Corpus.Sensitive", "Record", "unavailable", null],
+    ["Calls", 24, "/Script/Corpus.Sensitive", "Record", "unavailable", null],
+    ["Map", 0, "/Script/Corpus.Sensitive", "Record", "unavailable", null],
+    ["Unresolved", 0, "/Script/Corpus.Sensitive", "Record", "unavailable", null],
+    ["Unsupported", 0, "/Script/Corpus.Sensitive", "Record", "unavailable", null]
+  ],
+  "flagged": [["Calls", 45, "/Game/Calls.BP_Corpus_C", "Local", "known", 1]],
+  "nonfinding-invocations": [
+    ["Calls", 35, "/Script/Corpus.Other", "Record", "unavailable", null],
+    ["Calls", 56, "/Game/Calls.BP_Corpus_C", "Local", "known", 1],
+    ["Unresolved", 10, null, null, "unavailable", null]
+  ],
+  "component-coverage": {
+    "inheritance-and-engine-graphs": "tests/OwnedFixtures.Verify/Program.cs:CheckGraph,CheckNormalized (external cooked evidence required)",
+    "metadata-negation-and-unresolved-dispatch": "tests/CompatibilityProbe.Tests/ExtractionTests.cs",
+    "malformed-bytecode-and-VM-offsets": "tests/CompatibilityProbe.Tests/ExtractionTests.cs",
+    "missing-keys-sidecars-mappings-dependencies": "tests/test_ingestion.py; tests/test_container.py; tests/OwnedFixtures.Verify/Program.cs",
+    "archive-quotas-cancellation-collisions-bombs": "tests/test_ingestion.py; tests/test_container.py",
+    "all-policy-source-level-error-and-isolation-paths": "tests/PolicyInput.Tests; tests/Scanner.Tests; tests/test_container.py; tests/test_action.py",
+    "large-output-strict-schema-duplicates-privacy": "tests/Scanner.Tests; tests/test_action.py; tests/test_report_schema.py"
+  },
+  "known-gaps": [
+    "Synthetic Map.umap is not an engine-created Level Blueprint; actual parent/child/Level evidence requires --owned-evidence.",
+    "Indirect/data-driven behavior and native implementation analysis are not shipped and are not proved by this corpus.",
+    "Imported parameter metadata remains unavailable; virtual dispatch remains unresolved.",
+    "Private external Action consumer access remains blocked; no visibility change is authorized.",
+    "Exact game/Windows compatibility and cooked binary redistribution authorization remain issue #2 gates."
+  ]
+}

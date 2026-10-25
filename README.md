@@ -18,7 +18,7 @@ For unresolved submissions, see the [manual runtime escalation runbook](docs/run
 It includes a trusted local canary, not authorization to deploy VMs or execute mods.
 
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
-The first implementation addresses [compatibility issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
+Compatibility and legal-fidelity limits remain tracked in [issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
 
 ## Build and test
 
@@ -40,6 +40,12 @@ cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_
 
 The dependency submodules are pinned. Do not substitute the current NuGet release
 for the evaluated UAssetAPI source revision.
+
+The [integrated regression gate](docs/regression-corpus.md) adds reviewed synthetic
+package/pak expectations, finding/coverage removal mutations, bounded boundary
+properties and optional complete CLI/container/Action parity. Authorized external
+owned cooks remain a separate release prerequisite; CI does not cook or redistribute
+engine-derived assets.
 
 ## Run a local compatibility experiment
 
@@ -81,7 +87,7 @@ report path must be new and must not use an asset/sidecar extension.
 Exit codes: `0` means this parser experiment completed without its tracked gaps;
 `2` means incomplete parsing or unresolved behavior; `1` means invalid setup,
 unsupported format, extraction failure, or report failure. **Every report still
-has `analysis-complete: false`.** These are not the future moderation gate codes.
+has `analysis-complete: false`.** These differ from the integrated scanner's gate codes.
 
 See [the compatibility baseline](docs/compatibility.md) for measured results,
 licensing, unsupported cases, and remaining issue #2 work.

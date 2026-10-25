@@ -1,0 +1,29 @@
+schema-version: 1
+rules:
+  - id: corpus-policy-canary
+    description: 'corpus-policy-canary ::warning:: ##[error] $() `not executed`'
+    effect: forbid
+    match:
+      kind: invocation
+      target:
+        kind: exact
+        owner: /Script/Corpus.Sensitive
+        function: Record
+  - id: corpus-local-constant
+    description: corpus-policy-canary local constant
+    effect: flag
+    match:
+      kind: all
+      expressions:
+        - kind: invocation
+          target:
+            kind: exact
+            owner: /Game/Calls.BP_Corpus_C
+            function: Local
+        - kind: argument
+          name: Value
+          predicate:
+            kind: equals
+            value:
+              kind: integer
+              value: 1

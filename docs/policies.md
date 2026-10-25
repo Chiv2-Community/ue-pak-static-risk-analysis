@@ -1,8 +1,11 @@
 # Policy YAML v1
 
-The policy parser, typed model, and standalone evaluator are implemented.
-**Fact extraction, probe integration, environment loading, CLI gates, and the
-reusable Action are not implemented yet.**
+The policy parser, typed model and evaluator are implemented. The
+[extraction API](extraction.md), [shared policy input](policy-input.md),
+[evaluation CLI](evaluate.md), [Docker scanner](container.md) and [Action](action.md)
+integrate them. The old compatibility probe remains a separate experiment.
+See the [integrated regression gate](regression-corpus.md) for measured coverage
+and remaining release prerequisites.
 
 Start with [the illustrative policy](../examples/starter-policy.yaml). It is not
 a complete security policy for any game. Editor integrations can use
