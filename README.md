@@ -14,6 +14,9 @@ The local [moderation handoff](docs/moderation.md) binds explicit human decision
 to exact pak/dependency bytes and trusted scan/build/policy context. It does not
 autoapprove or modify any platform, launcher or registry.
 
+For unresolved submissions, see the [manual runtime escalation runbook](docs/runtime-escalation.md).
+It includes a trusted local canary, not authorization to deploy VMs or execute mods.
+
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
 The first implementation addresses [compatibility issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
 
