@@ -3,8 +3,9 @@
 Linux-based inspection of cooked UE 4.25 assets and Blueprint calls.
 
 **Current status: compatibility experiment, not a moderation scanner.**
-There is a typed YAML policy parser, but no policy evaluator, production sandbox, Docker image, or reusable
-Action yet. Successful parsing does not mean a mod is safe.
+There are a typed YAML policy parser and standalone three-valued evaluator, but
+no normalized fact extractor, evaluator/probe integration, production sandbox,
+Docker image, or reusable Action yet. Successful parsing does not mean a mod is safe.
 
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
 The first implementation addresses [compatibility issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
@@ -73,13 +74,16 @@ licensing, unsupported cases, and remaining issue #2 work.
 
 ## Policy rules
 
-The [YAML policy ADT/schema](docs/policies.md) and strict parser are implemented.
+The [YAML policy ADT/schema](docs/policies.md), strict parser, and standalone
+evaluator are implemented. Evaluation consumes explicit normalized invocation
+facts; the compatibility probe does not produce these yet. Unknown evaluations
+and global coverage gaps remain separate from findings and gate decisions.
 See [the starter example](examples/starter-policy.yaml) and
 [machine-readable structural schema](schemas/policy-v1.schema.json).
 
-### Planned transport and evaluation
+### Planned transport and integration
 
-The policy evaluator is not implemented yet. The agreed interface is a
+The evaluator is not connected to asset extraction or a CLI gate. The planned transport is a
 `policy-rules` file or raw YAML in `UE_PAK_POLICY_RULES`, with exactly one source.
 The Action will expose `log-level`: `error`, `warn`, `info`, or `verbose`, default
 `info`.
