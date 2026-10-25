@@ -1,8 +1,8 @@
 # Trusted facts evaluation
 
-`src/Scanner` implements **evaluate**, not a pak scanner. Issue #11 remains open
-for orchestration in #12. There is no `scan --pak` command, parser subprocess,
-container, or sandbox in this delivery. Do not run the compatibility probe in a
+`src/Scanner` implements **evaluate** for bounded normalized facts. The separate
+[host Docker wrapper](container.md) implements `scan --pak`, keeping policy away
+from the untrusted parser. Do not run the old compatibility probe in a
 policy-bearing job to manufacture facts from untrusted assets.
 
 ## Usage
@@ -70,7 +70,9 @@ mapping/dependency identity actually used, each with its SHA-256 and unique kind
 an explicit empty list means none were used. Hashes are lowercase 64-digit hex.
 Producer version and dependency kinds are nonempty bounded ASCII identity tokens.
 
-Every constructor field is required. Closed `kind` tags cover resolved/unresolved
+Core constructor fields are required. Optional `inspection` carries bounded
+inventory/member hashes and inspection states; it contains no storage paths.
+Closed `kind` tags cover resolved/unresolved
 targets; known/unavailable argument metadata; constant/dynamic/missing values;
 and string/integer/boolean/null literals. Enums are names, never integers. Keys
 are kebab-case and case-sensitive; property order does not matter. Unknown or
@@ -87,7 +89,7 @@ identities and explicit coverage; absent/truncated input never becomes empty suc
 
 Producers must report honest coverage. Schema validation, hashes and an empty gap
 list are **not authenticity guarantees**: a compromised parser can fabricate
-semantics, omit calls or lie about hashes/completeness. #12 must run parsing in a
+semantics, omit calls or lie about hashes/completeness. The Docker wrapper runs parsing in a
 separate isolated container/worker with no policy mount/environment/credentials,
 not merely another same-UID process. Trusted orchestration must bind producer
 artifacts to the original pak and dependency hashes. Never replay raw parser
@@ -142,4 +144,4 @@ Process tests launch the built DLL for gates, file/environment loading, log-leve
 parity, warned disclosure, special files, malformed facts, deterministic ordering
 and output-write failures. Schema-example checks use Python `jsonschema` when
 installed; no new production dependency is required. Parser timeout, cancellation
-and private-policy isolation tests await #12's real parser boundary.
+and private-policy isolation tests run through the [Docker wrapper](container.md).

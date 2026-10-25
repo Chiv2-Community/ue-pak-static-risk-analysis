@@ -59,7 +59,7 @@ def collect(root, limits, report):
     report["records"] = list(records.values())
 
 
-def ingest(path, *, limits=None, scratch_parent=None, cancel=None, namespaces=(), protected=()):
+def ingest(path, *, limits=None, scratch_parent=None, cancel=None, namespaces=(), protected=(), inspector=None):
     """Return evidence only; payloads and snapshot are removed before returning.
 
     `cancel` is a threading.Event-compatible object. Limits/prefixes are trusted
@@ -135,6 +135,10 @@ def ingest(path, *, limits=None, scratch_parent=None, cancel=None, namespaces=()
                     report["diagnostic"] = reason
                 elif process is not None and process.returncode < 0:
                     report["diagnostic"] = "worker_resource_or_signal_failure"
+            # Only the trusted supervisor invokes the fixed inspector, after reaping
+            # the ingestion worker and before removing its generated payloads.
+            if inspector is not None:
+                inspector(root, report)
             # TemporaryDirectory cleanup happens on success, failure, and cancellation.
     except Exception:
         report["ingestion_status"] = "rejected"

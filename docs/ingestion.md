@@ -2,9 +2,10 @@
 
 `python3 -m pak_ingest archive.pak` emits JSON ingestion evidence. Exit 0 means
 the narrow ingestion checks passed, not that the archive is safe. Exit 1 means
-ingestion failed. `analysis_complete` is always false: parsed class inspection
-and invocation extraction are deferred to #4. Keep #3 open until that integration
-is delivered. This is not the shared CLI/report contract planned in #11.
+ingestion failed. `analysis_complete` is always false in this standalone inventory
+command. The [Docker wrapper](container.md) adds class/invocation inspection during
+the private payload lifetime and uses the shared report/gates. Keep #3 open for
+configured class/namespace/replacement enforcement and broader inventory coverage.
 
 ## Scope and evidence
 
@@ -74,8 +75,10 @@ using isolated Python mode, closed inherited descriptors and a fixed `LANG`/
 does not spawn subprocesses. Cancellation/timeout kills the full process group,
 reaps the worker, collects available evidence, and removes the controlled
 `TemporaryDirectory`. Outputs are ephemeral: the public API returns evidence, not
-member paths. A future inspector must run against this same private snapshot and
-payload set before cleanup, rather than reopen the original archive.
+member paths. The optional trusted `inspector(root, report)` callback runs after
+the worker is reaped and before cleanup. The container entry point uses this to
+launch only its fixed managed inspector against the same generated payload IDs.
+It is not a configurable executable hook or a standalone containment boundary.
 
 The input must be a regular final-component-nofollow file. It is copied once with
 a streaming input quota, checked for metadata changes during copying, SHA256
@@ -120,7 +123,8 @@ Linux rlimits, a private directory, and a scrubbed environment are **not a VM or
 container sandbox**. They do not isolate the network, filesystem, UID, syscalls,
 or Python interpreter. This code does not execute archive content, but interpreter
 or decompressor compromise is outside this boundary. Container/stronger isolation,
-network denial and an aggregate OS quota remain future #12 work. Do not label this
+network denial and aggregate OS quotas are provided by the separate
+[Docker wrapper](container.md), not by this API. Do not label this standalone
 foundation production-ready hostile-code containment.
 
 ## Validation

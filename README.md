@@ -2,10 +2,12 @@
 
 Linux-based inspection of cooked UE 4.25 assets and Blueprint calls.
 
-**Current status: compatibility experiment, not a moderation scanner.**
+**Current status: bounded static-analysis prototype, not a safety verdict.**
 There are a typed YAML policy parser, standalone three-valued evaluator, and
-normalized extraction API and [trusted facts evaluation CLI](docs/evaluate.md), but no pak CLI extraction/policy integration, production sandbox,
-Docker image, or reusable Action yet. Successful parsing does not mean a mod is safe.
+normalized extraction API, [trusted facts evaluation CLI](docs/evaluate.md), and
+[local Docker pak scan](docs/container.md) with separate parser/evaluator containers.
+There is no reusable Action yet. Use disposable workers; Docker is not a complete
+sandbox. Successful parsing does not mean a mod is safe.
 
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
 The first implementation addresses [compatibility issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
@@ -86,14 +88,16 @@ and global coverage gaps remain separate from findings and gate decisions.
 See [the starter example](examples/starter-policy.yaml) and
 [machine-readable structural schema](schemas/policy-v1.schema.json).
 
-### Trusted facts evaluation and pending integration
+### Trusted facts evaluation and pak scanning
 
 The Linux [shared policy input boundary](docs/policy-input.md) implements bounded
 file/environment loading and safe verbose rendering. The [evaluate CLI](docs/evaluate.md)
-uses it for bounded normalized facts and versioned reports, not pak parsing.
-It is not wired into the probe, Docker, or Action; issue #14 remains open pending integration.
+uses it for bounded normalized facts and versioned reports. The
+[host Docker wrapper](docs/container.md) integrates bounded pak extraction and
+policy evaluation without exposing policy to the parser. The old compatibility
+probe remains trusted-input-only; Action integration is pending.
 
-The evaluator is not connected to pak extraction. The evaluation CLI accepts a
+The evaluation CLI and Docker wrapper accept a
 `policy-rules` file or raw YAML in `UE_PAK_POLICY_RULES`, with exactly one source.
 The Action will expose `log-level`: `error`, `warn`, `info`, or `verbose`, default
 `info`.

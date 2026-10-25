@@ -12,6 +12,7 @@
     "engine-version": {"const": "4.25"},
     "producer-version": {"$ref": "#/$defs/identity"},
     "dependencies": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/dependency"}},
+    "inspection": {"$ref": "#/$defs/inspection"},
     "analysis": {
       "type": "object", "additionalProperties": false,
       "required": ["invocations", "coverage-gaps"],
@@ -22,6 +23,26 @@
     }
   },
   "$defs": {
+    "inspection": {
+      "type": "object", "additionalProperties": false, "required": ["status", "diagnostic", "members"],
+      "properties": {
+        "status": {"enum": ["validated", "rejected"]},
+        "diagnostic": {"$ref": "#/$defs/identity"},
+        "members": {"type": "array", "maxItems": 10000, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "path", "size", "sha256", "status", "signatures", "classes", "inspection-status", "sidecar-status"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identity"}, "path": {"$ref": "#/$defs/text"},
+            "size": {"type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807},
+            "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+            "status": {"enum": ["uninspected", "rejected", "payload_verified"]},
+            "signatures": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/identity"}},
+            "classes": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/text"}},
+            "inspection-status": {"$ref": "#/$defs/identity"}, "sidecar-status": {"$ref": "#/$defs/identity"}
+          }
+        }}
+      }
+    },
     "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "identity": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._+\\-]+$"},
     "text": {"type": "string", "maxLength": 4096},

@@ -22,7 +22,8 @@ public sealed record ReportContext(string ToolVersion, string EngineVersion, str
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PolicyRevision);
 public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisComplete,
     ReportContext Context, ReportCounts Counts, ReportCoverage Coverage,
-    ReportFinding[] FlaggedInvocations, ReportFinding[] ForbiddenInvocations, string[] Diagnostics)
+    ReportFinding[] FlaggedInvocations, ReportFinding[] ForbiddenInvocations, string[] Diagnostics,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null)
 {
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -53,7 +54,7 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
         return new(1, evaluation.IsIncomplete ? "partial" : "successful", !evaluation.IsIncomplete,
             ContextFor(facts, revision), new(byLocation.Count, flagged.Length, forbidden.Length, evaluation.Findings.Length),
             new(evaluation.CoverageGaps.Select(g => JsonNamingPolicy.KebabCaseLower.ConvertName(g.ToString())).ToArray(),
-                !evaluation.Uncertainties.IsEmpty), flagged, forbidden, []);
+                !evaluation.Uncertainties.IsEmpty), flagged, forbidden, [], facts.Inspection);
     }
 
     public static RiskReport Failed(string code, FactsDocument? facts = null, string? revision = null) =>
