@@ -78,7 +78,7 @@ class CallChainTransportTests(unittest.TestCase):
             reports.validate(value, schema, schema, {})
 
     def test_catalog_hash_revision_are_context_bound_and_moderation_copies_no_graph(self):
-        with tempfile.TemporaryDirectory(dir="/tmp/opencode", prefix="chain-moderation-") as directory:
+        with tempfile.TemporaryDirectory(prefix="chain-moderation-") as directory:
             pak, catalog = Path(directory) / "pak", Path(directory) / "catalog"
             pak.write_bytes(b"original-fixture-only")
             catalog.write_bytes((ROOT / "examples/capability-summaries-v1.json").read_bytes())

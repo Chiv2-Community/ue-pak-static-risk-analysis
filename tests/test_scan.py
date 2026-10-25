@@ -21,7 +21,7 @@ class ScanTests(unittest.TestCase):
             def run(self, mounts, entry, arguments, **options):
                 calls.append((list(mounts), list(arguments), options))
                 return (0, b"{}")
-        with tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pak, catalog = root / "pak", root / "catalog"
             pak.write_bytes(b"owned")
