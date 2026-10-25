@@ -10,6 +10,9 @@ A [reusable GitHub Action](docs/action.md) wraps that scanner; private external
 consumer access remains unverified. Use disposable workers; Docker is not a
 complete sandbox. Successful parsing does not mean a mod is safe.
 
+For unresolved submissions, see the [manual runtime escalation runbook](docs/runtime-escalation.md).
+It includes a trusted local canary, not authorization to deploy VMs or execute mods.
+
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
 The first implementation addresses [compatibility issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
 
