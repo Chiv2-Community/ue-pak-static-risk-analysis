@@ -75,6 +75,9 @@ rather than skip. It asserts:
 - Cooked/filter markers, no `RawExport`, and no bytecode parse/size failures.
 - Unversioned package marker and exact native int32/FString values with mappings.
 - Explicit incomplete/failure diagnostic without mappings.
+- Normalized native calls/constants and policy consumption: invocation-only rules
+  stay complete; required imported argument metadata remains Unknown under
+  negation; unrelated targets suppress irrelevant argument uncertainty.
 
 `receipt.json` records image/engine identity, exact commands and runtime arguments,
 source/tool SHA-256 hashes, reflection, output hashes, log hashes, and exit status.
@@ -111,6 +114,19 @@ source hashes, package/sidecar hashes, and resource preflight measurements.
 | `receipt.json` | `56b90c503c84cc9edeafff39579292e2cc54fc8b81e165ea05f85da27edd8ee2` |
 | `verify.log` | `fd00709b955fa4eed38bd0c2d1a79ad7e9629129ca9930acf08a3d6859dfd79c` |
 | `owned.usmap` | `f7f43158652035e106070c6dbc5eb0188543fe36dc91207b6be1ca8dd0a630eb` |
+
+The verifier was then extended against normalized extraction revision `452c786`.
+Reusing the same cooked bytes passed all checks above without recooking:
+
+```sh
+dotnet run --project tests/OwnedFixtures.Verify/OwnedFixtures.Verify.csproj --no-restore -- /tmp/opencode/owned-fixture-clean-20261025 > /tmp/opencode/owned-fixture-clean-20261025/normalized-verify.log
+```
+
+`normalized-verify.log` SHA-256:
+`bdb8314d94226db158ef16a9a878550d8f7a5af8c7de8c919c7d943fb3e0311b`.
+The original cook receipt and `verify.log` above are unchanged. GitHub CI builds
+the verifier and runs source/tool unit tests; it does not cook or claim the local
+engine-generated acceptance run.
 
 Earlier exploratory directories are not the final evidence selection. They retain
 the initial command-selection and engine/plugin-exclusion attempts; no artifacts

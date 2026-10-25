@@ -1,4 +1,6 @@
 using CompatibilityProbe;
+using PakRisk.Extraction;
+using PakRisk.Policy;
 using UAssetAPI;
 using UAssetAPI.ExportTypes;
 using UAssetAPI.Kismet.Bytecode.Expressions;
@@ -22,7 +24,7 @@ try
         var asset = PackageReader.Read(path, null);
         Check(!asset.HasUnversionedProperties, name + " must use tagged properties");
         CheckCooked(asset, name);
-        CheckGraph(asset, name, "ExecuteUbergraph_" + name, "/Script/OwnedFixtures.FixtureActor:RecordFixture",
+        CheckGraph(asset, path, name, "ExecuteUbergraph_" + name, "/Script/OwnedFixtures.FixtureActor:RecordFixture",
             name == "BP_OwnedParent" ? 101 : 202);
         var defaults = asset.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == "Default__" + name + "_C");
         CheckValues(defaults, number, text);
@@ -32,9 +34,10 @@ try
         Check(superclass == (name == "BP_OwnedParent" ? "FixtureActor" : "BP_OwnedParent_C"), name + " superclass identity");
     }
 
-    var map = PackageReader.Read(Path.Combine(root, "tagged/OwnedFixtures/Content/OwnedMap.umap"), null);
+    var mapPath = Path.Combine(root, "tagged/OwnedFixtures/Content/OwnedMap.umap");
+    var map = PackageReader.Read(mapPath, null);
     CheckCooked(map, "OwnedMap");
-    CheckGraph(map, "OwnedMap", "ExecuteUbergraph_OwnedMap", "/Script/OwnedFixtures.FixtureLibrary:ObserveFixture", 303);
+    CheckGraph(map, mapPath, "OwnedMap", "ExecuteUbergraph_OwnedMap", "/Script/OwnedFixtures.FixtureLibrary:ObserveFixture", 303);
     var taggedData = PackageReader.Read(Path.Combine(root, "tagged/OwnedFixtures/Content/Data/OwnedData.uasset"), null);
     Check(!taggedData.HasUnversionedProperties, "tagged native data control");
     CheckCooked(taggedData, "tagged OwnedData");
@@ -73,7 +76,7 @@ static void CheckCooked(UAsset asset, string name)
     Check(!asset.Exports.Any(e => e is RawExport), name + " must not contain RawExport");
 }
 
-static void CheckGraph(UAsset asset, string name, string ubergraph, string target, int argument)
+static void CheckGraph(UAsset asset, string path, string name, string ubergraph, string target, int argument)
 {
     var functions = asset.Exports.OfType<FunctionExport>().ToArray();
     Check(functions.Any(f => f.ObjectName.ToString() == ubergraph && f.ScriptBytecode is { Length: > 0 }), name + " executable ubergraph");
@@ -101,7 +104,37 @@ static void CheckGraph(UAsset asset, string name, string ubergraph, string targe
             matchedArgument = true;
         });
     Check(matchedArgument, name + " executable native argument");
+    CheckNormalized(asset, path, name, ubergraph, target, argument);
     Console.WriteLine($"{name}: functions={report.ParsedFunctions}/{report.Functions}; native-target={target}; argument={argument}; RawExport=0.");
+}
+
+static void CheckNormalized(UAsset asset, string path, string name, string ubergraph, string target, int argument)
+{
+    // These are loose cooked fixtures, not an archived submission identity.
+    var input = new PackageInput("owned-loose-cook", name, "/Game/" + name, path);
+    var extracted = InvocationExtractor.Inspect(asset, input);
+    Check(extracted.Functions.Length == 2, name + " normalized function coverage");
+    Check(extracted.Analysis.CoverageGaps.IsEmpty, name + " no global policy gaps");
+    var call = extracted.Invocations.Single(c => c.ContainingFunction.Name == ubergraph
+        && c.ResolvedIdentity is { } identity && identity.Owner + ":" + identity.Function == target);
+    Check(call.Arguments.Single().Value is ArgumentValue.Constant { Value: PolicyLiteral.Integer value }
+        && value.Value == argument, name + " normalized native constant");
+    Check(call.Fact.Arguments is ArgumentMetadata.Unavailable, name + " imported metadata remains unavailable");
+    var resolved = (InvocationTarget.Resolved)call.Target;
+    var match = new MatchExpression.Invocation(new TargetMatcher.Exact(resolved.Owner, resolved.Function));
+    PolicyEvaluation Evaluate(MatchExpression expression) => new PolicyEvaluator(new PolicyDocument(1,
+        [new PolicyRule("owned-call", "Owned fixture call", RuleEffect.Forbid, expression)])).Evaluate(extracted.Analysis);
+    var exact = Evaluate(match);
+    Check(exact.Findings.Length == 1 && !exact.IsIncomplete, name + " invocation-only policy completeness");
+    var valueMatch = new MatchExpression.Argument("Value", new ValuePredicate.EqualTo(new PolicyLiteral.Integer(argument)));
+    var unknown = Evaluate(new MatchExpression.All([match, new MatchExpression.Not(valueMatch)]));
+    Check(unknown.Findings.IsEmpty && unknown.Uncertainties.Length == 1 && unknown.IsIncomplete,
+        name + " unknown imported arguments survive negation");
+    var irrelevant = Evaluate(new MatchExpression.All([
+        new MatchExpression.Invocation(new TargetMatcher.Exact("/Script/Other.Owner", "Unrelated")), valueMatch]));
+    Check(irrelevant.Findings.IsEmpty && irrelevant.Uncertainties.IsEmpty && !irrelevant.IsIncomplete,
+        name + " unrelated target suppresses argument uncertainty");
+    Console.WriteLine($"{name}: normalized-calls={extracted.Invocations.Length}; invocation-policy=complete; required-imported-arguments=unknown; unrelated-policy=complete.");
 }
 
 static void CheckValues(NormalExport export, int number, string text)
