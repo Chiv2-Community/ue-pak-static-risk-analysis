@@ -66,7 +66,11 @@ try
         {
             if (exports.Length > 1) throw new InvalidDataException();
             var asset = PackageReader.Read(Payload(record), exports.Length == 1 ? Payload(exports[0]) : null, mapping);
-            if (exports.Length == 1) paired.Add(exports[0].GetProperty("id").GetString()!);
+            // Pairing accounts only for unclassified raw export bytes, not recognized content.
+            if (exports.Length == 1 && exports[0].TryGetProperty("signatures", out var exportSignatures)
+                && exportSignatures.GetArrayLength() == 1
+                && exportSignatures[0].GetString() == "unknown_content")
+                paired.Add(exports[0].GetProperty("id").GetString()!);
             // Bulk payload inspection is not implemented; it must not become clean.
             var input = new PackageInput("submission", path, logical, Payload(record));
             var extraction = InvocationExtractor.Inspect(asset, input);
@@ -81,7 +85,10 @@ try
         catch (Exception error) when (error is not OutOfMemoryException)
         { gaps.Add(CoverageGap.UnsupportedParsing); inspections[record.GetProperty("id").GetString()!] = "parse_failed"; }
     }
-    if (records.Any(r => !paired.Contains(r.GetProperty("id").GetString()!))) gaps.Add(CoverageGap.IncompleteExtraction);
+    if (records.Any(r => !paired.Contains(r.GetProperty("id").GetString()!)
+        || (r.TryGetProperty("signatures", out var signatures)
+            && signatures.EnumerateArray().Any(s => s.GetString() is not ("unknown_content" or "unreal_package_tag")))))
+        gaps.Add(CoverageGap.IncompleteExtraction);
     var pakHash = Hash("/input/submission");
     if (report.TryGetProperty("input_sha256", out var recordedHash) && recordedHash.GetString() != pakHash)
         throw new InvalidDataException();

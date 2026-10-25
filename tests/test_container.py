@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -278,6 +279,85 @@ except scan.Failure: sys.exit(3)
         self.assertEqual("rejected", partial["inspection"]["status"])
         self.assertEqual(1, partial["counts"]["forbidden"])
         self.assertEqual("entry_sha1", partial["inspection"]["diagnostic"])
+
+    @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for paired-signature scan")
+    def test_paired_exports_never_override_recognized_signatures(self):
+        content = Path(os.environ["OWNED_FIXTURE_EVIDENCE"]) / "tagged/OwnedFixtures/Content"
+        header = (content / "BP_OwnedParent.uasset").read_bytes()
+        exports = (content / "BP_OwnedParent.uexp").read_bytes()
+        path = "Content/BP_OwnedParent"
+        extra = ["--content-root", "Content=/Game"]
+        unrelated = POLICY.replace("function: RecordFixture", "function: Unrelated")
+        # Exercise the production Read API with both split and inline cooked data.
+        split, split_report = self.invoke(build([(path + ".uasset", header, False),
+            (path + ".uexp", exports, False)]), policy=unrelated, extra=extra)
+        inline, baseline = self.invoke(build([(path + ".uasset", header + exports, False)]),
+                                       policy=unrelated, extra=extra)
+        self.assertEqual((0, 0), (split.returncode, inline.returncode))
+        self.assertTrue(split_report["analysis-complete"])
+        self.assertTrue(baseline["analysis-complete"])
+        self.assertGreater(baseline["counts"]["invocations"], 0)
+        self.assertEqual(baseline["counts"], split_report["counts"])
+        self.assertEqual("paired_export_data", split_report["inspection"]["members"][1]["inspection-status"])
+        # Structural signature fixtures; none is executed or loaded as native code.
+        pe = bytearray(90)
+        pe[:2] = b"MZ"
+        struct.pack_into("<I", pe, 60, 64)
+        pe[64:68] = b"PE\0\0"
+        struct.pack_into("<H", pe, 84, 2)
+        pe[88:90] = b"\x0b\x01"
+        samples = [("elf", b"\x7fELF" + bytes(60)),
+                   ("pe", bytes(pe)), ("mach_o", b"\xcf\xfa\xed\xfe" + bytes(28)),
+                   ("shebang", b"#!/bin/sh\necho not-executed\n")]
+        for signature, data in samples:
+            with self.subTest(signature=signature):
+                members = [(path + ".uasset", header + exports, False), (path + ".uexp", data, False)]
+                result, report = self.invoke(build(members), policy=unrelated, extra=extra)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertEqual("partial", report["status"])
+                self.assertFalse(report["analysis-complete"])
+                self.assertIn("incomplete-extraction", report["coverage"]["gaps"])
+                self.assertEqual(baseline["counts"], report["counts"])
+                evidence = report["inspection"]["members"]
+                self.assertEqual(2, len(evidence))
+                self.assertEqual(signature, evidence[1]["signatures"][0])
+                self.assertEqual(hashlib.sha256(data).hexdigest(), evidence[1]["sha256"])
+                self.assertEqual("uninspected", evidence[1]["inspection-status"])
+                for key in ("sha256", "signatures", "inspection-status", "classes"):
+                    self.assertEqual(baseline["inspection"]["members"][0][key], evidence[0][key])
+        result, report = self.invoke(build([(path + ".uasset", header + exports, False),
+            (path + ".uexp", samples[0][1], False)]), extra=extra)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertFalse(report["analysis-complete"])
+        self.assertEqual(1, report["counts"]["forbidden"])
+
+    @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for adjacent inventory scan")
+    def test_package_names_bulk_and_unpaired_content_retain_gaps(self):
+        content = Path(os.environ["OWNED_FIXTURE_EVIDENCE"]) / "tagged/OwnedFixtures/Content"
+        inline = (content / "BP_OwnedParent.uasset").read_bytes() + (content / "BP_OwnedParent.uexp").read_bytes()
+        extra = ["--content-root", "Content=/Game"]
+        unrelated = POLICY.replace("function: RecordFixture", "function: Unrelated")
+        for suffix, signature in (("py", "script_candidate"), ("ini", "config_candidate")):
+            with self.subTest(suffix=suffix):
+                result, report = self.invoke(build([("Content/BP_OwnedParent." + suffix, inline, False)]),
+                                             policy=unrelated, extra=extra)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertFalse(report["analysis-complete"])
+                self.assertGreater(report["counts"]["invocations"], 0)
+                self.assertIn(signature, report["inspection"]["members"][0]["signatures"])
+        for name, data, signature in (("BP_OwnedParent.ubulk", b"\x7fELF" + bytes(60), "elf"),
+                                     ("BP_OwnedParent.ubulk", b"raw bulk", "unknown_content"),
+                                     ("Other.uexp", b"raw exports", "unknown_content"),
+                                     ("Other.bin", b"unknown", "unknown_content")):
+            with self.subTest(name=name, signature=signature):
+                result, report = self.invoke(build([("Content/BP_OwnedParent.uasset", inline, False),
+                    ("Content/" + name, data, False)]), policy=unrelated, extra=extra)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertFalse(report["analysis-complete"])
+                self.assertGreater(report["counts"]["invocations"], 0)
+                self.assertEqual(2, len(report["inspection"]["members"]))
+                self.assertIn(signature, report["inspection"]["members"][1]["signatures"])
+                self.assertEqual("uninspected", report["inspection"]["members"][1]["inspection-status"])
 
     @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for mapping scan")
     def test_real_unversioned_mapping_identity_and_missing_mapping(self):
