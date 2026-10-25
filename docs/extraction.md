@@ -3,7 +3,9 @@
 `PakRisk.Extraction.InvocationExtractor` is an additive library API in
 `src/CompatibilityProbe`. It reuses the pinned UE 4.25 `PackageReader` and
 `TargetResolver`. The existing compatibility CLI is not an extraction or policy
-gate. Issue #11 owns CLI integration; ingestion can call this API separately.
+gate. The [Docker scanner](container.md) integrates this API with ingestion and
+the shared evaluator; the [regression corpus](regression-corpus.md) checks those
+boundaries without changing extraction semantics.
 
 ```csharp
 var input = new PackageInput(

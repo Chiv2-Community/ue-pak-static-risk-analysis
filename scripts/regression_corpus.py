@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""Bounded integrated regression gate. No expectation-update mode or engine execution."""
+
+import argparse
+import copy
+import hashlib
+import itertools
+import json
+import os
+from pathlib import Path
+import random
+import resource
+import selectors
+import signal
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+from ingestion_fixture import build
+import report_validation
+
+GENERATOR = ROOT / "tests/Corpus.Generate/bin/Release/net10.0/Corpus.Generate.dll"
+SCANNER = ROOT / "src/Scanner/bin/Release/net10.0/Scanner.dll"
+CANARY = b"corpus-policy-canary"
+LIMIT = 32 * 1024 * 1024
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def location_for(asset, offset):
+    filename = asset + (".umap" if asset == "Map" else ".uasset")
+    member = "Content/" + filename
+    return {"asset": f"10:submission{len(member)}:{member}/Game/{asset}",
+            "function": f"/Game/{asset}.BP_Corpus_C:ExecuteUbergraph_Corpus#3", "offset": offset}
+
+
+def facts_oracle(facts, expected):
+    cases = expected["forbidden"] + expected["flagged"] + expected["nonfinding-invocations"]
+    actual = facts["analysis"]["invocations"]
+    require(len(actual) == len(cases), "normalized invocation count mismatch")
+    by_location = {tuple(call["location"][key] for key in ("asset", "function", "offset")): call for call in actual}
+    require(len(by_location) == len(cases), "duplicate normalized locations")
+    for asset, offset, owner, function, metadata, count in cases:
+        location = location_for(asset, offset)
+        call = by_location.get(tuple(location.values()))
+        target = {"kind": "resolved", "owner": owner, "function": function} if owner else {"kind": "unresolved"}
+        require(call is not None and call["target"] == target, "normalized location/target mismatch")
+        arguments = call["arguments"]
+        require(arguments["kind"] == metadata, "argument metadata mismatch")
+        if metadata == "known":
+            require(len(arguments["arguments"]) == count, "known argument count mismatch")
+            value = {"kind": "constant", "value": {"kind": "integer", "value": 1}} if offset == 45 else {"kind": "dynamic"}
+            require(arguments["arguments"] == [{"name": "Value", "value": value}], "constant/dynamic argument mismatch")
+    require(facts["analysis"]["coverage-gaps"] == expected["coverage"]["gaps"], "normalized coverage mismatch")
+
+
+def oracle(report, expected, pak_hash):
+    """Reviewed locations/targets are inputs, never inferred from produced findings."""
+    require(report["context"]["pak-sha256"] == pak_hash, "pak identity changed")
+    for key in ("status", "analysis-complete", "counts", "coverage", "diagnostics"):
+        require(report[key] == expected[key], "expectation mismatch: " + key)
+    for kind in ("flagged", "forbidden"):
+        findings = []
+        for case in expected[kind]:
+            asset, offset, owner, function, metadata, count = case
+            location = location_for(asset, offset)
+            identity = [pak_hash, location["asset"], location["function"], offset]
+            findings.append({"id": digest(json.dumps(identity, separators=(",", ":")).encode()),
+                             "location": location, "target": {"owner": owner, "function": function},
+                             "argument-metadata": metadata, "known-argument-count": count})
+        findings.sort(key=lambda f: (f["location"]["asset"], f["location"]["function"], f["location"]["offset"]))
+        require(report[kind + "-invocations"] == findings, "expectation mismatch: " + kind)
+
+
+def mutation_gate(report, expected, pak_hash):
+    oracle(report, expected, pak_hash)
+    # Keep each mutation schema/count-consistent so schema validation alone cannot catch it.
+    missing = copy.deepcopy(report)
+    missing["forbidden-invocations"].pop()
+    missing["counts"]["forbidden"] -= 1
+    missing["counts"]["affected-union"] -= 1
+    suppressed = copy.deepcopy(report)
+    suppressed["coverage"]["gaps"].remove("unsupported-parsing")
+    for name, mutant in (("removed-sensitive-finding", missing), ("suppressed-coverage-diagnostic", suppressed)):
+        report_validation.load(json.dumps(mutant).encode(), ROOT)
+        try:
+            oracle(mutant, expected, pak_hash)
+        except ValueError:
+            continue
+        raise ValueError("oracle accepted " + name)
+
+
+class Run:
+    def __init__(self, root):
+        self.root = root
+        self.sequence = 0
+        self.receipts = []
+
+    def command(self, args, *, env=None, timeout=30, codes=(0,), cwd=ROOT):
+        self.sequence += 1
+        prefix = self.root / f"process-{self.sequence:04d}"
+        environment = {k: v for k, v in os.environ.items() if k not in
+                       ("UE_PAK_POLICY_RULES", "UE_PAK_CONTAINER_TEST_IMAGE", "OWNED_FIXTURE_EVIDENCE")}
+        environment.update(DOTNET_EnableDiagnostics="0", DOTNET_GCHeapHardLimit="0x20000000")
+        environment.update(env or {})
+        def limits():
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        started = time.monotonic()
+        with prefix.with_suffix(".stdout").open("xb") as out, prefix.with_suffix(".stderr").open("xb") as err:
+            process = subprocess.Popen([str(a) for a in args], cwd=cwd, env=environment,
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       start_new_session=True, preexec_fn=limits)
+            try:
+                deadline, total = time.monotonic() + timeout, 0
+                with selectors.DefaultSelector() as selector:
+                    selector.register(process.stdout, selectors.EVENT_READ, out)
+                    selector.register(process.stderr, selectors.EVENT_READ, err)
+                    while selector.get_map():
+                        if time.monotonic() >= deadline:
+                            raise subprocess.TimeoutExpired(args, timeout)
+                        for key, _ in selector.select(.1):
+                            data = os.read(key.fileobj.fileno(), 65536)
+                            if not data:
+                                selector.unregister(key.fileobj)
+                                continue
+                            total += len(data)
+                            require(total < LIMIT, "process output budget")
+                            key.data.write(data)
+                process.wait(timeout=max(.01, deadline - time.monotonic()))
+            except BaseException:
+                # Give scan.py its bounded owned-container cleanup window before hard kill.
+                previous = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM)}
+                try:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    grace = time.monotonic() + 15
+                    while time.monotonic() < grace:
+                        process.poll()  # Reap the leader; descendants may still be cleaning up.
+                        try:
+                            os.killpg(process.pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(.05)
+                finally:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                    for sig, handler in previous.items():
+                        signal.signal(sig, handler)
+                raise
+            finally:
+                process.stdout.close()
+                process.stderr.close()
+        stdout, stderr = prefix.with_suffix(".stdout").read_bytes(), prefix.with_suffix(".stderr").read_bytes()
+        require(len(stdout) + len(stderr) < LIMIT, "process output budget")
+        require(sum(p.stat().st_size for p in self.root.rglob("*") if p.is_file()) <= 64 * 1024 * 1024,
+                "corpus artifact budget")
+        self.receipts.append({"command": [str(a) for a in args], "exit": process.returncode,
+                              "seconds": round(time.monotonic() - started, 3),
+                              "stdout-sha256": digest(stdout), "stderr-sha256": digest(stderr)})
+        require(process.returncode in codes, f"unexpected exit {process.returncode}; see {prefix}.stderr")
+        return stdout, stderr
+
+    def evaluate(self, facts, *, policy, extra=(), codes=(1,), source="environment", level="info", report_required=True):
+        destination = self.root / f"report-{self.sequence + 1}.json"
+        args = ["dotnet", SCANNER, "evaluate", "--facts", facts, "--report", destination,
+                "--engine-version", "4.25", "--log-level", level, *extra]
+        env = {}
+        if source == "file":
+            args += ["--policy-rules", ROOT / "fixtures/corpus/policy.yaml"]
+        elif source == "environment":
+            env["UE_PAK_POLICY_RULES"] = policy
+        logs = self.command(args, env=env, codes=codes)
+        if not destination.exists() and not report_required:
+            privacy(logs, b"")
+            return None
+        value = report_validation.load(destination.read_bytes(), ROOT)
+        privacy(logs, destination.read_bytes(), verbose=level == "verbose")
+        return value
+
+
+def privacy(logs, public, *, verbose=False):
+    require(CANARY not in public, "policy leaked into public channels")
+    text = b"".join(logs)
+    if verbose:
+        require(b"WARNING: VERBOSE" in text and CANARY in text, "verbose disclosure missing")
+        require(text.index(b"WARNING:") < text.index(CANARY), "verbose warning order")
+        require(b"::warning::" not in text and b"##[error]" not in text, "unescaped runner command")
+        require(b"\\u003a\\u003awarning" in text and b"\\u0023\\u0023" in text, "verbose policy not fully escaped")
+    else:
+        require(CANARY not in text, "policy leaked into ordinary logs")
+
+
+def archive_properties(run, packages):
+    from pak_ingest import ingest, Limits
+    randomizer = random.Random(150425)
+    valid = build([("Content/owned.bin", randomizer.randbytes(1024), False)])
+    samples = [valid[:randomizer.randrange(len(valid))] for _ in range(16)]
+    samples += [build([("../escape", b"original", False)]),
+                build([("Content/a", b"a", False), ("content/A", b"b", False)]),
+                build([("Content/bomb", b"x" * 1048576, True)])]
+    for index, data in enumerate(samples):
+        path = run.root / f"hostile-{index}.pak"
+        path.write_bytes(data)
+        result = ingest(path, limits=Limits(wall_seconds=1), scratch_parent=run.root)
+        require(result["ingestion_status"] == "rejected", "malformed archive accepted")
+        require(result["diagnostic"] not in ("worker_failure", "wall_timeout"), "archive property crashed/timed out")
+    # Repeat exact generated bytes through the supervised archive boundary, before Docker.
+    path = run.root / "synthetic.pak"
+    path.write_bytes(build(packages))
+    result = ingest(path, scratch_parent=run.root)
+    require(result["ingestion_status"] == "validated", "synthetic archive invalid")
+    return path
+
+
+def integrated(run, image, pak, expected, policy):
+    import scan
+    config = run.root / "docker-config"
+    config.mkdir()
+    docker = scan.Docker(config, image, 30)
+    image = docker.image  # Action accepts the resolved immutable image identity.
+    # Actual parser facts, then the actual direct evaluator: no alternate report producer.
+    status, facts = docker.run(scan.mount(pak, "/input/submission"), "/usr/local/bin/python3",
+        ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+    require(status == 0 and facts, "container facts failed")
+    facts_oracle(json.loads(facts), expected)
+    facts_path = run.root / "container-facts.json"
+    facts_path.write_bytes(facts)
+    direct = run.evaluate(facts_path, policy=policy)
+    oracle(direct, expected, digest(pak.read_bytes()))
+    mutation_gate(direct, expected, digest(pak.read_bytes()))
+    destination = run.root / "wrapper-report.json"
+    logs = run.command([sys.executable, ROOT / "scripts/scan.py", "scan", "--pak", pak,
+        "--report", destination, "--engine-version", "4.25", "--image", image,
+        "--content-root", "Content=/Game"], env={"UE_PAK_POLICY_RULES": policy}, timeout=120, codes=(1,))
+    wrapper = report_validation.load(destination.read_bytes(), ROOT)
+    privacy(logs, destination.read_bytes())
+    require(wrapper == direct, "complete CLI/container report mismatch")
+    for level in ("info", "verbose"):
+        workspace = run.root / ("action-" + level)
+        workspace.mkdir()
+        output, summary = workspace / "outputs", workspace / "summary"
+        output.touch()
+        summary.touch()
+        logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+            "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": image,
+            "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
+            "INPUT_PAK": str(pak), "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game",
+            "INPUT_LOG_LEVEL": level}, timeout=120, codes=(1,), cwd=workspace)
+        raw = (workspace / "report.json").read_bytes()
+        require(report_validation.load(raw, ROOT) == direct, "complete Action report mismatch")
+        privacy(logs, raw + output.read_bytes() + summary.read_bytes(), verbose=level == "verbose")
+        outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        for kind in ("flagged", "forbidden"):
+            require(json.loads(outputs[kind + "-invocations"]) == direct[kind + "-invocations"], "Action arrays mismatch")
+
+
+def components(run, image=None, evidence=None):
+    for name in ("CompatibilityProbe", "Policy", "PolicyInput", "Scanner"):
+        project = ROOT / f"tests/{name}.Tests/{name}.Tests.csproj"
+        run.command(["dotnet", "restore", project, "--locked-mode"], timeout=180)
+        run.command(["dotnet", "test", project, "-c", "Release", "--no-restore"], timeout=180)
+    env = {}
+    if image:
+        env["UE_PAK_CONTAINER_TEST_IMAGE"] = image
+    if evidence:
+        env["OWNED_FIXTURE_EVIDENCE"] = str(evidence)
+    # One serial suite: component Docker ownership assertions cannot race each other.
+    run.command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
+                env=env, timeout=900)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True, help="new private directory outside checkout")
+    parser.add_argument("--docker-image", help="existing local image; never pulled or published")
+    parser.add_argument("--owned-evidence", type=Path, help="required if specified; never silently skipped")
+    parser.add_argument("--components", action="store_true")
+    parser.add_argument("--release", action="store_true", help="require Docker, external owned evidence and all component suites")
+    args = parser.parse_args()
+    require(not args.release or (args.docker_image and args.owned_evidence and args.components),
+            "release requires --docker-image, --owned-evidence and --components")
+    root = args.output.resolve()
+    require(not root.is_relative_to(ROOT) and not root.exists(), "output must be new and external")
+    root.mkdir(mode=0o700)
+    run = Run(root)
+    completed = False
+    try:
+        expected = json.loads((ROOT / "fixtures/corpus/expectations.json").read_bytes())
+        if args.owned_evidence:
+            verify_owned(args.owned_evidence)
+        run.command(["dotnet", "--info"])
+        run.command(["dotnet", "restore", ROOT / "tests/Corpus.Generate/Corpus.Generate.csproj", "--locked-mode"], timeout=180)
+        run.command(["dotnet", "build", ROOT / "tests/Corpus.Generate/Corpus.Generate.csproj", "-c", "Release", "--no-restore"], timeout=180)
+        run.command(["dotnet", GENERATOR, "properties", "unused"])
+        generated = root / "packages"
+        run.command(["dotnet", GENERATOR, "generate", generated])
+        hashes = {p.name: digest(p.read_bytes()) for p in sorted(generated.iterdir())}
+        require(hashes == expected["serialized-sha256"], "serialized fixture hashes changed; manual review required")
+        packages = [("Content/" + p.name, p.read_bytes(), False) for p in sorted(generated.iterdir())]
+        pak = archive_properties(run, packages)
+        pak_hash = digest(pak.read_bytes())
+        require(pak_hash == expected["pak-sha256"], "deterministic pak hash changed")
+        raw, _ = run.command(["dotnet", GENERATOR, "facts", generated])
+        facts = json.loads(raw)
+        facts_oracle(facts, expected)
+        facts["pak-sha256"] = pak_hash
+        path = root / "facts.json"
+        path.write_text(json.dumps(facts))
+        policy = (ROOT / "fixtures/corpus/policy.yaml").read_text()
+        baseline = None
+        for source, level in itertools.product(("file", "environment"), ("error", "warn", "info", "verbose")):
+            value = run.evaluate(path, policy=policy, source=source, level=level)
+            oracle(value, expected, pak_hash)
+            baseline = value if baseline is None else baseline
+            require(value == baseline, "source/log-level report mismatch")
+        mutation_gate(baseline, expected, pak_hash)
+        for gates in itertools.product((False, True), repeat=3):
+            extra = [item for name, value in zip(("forbidden", "flagged", "incomplete"), gates)
+                     for item in ("--fail-on-" + ("incomplete" if name == "incomplete" else "any-" + name), str(value).lower())]
+            value = run.evaluate(path, policy=policy, extra=extra, codes=(int(any(gates)),))
+            require(value == baseline, "gate changed report evidence")
+        for level in ("error", "warn", "info", "verbose"):
+            value = run.evaluate(path, policy="corpus-policy-canary: [ ::warning:: ##[error]", level=level, codes=(2,))
+            require(value["status"] == "failed", "malformed policy succeeded")
+        for policy_value, source, extra in ((policy, "environment", ["--log-level", "invalid"]),
+                (policy, "environment", ["--policy-rules", ROOT / "fixtures/corpus/policy.yaml"]),
+                ("", "none", [])):
+            value = run.evaluate(path, policy=policy_value, source=source, extra=extra, codes=(2,), report_required=False)
+            require(value is None or value["status"] == "failed", "invalid configuration succeeded")
+        output_properties(baseline)
+        if args.docker_image:
+            integrated(run, args.docker_image, pak, expected, policy)
+        if args.owned_evidence:
+            project = ROOT / "tests/OwnedFixtures.Verify/OwnedFixtures.Verify.csproj"
+            run.command(["dotnet", "restore", project, "--locked-mode"], timeout=180)
+            run.command(["dotnet", "run", "--project", project, "-c", "Release", "--no-restore", "--", args.owned_evidence], timeout=180)
+        if args.components:
+            components(run, args.docker_image, args.owned_evidence)
+        completed = True
+        print("PASS: integrated synthetic corpus; both removal mutations rejected; Docker=" + str(bool(args.docker_image))
+              + "; external owned cook=" + str(bool(args.owned_evidence)))
+        return 0
+    finally:
+        (root / "execution.json").write_text(json.dumps({"schema-version": 1, "python": sys.version,
+            "completed": completed, "release-requested": args.release,
+            "source-sha256": {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
+                (ROOT / "scripts/regression_corpus.py", ROOT / "tests/Corpus.Generate/Program.cs",
+                 ROOT / "fixtures/corpus/expectations.json", ROOT / "fixtures/corpus/policy.yaml")},
+            "commands": run.receipts, "docker-requested": bool(args.docker_image),
+            "owned-evidence-requested": bool(args.owned_evidence)}, indent=2) + "\n")
+
+
+def output_properties(baseline):
+    randomizer = random.Random(150425)
+    for _ in range(32):
+        mutant = copy.deepcopy(baseline)
+        mutant["forbidden-invocations"][randomizer.randrange(6)]["location"]["offset"] = -randomizer.randrange(1, 1000)
+        try:
+            report_validation.load(json.dumps(mutant).encode(), ROOT)
+        except ValueError:
+            continue
+        raise ValueError("invalid output accepted")
+    encoded = json.dumps(baseline).encode()
+    for mutant in (encoded.replace(b'"schema-version": 1', b'"schema-version": 1, "schema-version": 1', 1),
+                   encoded.replace(b'"status": "partial"', b'"status": "Partial"', 1),
+                   encoded.replace(b'"schema-version": 1', b'"schema-version": 1, "rule-ids": ["corpus-policy-canary"]', 1)):
+        require(mutant != encoded, "output mutation did not apply")
+        try:
+            report_validation.load(mutant, ROOT)
+        except ValueError:
+            continue
+        raise ValueError("duplicate/case/private output accepted")
+
+
+def verify_owned(root):
+    require(root.is_dir(), "requested owned evidence missing")
+    receipt = json.loads((root / "receipt.json").read_bytes())
+    require(receipt["completed"], "requested cook incomplete")
+    for group, entries in receipt["output_sha256"].items():
+        for name, sha in entries.items():
+            path = (root / group / name).resolve()
+            require(path.is_relative_to(root.resolve()) and path.is_file(), "owned evidence path invalid")
+            require(digest(path.read_bytes()) == sha, "owned cook hash mismatch")
+    for name, sha in receipt["evidence_sha256"].items():
+        path = (root / name).resolve()
+        require(path.is_relative_to(root.resolve()) and path.is_file(), "owned receipt path invalid")
+        require(digest(path.read_bytes()) == sha, "owned evidence hash mismatch")
+    require(digest((root / "owned.usmap").read_bytes()) == receipt["usmap_sha256"], "owned mapping hash mismatch")
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    try:
+        raise SystemExit(main())
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        print("Corpus failed: " + str(error), file=sys.stderr)
+        raise SystemExit(1)

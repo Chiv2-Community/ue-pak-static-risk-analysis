@@ -1,0 +1,31 @@
+name: Integrated release regression gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build local sandbox; never publish
+        run: docker build -t ue-pak-corpus:local .
+      - name: Full component suites, synthetic corpus, parity and removal mutations
+        run: |
+          python3 -m venv "$RUNNER_TEMP/corpus-venv"
+          "$RUNNER_TEMP/corpus-venv/bin/pip" install PyYAML==6.0.3 jsonschema==4.25.1
+          "$RUNNER_TEMP/corpus-venv/bin/python" scripts/regression_corpus.py --output "$RUNNER_TEMP/corpus-evidence" --docker-image ue-pak-corpus:local --components
+      # No cook, game execution, registry publication, or generated artifact upload.
+      # Authorized external cooked evidence remains a separate local release prerequisite.
