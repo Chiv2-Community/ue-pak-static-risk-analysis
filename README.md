@@ -6,8 +6,9 @@ Linux-based inspection of cooked UE 4.25 assets and Blueprint calls.
 There are a typed YAML policy parser, standalone three-valued evaluator, and
 normalized extraction API, [trusted facts evaluation CLI](docs/evaluate.md), and
 [local Docker pak scan](docs/container.md) with separate parser/evaluator containers.
-There is no reusable Action yet. Use disposable workers; Docker is not a complete
-sandbox. Successful parsing does not mean a mod is safe.
+A [reusable GitHub Action](docs/action.md) wraps that scanner; private external
+consumer access remains unverified. Use disposable workers; Docker is not a
+complete sandbox. Successful parsing does not mean a mod is safe.
 
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
 The first implementation addresses [compatibility issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2).
@@ -95,11 +96,11 @@ file/environment loading and safe verbose rendering. The [evaluate CLI](docs/eva
 uses it for bounded normalized facts and versioned reports. The
 [host Docker wrapper](docs/container.md) integrates bounded pak extraction and
 policy evaluation without exposing policy to the parser. The old compatibility
-probe remains trusted-input-only; Action integration is pending.
+probe remains trusted-input-only. See the [Action guide](docs/action.md) for CI.
 
 The evaluation CLI and Docker wrapper accept a
 `policy-rules` file or raw YAML in `UE_PAK_POLICY_RULES`, with exactly one source.
-The Action will expose `log-level`: `error`, `warn`, `info`, or `verbose`, default
+The Action exposes `log-level`: `error`, `warn`, `info`, or `verbose`, default
 `info`.
 
 **Warning: `log-level: verbose` will print the policy to workflow logs. Anyone
