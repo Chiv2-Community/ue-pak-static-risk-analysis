@@ -5,6 +5,8 @@ namespace CompatibilityProbe;
 
 public static class TargetResolver
 {
+    private static readonly System.Reflection.PropertyInfo? NameIndex = typeof(FName).GetProperty("Index",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
     public sealed record Identity(string Owner, string Function, int PackageIndex);
 
     public static string? Resolve(UAsset asset, FPackageIndex? index, string localPackage)
@@ -14,12 +16,30 @@ public static class TargetResolver
     }
 
     public static Identity? ResolveIdentity(UAsset asset, FPackageIndex? index, string localPackage)
+        => ResolveIdentity(asset, index, localPackage, false);
+
+    internal static Identity? ResolveDataIdentity(UAsset asset, FPackageIndex? index, string localPackage)
+        => ResolveIdentity(asset, index, localPackage, true);
+
+    // Pinned FName.ToString invents "null" for absent storage. Dummy names with real
+    // values are supported; literal "null", NAME_None and instance suffixes stay intact.
+    internal static string? StoredName(FName? name)
     {
-        try { return ResolveCore(asset, index, localPackage); }
+        if (name?.Value?.Value is null) return null;
+        // GetNameReference also invents numeric text for out-of-range indices.
+        // Index is internal in the pinned API; an unknown layout fails closed.
+        if (!name.IsDummy && (NameIndex?.GetValue(name) is not int index || index < 0
+            || name.Asset is null || index >= name.Asset.GetNameMapIndexList().Count)) return null;
+        return name.ToString();
+    }
+
+    private static Identity? ResolveIdentity(UAsset asset, FPackageIndex? index, string localPackage, bool requireStoredNames)
+    {
+        try { return ResolveCore(asset, index, localPackage, requireStoredNames); }
         catch (Exception error) when (error is not OutOfMemoryException) { return null; }
     }
 
-    private static Identity? ResolveCore(UAsset asset, FPackageIndex? index, string localPackage)
+    private static Identity? ResolveCore(UAsset asset, FPackageIndex? index, string localPackage, bool requireStoredNames)
     {
         if (index is null || index.Index == 0)
             return null;
@@ -43,7 +63,9 @@ public static class TargetResolver
                 var import = asset.Imports[(int)position];
                 if (import is null || import.ObjectName is null || import.OuterIndex is null)
                     return null;
-                names.Add(import.ObjectName.ToString());
+                var name = requireStoredNames ? StoredName(import.ObjectName) : import.ObjectName.ToString();
+                if (name is null) return null;
+                names.Add(name);
                 current = import.OuterIndex.Index;
             }
             else
@@ -54,7 +76,9 @@ public static class TargetResolver
                 var export = asset.Exports[position];
                 if (export is null || export.ObjectName is null || export.OuterIndex is null)
                     return null;
-                names.Add(export.ObjectName.ToString());
+                var name = requireStoredNames ? StoredName(export.ObjectName) : export.ObjectName.ToString();
+                if (name is null) return null;
+                names.Add(name);
                 current = export.OuterIndex.Index;
             }
             characters += names[^1].Length + 1;

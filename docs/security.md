@@ -48,6 +48,9 @@ Not shipped: complete indirect resolution (#8), complete cross-package call-chai
 behavior (#9), data/default/configuration-driven effects (#10), native
 implementation analysis/nativized behavior, reachability, exploit detection,
 full serialization coverage, runtime computed arguments, or complete reconstruction.
+An experimental [serialized asset-data library](asset-data.md) collects bounded
+typed values and local default provenance only; it is not a data-risk evaluator
+or scanner/report integration and does not close #10.
 Imported signatures can remain unavailable: exact invocation-only rules may
 complete while argument-dependent rules stay Unknown, including under negation.
 See [exact matching/three-valued rules](policies.md) and

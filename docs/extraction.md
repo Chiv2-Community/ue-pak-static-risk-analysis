@@ -146,6 +146,10 @@ dynamic dispatch, and runtime argument computation remain unknown.
 
 ## Validation and remaining acceptance work
 
+The separate [partial asset-data API](asset-data.md) collects bounded serialized
+property/default provenance. It is not integrated into scanner facts/reports and
+does not close data-driven risk issue #10 or alter invocation extraction.
+
 `tests/CompatibilityProbe.Tests/ExtractionTests.cs` uses synthetic UAsset trees for
 nested/generated/map-style functions, owner/name collisions, dispatch, constants,
 loaded/legacy metadata, receivers, native boundaries, malformed references, raw
