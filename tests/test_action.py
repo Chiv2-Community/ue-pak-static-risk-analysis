@@ -1,5 +1,6 @@
 """Action adapter process tests, plus opt-in real Docker/owned-cook parity."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -98,6 +99,22 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(report()["forbidden-invocations"], json.loads(outputs["forbidden-invocations"]))
         self.assertTrue((self.workspace / outputs["report-path"]).exists())
         self.assertIn("Forbidden: 1", summary)
+
+    def test_call_chain_report_is_valid_but_witnesses_and_capabilities_are_not_action_outputs(self):
+        from test_call_chains import report as chain_report
+        value = chain_report()
+        value["context"]["capability-catalog-revision"] = "fixture-v1"
+        value["context"]["dependencies"].insert(0, {"kind": "capability-summaries", "sha256": "c" * 64})
+        value["call-chains"].update({"catalog-revision": "fixture-v1", "catalog-sha256": "c" * 64, "needs-review": True})
+        value["call-chains"]["witnesses"][0]["endpoint"]["capability"] = "public-capability-canary"
+        result, outputs, summary = self.invoke(value)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("true", outputs["report-available"])
+        self.assertEqual("1", outputs["forbidden-count"])
+        self.assertEqual(value["forbidden-invocations"], json.loads(outputs["forbidden-invocations"]))
+        self.assertNotIn("public-capability-canary", json.dumps(outputs) + summary)
+        self.assertNotIn("callers", json.dumps(outputs) + summary)
+        self.assertIn("call-chains", json.loads((self.workspace / outputs["report-path"]).read_bytes()))
 
     def test_metadata_output_delimiters_commands_and_summary_are_data(self):
         metadata = 'x\r\nFORGED=1\nEOF\n::error:: ##[error]\x1b[31m </summary> [link](https://bad) \U0001f600'
@@ -277,10 +294,12 @@ class ActionDockerTests(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
-    def invoke(self, payload=None, *, policy=POLICY, file=False, extra=None):
+    def invoke(self, payload=None, *, policy=POLICY, file=False, extra=None, catalog=None):
         workspace = self.root / str(len(list(self.root.iterdir())))
         workspace.mkdir()
         (workspace / "pak").write_bytes(build() if payload is None else payload)
+        if catalog is not None:
+            (workspace / "catalog.json").write_bytes(catalog)
         output, summary = workspace / "outputs", workspace / "summary"
         output.touch()
         summary.touch()
@@ -351,6 +370,38 @@ class ActionDockerTests(unittest.TestCase):
         self.assertNotIn(b"##[error]", result.stderr)
         self.assertNotIn("private-action-canary", json.dumps(outputs) + summary + json.dumps(value))
 
+    def test_actual_capability_catalog_input_and_outputs_precede_mandatory_review_failure(self):
+        fixtures = self.root / "chains"
+        generated = subprocess.run(["dotnet", "run", "--project", str(ROOT / "tests/Corpus.Generate"),
+            "-c", "Release", "--", "chains", str(fixtures)], capture_output=True, timeout=120)
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        payload = build([("Content/" + p.name, p.read_bytes(), False)
+                         for p in sorted(fixtures.iterdir()) if p.suffix in (".uasset", ".uexp")])
+        catalog = (ROOT / "examples/capability-summaries-v1.json").read_bytes()
+        disabled = {"INPUT_CONTENT_ROOT": "Content=/Game", "INPUT_FAIL_ON_INCOMPLETE": "false",
+                    "INPUT_FAIL_ON_ANY_FORBIDDEN": "false", "INPUT_FAIL_ON_ANY_FLAGGED": "false"}
+        result, _, baseline, _ = self.invoke(payload, extra=disabled)
+        self.assertEqual(0, result.returncode, result.stderr)
+        for file in (False, True):
+            result, outputs, value, summary = self.invoke(payload, file=file, catalog=catalog,
+                extra=dict(disabled, INPUT_CAPABILITY_SUMMARIES="catalog.json"))
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertEqual("true", outputs["report-available"])
+            self.assertEqual(baseline["counts"], value["counts"])
+            self.assertEqual("0", outputs["forbidden-count"])
+            self.assertTrue(value["call-chains"]["needs-review"])
+            self.assertEqual(hashlib.sha256(catalog).hexdigest(), value["call-chains"]["catalog-sha256"])
+            self.assertEqual(value["call-chains"]["catalog-revision"], value["context"]["capability-catalog-revision"])
+            self.assertTrue(any(w["endpoint"]["capability"] == "fixture-opaque-boundary"
+                                for w in value["call-chains"]["witnesses"]))
+            self.assertNotIn("fixture-opaque-boundary", json.dumps(outputs) + summary)
+            for entry in json.loads(catalog)["summaries"]:
+                self.assertNotIn(entry["provenance"], json.dumps(value) + (result.stdout + result.stderr).decode())
+        result, outputs, _, _ = self.invoke(payload, catalog=b'{"disclosure":"private"}',
+            extra=dict(disabled, INPUT_CAPABILITY_SUMMARIES="catalog.json"))
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual("failed", outputs["status"])
+
     def test_actual_missing_local_image_is_not_clean(self):
         result, outputs, value, summary = self.invoke(extra={"UE_PAK_ACTION_IMAGE": "sha256:" + "1" * 64})
         self.assertEqual(3, result.returncode, result.stderr)
@@ -373,7 +424,9 @@ class ActionDockerTests(unittest.TestCase):
         result, outputs, value, summary = self.invoke(build(members), extra=extra)
         self.assertEqual(1, result.returncode, result.stderr)
         self.assertEqual("2", outputs["forbidden-count"])
-        self.assertEqual("true", outputs["analysis-complete"])
+        self.assertEqual("false", outputs["analysis-complete"])
+        self.assertEqual([], value["coverage"]["gaps"])
+        self.assertIn("external-summary-unavailable", value["call-chains"]["diagnostics"])
         self.assertEqual(2, len(json.loads(outputs["forbidden-invocations"])))
         self.assertIn("Forbidden: 2", summary)
         self.assertEqual(6, value["counts"]["invocations"])

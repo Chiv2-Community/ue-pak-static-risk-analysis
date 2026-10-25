@@ -66,6 +66,11 @@ def facts_oracle(facts, expected):
     require(len(dispatch) == 1, "normalized indirect evidence count")
     require(dispatch[0]["origin"] == location_for("Unresolved", 10), "normalized indirect origin")
     require(dispatch[0]["candidates"] == [{"owner": "/Game/Unresolved.BP_Corpus_C", "function": "DynamicDispatch", "provenance": "local-function"}], "normalized indirect candidates")
+    graph = facts["analysis"]["call-graph"]
+    require(graph["schema-version"] == 1 and not graph["complete"], "graph context uncertainty lost")
+    require(len(graph["functions"]) == 8, "graph definition count")
+    require(all(any(f["asset"] == call["location"]["asset"] and f["location-function"] == call["location"]["function"]
+                    for f in graph["functions"]) for call in actual), "containing identity absent from graph")
 
 
 def oracle(report, expected, pak_hash):
@@ -89,13 +94,21 @@ def oracle(report, expected, pak_hash):
     require(possible[0]["evidence"]["origin"] == location_for("Unresolved", 10), "possible dispatch origin changed")
     require(possible[0]["possibly-forbidden"] and not possible[0]["possibly-flagged"], "possible policy match lost or made definite")
     require(possible[0]["evidence"]["resolution"] == "possible" and "open-world" in possible[0]["evidence"]["diagnostics"], "indirect uncertainty lost")
+    chains = report["call-chains"]
+    require(not chains["complete"] and "external-summary-unavailable" in chains["diagnostics"], "unknown summary hidden")
+    endpoints = [w["endpoint"] for w in chains["witnesses"] if not w["callers"]]
+    for effect in ("flagged", "forbidden"):
+        require({report_validation.compact(e["origin"]) for e in endpoints if e[effect]} ==
+                {report_validation.compact(f["location"]) for f in report[effect + "-invocations"]}, "actual endpoint witness lost")
 
 
 def mutation_gate(report, expected, pak_hash):
     oracle(report, expected, pak_hash)
     # Keep each mutation schema/count-consistent so schema validation alone cannot catch it.
     missing = copy.deepcopy(report)
-    missing["forbidden-invocations"].pop()
+    removed = missing["forbidden-invocations"].pop()
+    missing["call-chains"]["witnesses"] = [w for w in missing["call-chains"]["witnesses"]
+        if w["endpoint"]["origin"] != removed["location"]]
     missing["counts"]["forbidden"] -= 1
     missing["counts"]["affected-union"] -= 1
     suppressed = copy.deepcopy(report)
@@ -281,6 +294,92 @@ def integrated(run, image, pak, expected, policy):
             require(json.loads(outputs[kind + "-invocations"]) == direct[kind + "-invocations"], "Action arrays mismatch")
 
 
+def call_chain_gate(run, image=None):
+    generated = run.root / "call-chain-packages"
+    run.command(["dotnet", GENERATOR, "chains", generated])
+    path = generated / "facts.json"
+    catalog = ROOT / "examples/capability-summaries-v1.json"
+    policy = (ROOT / "fixtures/corpus/policy.yaml").read_text()
+    baseline = run.evaluate(path, policy=policy)
+    require(not baseline["call-chains"]["witnesses"], "fixture name automatically classified")
+    require("external-summary-unavailable" in baseline["call-chains"]["diagnostics"], "missing summary hidden")
+    supplied = run.evaluate(path, policy=policy, extra=["--capability-summaries", catalog])
+    for key in ("counts", "flagged-invocations", "forbidden-invocations", "possible-dispatches"):
+        require(supplied[key] == baseline[key], "catalog changed direct/indirect policy results")
+    chains = supplied["call-chains"]
+    require(chains["needs-review"] and not chains["complete"], "fixture uncertainty or review hidden")
+    require(chains["catalog-sha256"] == digest(catalog.read_bytes()), "catalog bytes not bound")
+    require(len(chains["witnesses"]) == 4, "cycle/duplicate chain witness count")
+    root = [w for w in chains["witnesses"] if w["callers"] and ":Root#" in w["callers"][0]["origin"]["function"]]
+    require(len(root) == 1 and len(root[0]["callers"]) == 2, "complete Root/Helper/Wrapper witness missing")
+    require(root[0]["endpoint"]["origin"]["offset"] == 0 and ":Wrapper#" in root[0]["endpoint"]["origin"]["function"],
+            "endpoint invocation confused with upstream witness")
+    possible = [w for w in chains["witnesses"] if w["resolution"] == "possible"]
+    require(len(possible) == 1 and possible[0]["callers"][0]["kind"] == "virtual", "possible edge upgraded or lost")
+    require(supplied["counts"] == {"invocations": 6, "flagged": 0, "forbidden": 0, "affected-union": 0}, "fixture invocation counts inflated")
+    relaxed = run.evaluate(path, policy=policy, extra=["--capability-summaries", catalog, "--fail-on-incomplete", "false"])
+    require(relaxed == supplied, "review gate changed evidence")
+    # The exact private report bytes, not a reconstructed graph, bind moderation approval.
+    import moderation
+    pak = run.root / "call-chain.pak"
+    pak.write_bytes(build([("Content/" + p.name, p.read_bytes(), False) for p in sorted(generated.iterdir())
+                           if p.suffix in (".uasset", ".uexp")]))
+    facts = json.loads(path.read_bytes())
+    facts["pak-sha256"] = digest(pak.read_bytes())
+    path.write_text(json.dumps(facts))
+    supplied = run.evaluate(path, policy=policy, extra=["--capability-summaries", catalog, "--policy-revision", "fixture-policy-v1"])
+    context = {"schema-version": 1, "kind": "scan-context", "scanner-identity": "git:" + "1" * 40,
+               "game-build": "original-fixture-only", "report-context": supplied["context"]}
+    raw = json.dumps(supplied).encode()
+    handoff = moderation.handoff(raw, context, pak, [("capability-summaries", catalog)])
+    require(handoff["routes"] == ["needs-review", "analysis-incomplete"], "capability moderation route lost")
+    review = moderation.review(handoff, "fixture-reviewer", "approve", "Original test contract only")
+    require(moderation.verify(review, context, pak, [("capability-summaries", catalog)], raw), "exact call-chain report binding failed")
+    changed = copy.deepcopy(supplied)
+    changed["call-chains"]["witnesses"][0]["endpoint"]["origin"]["offset"] += 1
+    try:
+        moderation.verify(review, context, pak, [("capability-summaries", catalog)], json.dumps(changed).encode())
+    except ValueError:
+        pass
+    else:
+        raise ValueError("call-chain evidence substitution accepted")
+    if image:
+        call_chain_container_gate(run, image, pak, catalog, policy)
+
+
+def call_chain_container_gate(run, image, pak, catalog, policy):
+    """Serial actual parser/wrapper/Action coverage; runs only with explicit Docker opt-in."""
+    import scan
+    config = run.root / "chain-docker-config"
+    config.mkdir()
+    docker = scan.Docker(config, image, 30)
+    status, facts = docker.run(scan.mount(pak, "/input/submission"), "/usr/local/bin/python3",
+        ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+    require(status == 0 and facts, "call-chain parser failed")
+    path = run.root / "chain-container-facts.json"
+    path.write_bytes(facts)
+    direct = run.evaluate(path, policy=policy, extra=["--capability-summaries", catalog])
+    destination = run.root / "chain-wrapper-report.json"
+    run.command([sys.executable, ROOT / "scripts/scan.py", "scan", "--pak", pak, "--report", destination,
+        "--engine-version", "4.25", "--image", docker.image, "--content-root", "Content=/Game",
+        "--capability-summaries", catalog], env={"UE_PAK_POLICY_RULES": policy}, timeout=120, codes=(1,))
+    require(report_validation.load(destination.read_bytes(), ROOT) == direct, "call-chain wrapper parity")
+    workspace = run.root / "chain-action"
+    workspace.mkdir()
+    output, summary = workspace / "outputs", workspace / "summary"
+    output.touch()
+    summary.touch()
+    logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+        "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image,
+        "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
+        "INPUT_PAK": str(pak), "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game",
+        "INPUT_CAPABILITY_SUMMARIES": str(catalog)}, timeout=120, codes=(1,), cwd=workspace)
+    raw = (workspace / "report.json").read_bytes()
+    require(report_validation.load(raw, ROOT) == direct, "call-chain Action parity")
+    privacy(logs, raw + output.read_bytes() + summary.read_bytes())
+    require(b"fixture-opaque-boundary" not in output.read_bytes() + summary.read_bytes(), "capability exposed in Action outputs")
+
+
 def components(run, image=None, evidence=None):
     for name in ("CompatibilityProbe", "Policy", "PolicyInput", "Scanner"):
         project = ROOT / f"tests/{name}.Tests/{name}.Tests.csproj"
@@ -355,6 +454,7 @@ def main():
             value = run.evaluate(path, policy=policy_value, source=source, extra=extra, codes=(2,), report_required=False)
             require(value is None or value["status"] == "failed", "invalid configuration succeeded")
         output_properties(baseline)
+        call_chain_gate(run, args.docker_image)
         if args.docker_image:
             integrated(run, args.docker_image, pak, expected, policy)
         if args.owned_evidence:

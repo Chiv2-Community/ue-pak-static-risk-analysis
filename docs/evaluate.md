@@ -78,6 +78,11 @@ Core constructor fields are required. Optional `inspection` carries bounded
 inventory/member hashes and inspection states; it contains no storage paths.
 Optional `analysis.dispatches` adds independently versioned, bounded possible
 target evidence; it never inserts callback invocations or changes YAML v1.
+Optional `analysis.call-graph` carries independently versioned bounded function
+definitions for [call-chain evidence](call-chains.md), not inferred invocation
+occurrences. New parser/extractor producers emit it; legacy absence means no
+call-chain analysis unless an explicit catalog is supplied. Optional
+`--capability-summaries` is trusted nonsecret input, never private policy syntax.
 Closed `kind` tags cover resolved/unresolved
 targets; known/unavailable argument metadata; constant/dynamic/missing values;
 and string/integer/boolean/null literals. Enums are names, never integers. Keys

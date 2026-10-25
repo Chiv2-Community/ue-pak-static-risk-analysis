@@ -232,6 +232,17 @@ public sealed class PolicyEvaluator
             || analysis.CoverageGaps.Any(gap => !Enum.IsDefined(gap)))
             InvalidFacts();
         var locations = new Dictionary<InvocationLocation, InvocationFact>();
+        if (analysis.CallGraph is { } graph)
+        {
+            if (graph.SchemaVersion != 1 || graph.Functions is null || graph.Functions.Length > 4096) InvalidFacts();
+            var keys = new HashSet<(string, string)>();
+            var characters = 0;
+            foreach (var function in graph.Functions!)
+                if (function is null || !Text(function.Asset) || !Text(function.LocationFunction)
+                    || !PolicyYaml.IsOwner(function.Owner) || !PolicyYaml.IsIdentifier(function.Function)
+                    || !keys.Add((function.Asset, function.LocationFunction))
+                    || (characters += CallGraphContext.Characters(function)) > CallGraphContext.MaxCharacters) InvalidFacts();
+        }
         var origins = new HashSet<InvocationLocation>();
         var candidates = 0;
         if (analysis.Dispatches is { } dispatches)

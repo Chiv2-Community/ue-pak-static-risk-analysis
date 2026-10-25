@@ -239,7 +239,7 @@ except scan.Failure: sys.exit(3)
             "-c", "Release", "--", "dispatch-budgets", str(fixtures)], capture_output=True, timeout=120)
         self.assertEqual(0, generated.returncode, generated.stderr)
         policy = (ROOT / "fixtures/corpus/policy.yaml").read_text()
-        for mode, count in (("origins", 6000), ("candidates", 40), ("bytes", 650)):
+        for mode, count in (("origins", 6000), ("candidates", 40), ("bytes", 650), ("graph", 0)):
             with self.subTest(mode=mode):
                 members = [("Content/" + path.name, path.read_bytes(), False)
                            for path in sorted((fixtures / mode).iterdir())]
@@ -251,7 +251,8 @@ except scan.Failure: sys.exit(3)
                 self.assertEqual(3, report["counts"]["invocations"])
                 self.assertEqual(3, report["counts"]["forbidden"])
                 self.assertEqual(3, len(report["forbidden-invocations"]))
-                self.assertTrue({"unresolved-dispatch", "incomplete-extraction"} <= set(report["coverage"]["gaps"]))
+                if mode != "graph":
+                    self.assertTrue({"unresolved-dispatch", "incomplete-extraction"} <= set(report["coverage"]["gaps"]))
                 self.assertNotIn("parser-failed", report["diagnostics"])
                 self.assertEqual(len(members), len(report["inspection"]["members"]))
                 self.assertEqual({name: hashlib.sha256(data).hexdigest() for name, data, _ in members},
@@ -265,7 +266,29 @@ except scan.Failure: sys.exit(3)
                     location = finding["location"]
                     identity = [hashlib.sha256(payload).hexdigest(), location["asset"], location["function"], location["offset"]]
                     self.assertEqual(hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest(), finding["id"])
-                possible = report["possible-dispatches"]
+                possible = report.get("possible-dispatches", [])
+                if mode == "graph":
+                    self.assertEqual([], possible)
+                    chains = report["call-chains"]
+                    self.assertFalse(chains["complete"])
+                    actual = [w["endpoint"]["origin"] for w in chains["witnesses"]
+                              if w["endpoint"]["forbidden"] and not w["callers"]]
+                    self.assertEqual([f["location"] for f in findings], actual)
+                    self.assertLessEqual(len(chains["witnesses"]), 256)
+                    snapshot = self.root / "graph-snapshot"
+                    scan.snapshot(self.root / "submission", snapshot, scan.INPUT_LIMIT)
+                    status, raw = self.docker.run(scan.mount(snapshot, "/input/submission"), "/usr/local/bin/python3",
+                        ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+                    self.assertEqual(0, status)
+                    facts = json.loads(raw)
+                    graph = facts["analysis"]["call-graph"]
+                    self.assertFalse(graph["complete"])
+                    self.assertTrue(graph["functions"])
+                    self.assertLessEqual(len(graph["functions"]), 4096)
+                    self.assertLessEqual(sum(len(f[k]) for f in graph["functions"]
+                                             for k in ("asset", "location-function", "owner", "function")), 65536)
+                    self.assertEqual(3, len(facts["analysis"]["invocations"]))
+                    continue
                 self.assertTrue(possible)
                 self.assertLessEqual(len(possible), 10000)
                 candidates = sum(len(p["evidence"]["candidates"]) for p in possible)
@@ -289,6 +312,11 @@ except scan.Failure: sys.exit(3)
                     entry_bytes = len(json.dumps(facts["analysis"]["dispatches"][-1], separators=(",", ":")).encode())
                     self.assertGreater(len(raw) + entry_bytes + 1, 8 * 1024 * 1024)
                 self.assertEqual(3, len(facts["analysis"]["invocations"]))
+                graph = facts["analysis"]["call-graph"]
+                self.assertFalse(graph["complete"])
+                self.assertLessEqual(len(graph["functions"]), 4096)
+                self.assertLessEqual(sum(len(f[k]) for f in graph["functions"]
+                                         for k in ("asset", "location-function", "owner", "function")), 65536)
                 self.assertEqual([p["evidence"] for p in possible], sorted(facts["analysis"]["dispatches"],
                     key=lambda d: tuple(d["origin"][key] for key in ("asset", "function", "offset"))))
                 status, again = self.docker.run(scan.mount(snapshot, "/input/submission"), "/usr/local/bin/python3",
@@ -325,7 +353,9 @@ except scan.Failure: sys.exit(3)
             result, report = self.invoke(payload, extra=root + disabled + ["--protected-path", "content", "--replacement-policy", mode])
             self.assertEqual(code, result.returncode, result.stderr)
             self.assertEqual(expected, report["content-policy"]["decision"])
-            self.assertTrue(report["analysis-complete"])
+            self.assertFalse(report["analysis-complete"])
+            self.assertEqual([], report["coverage"]["gaps"])
+            self.assertIn("external-summary-unavailable", report["call-chains"]["diagnostics"])
             self.assertEqual(1, report["counts"]["forbidden"])
             self.assertTrue(report["forbidden-invocations"])
         result, baseline = self.invoke(payload, extra=root + disabled)
@@ -450,7 +480,10 @@ except scan.Failure: sys.exit(3)
         self.assertEqual(report, other)
         self.assertEqual(6, report["counts"]["invocations"])
         self.assertEqual(2, report["counts"]["forbidden"])
-        self.assertTrue(report["analysis-complete"])
+        self.assertFalse(report["analysis-complete"])
+        self.assertEqual([], report["coverage"]["gaps"])
+        self.assertFalse(report["coverage"]["evaluation-incomplete"])
+        self.assertIn("external-summary-unavailable", report["call-chains"]["diagnostics"])
         hashes = {p: hashlib.sha256(data).hexdigest() for p, data, _ in members}
         self.assertEqual(hashes, {m["path"]: m["sha256"] for m in report["inspection"]["members"]})
         snapshot = self.root / "snapshot"
@@ -493,9 +526,11 @@ except scan.Failure: sys.exit(3)
             (path + ".uexp", exports, False)]), policy=unrelated, extra=extra)
         inline, baseline = self.invoke(build([(path + ".uasset", header + exports, False)]),
                                        policy=unrelated, extra=extra)
-        self.assertEqual((0, 0), (split.returncode, inline.returncode))
-        self.assertTrue(split_report["analysis-complete"])
-        self.assertTrue(baseline["analysis-complete"])
+        self.assertEqual((1, 1), (split.returncode, inline.returncode))
+        for report in (split_report, baseline):
+            self.assertFalse(report["analysis-complete"])
+            self.assertEqual([], report["coverage"]["gaps"])
+            self.assertIn("external-summary-unavailable", report["call-chains"]["diagnostics"])
         self.assertGreater(baseline["counts"]["invocations"], 0)
         self.assertEqual(baseline["counts"], split_report["counts"])
         self.assertEqual("paired_export_data", split_report["inspection"]["members"][1]["inspection-status"])

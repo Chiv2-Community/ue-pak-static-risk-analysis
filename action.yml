@@ -7,6 +7,9 @@ inputs:
   policy-rules:
     description: Policy FILE PATH, not inline YAML. Alternatively set raw multiline UE_PAK_POLICY_RULES in step env. Exactly one source is required.
     required: false
+  capability-summaries:
+    description: Optional trusted nonsecret capability-catalog FILE PATH. Exact bytes are context-bound; matched capabilities always require review. Never supplied by the submission.
+    required: false
   engine-version:
     description: Supported Unreal Engine version (4.25 only).
     default: '4.25'
@@ -87,6 +90,7 @@ runs:
         UE_PAK_ACTION_IMAGE: ${{ steps.prepare.outputs.image }}
         INPUT_PAK: ${{ inputs.pak }}
         INPUT_POLICY_RULES: ${{ inputs.policy-rules }}
+        INPUT_CAPABILITY_SUMMARIES: ${{ inputs.capability-summaries }}
         INPUT_ENGINE_VERSION: ${{ inputs.engine-version }}
         INPUT_LOG_LEVEL: ${{ inputs.log-level }}
         INPUT_FAIL_ON_ANY_FORBIDDEN: ${{ inputs.fail-on-any-forbidden }}

@@ -18,6 +18,11 @@ def compact(value):
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
 
 
+def invocation_key(location, target):
+    return (location["asset"], location["function"], location["offset"],
+            None if target is None else (target["owner"], target["function"]))
+
+
 def pairs(items):
     result = {}
     for key, value in items:
@@ -125,8 +130,10 @@ def load(data, root):
     counts = report["counts"]
     sets = []
     by_id = {}
+    finding_identities = {}
     for kind in ("flagged", "forbidden"):
         findings = report[kind + "-invocations"]
+        finding_identities[kind] = {invocation_key(f["location"], f["target"]) for f in findings}
         ids = {item["id"] for item in findings}
         require(len(ids) == len(findings) == counts[kind])
         sets.append(ids)
@@ -154,7 +161,29 @@ def load(data, root):
         require(candidate_count <= 10000)
         require(bool(evidence["candidates"]) or not (dispatch["possibly-flagged"] or dispatch["possibly-forbidden"]))
     incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
-                      or report.get("content-policy", {}).get("incomplete", False))
+                      or report.get("content-policy", {}).get("incomplete", False)
+                      or not report.get("call-chains", {}).get("complete", True))
+    if "call-chains" in report:
+        chains = report["call-chains"]
+        require(chains["complete"] == (not chains["diagnostics"]))
+        require((chains["catalog-revision"] is None) == (chains["catalog-sha256"] is None))
+        require(chains["catalog-revision"] == report["context"].get("capability-catalog-revision"))
+        catalog_dependencies = [d for d in report["context"]["dependencies"] if d["kind"] == "capability-summaries"]
+        require(catalog_dependencies == ([] if chains["catalog-sha256"] is None else
+                [{"kind": "capability-summaries", "sha256": chains["catalog-sha256"]}]))
+        require(len(compact(chains).encode()) <= 512 * 1024)
+        for witness in chains["witnesses"]:
+            endpoint = witness["endpoint"]
+            possible = endpoint["resolution"] == "possible" or any(s["resolution"] == "possible" for s in witness["callers"])
+            require(witness["resolution"] == ("possible" if possible else "direct"))
+            require(endpoint["resolution"] != "possible" or not (endpoint["flagged"] or endpoint["forbidden"]))
+            require(endpoint["flagged"] or endpoint["forbidden"] or endpoint["capability"] is not None)
+            for effect in ("flagged", "forbidden"):
+                if endpoint[effect]:
+                    require(invocation_key(endpoint["origin"], endpoint["target"]) in finding_identities[effect])
+            require(endpoint["capability"] is None or chains["needs-review"])
+            require(endpoint["capability"] is None or chains["catalog-sha256"] is not None)
+            require(all(s["resolution"] == ("direct" if s["kind"] == "invocation" else "possible") for s in witness["callers"]))
     require(report["analysis-complete"] == (not incomplete))
     if report["status"] == "failed":
         require(all(count == 0 for count in counts.values()))

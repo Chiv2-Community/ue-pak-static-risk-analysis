@@ -43,6 +43,55 @@ public sealed class IndirectDispatchTests
     private static IndirectDispatch Dispatch(ExtractionReport report) => Assert.Single(report.Analysis.Dispatches!);
 
     [Fact]
+    public void GraphDefinitionsUseActualContainingExportOwnerNotCollidingFunctionNames()
+    {
+        var asset = Asset();
+        var first = Class(asset, "First");
+        var second = Class(asset, "Second");
+        var target = Function(asset, first, "Helper");
+        Function(asset, second, "Helper");
+        Function(asset, first, "Root", new EX_FinalFunction { StackNode = new(target), Parameters = [] });
+        var report = InvocationExtractor.Inspect(asset, Input);
+        var graph = report.Analysis.CallGraph!;
+        Assert.Equal(3, graph.Functions.Length);
+        var call = Assert.Single(report.Analysis.Invocations);
+        var source = Assert.Single(graph.Functions, f => f.Asset == call.Location.Asset && f.LocationFunction == call.Location.Function);
+        Assert.Equal("/Game/Indirect.First", source.Owner);
+        Assert.Equal("Root", source.Function);
+        Assert.Equal("/Game/Indirect.First", Assert.IsType<InvocationTarget.Resolved>(call.Target).Owner);
+        Assert.Contains(graph.Functions, f => f.Owner == "/Game/Indirect.Second" && f.Function == "Helper");
+        PolicyEvaluator.Validate(report.Analysis);
+    }
+
+    [Fact]
+    public void GraphOmitsUnresolvedContainingOwnerRatherThanInventingIdentity()
+    {
+        var asset = Asset();
+        Function(asset, 999, "Root", new EX_FinalFunction { StackNode = new(0), Parameters = [] });
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Empty(report.Analysis.CallGraph!.Functions);
+        Assert.False(report.Analysis.CallGraph.Complete);
+        Assert.Single(report.Analysis.Invocations);
+        Assert.Contains(report.Functions[0].Diagnostics, d => d.Code == "containing-function-identity-unresolved");
+    }
+
+    [Fact]
+    public void OptionalGraphDefinitionLimitDoesNotStopLaterBytecodeExtraction()
+    {
+        var asset = Asset();
+        var owner = Class(asset, "Owner");
+        var target = Function(asset, owner, "Target");
+        for (var i = 0; i < 1000; i++) Function(asset, owner, "F" + i);
+        Function(asset, owner, "Last", new EX_FinalFunction { StackNode = new(target), Parameters = [] });
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.False(report.Analysis.CallGraph!.Complete);
+        Assert.True(report.Analysis.CallGraph.Functions.Sum(CallGraphContext.Characters) <= CallGraphContext.MaxCharacters);
+        Assert.Equal("Last", Assert.Single(report.Invocations).ContainingFunction.Name);
+        Assert.DoesNotContain(report.Analysis.CallGraph.Functions, f => f.Function == "Last");
+        Assert.Equal(1002, report.Functions.Length);
+    }
+
+    [Fact]
     public void BaseCallRetainsOverrideCandidatesAndOriginalUnresolvedInvocation()
     {
         var asset = Asset();

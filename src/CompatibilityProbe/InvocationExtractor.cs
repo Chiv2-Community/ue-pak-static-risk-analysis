@@ -159,8 +159,13 @@ public static class InvocationExtractor
         // Keep corruption, count mismatches, limits, and all other diagnostics global.
         if (all.Any(d => d.Code is not ("imported-signature-unavailable" or "parameter-metadata-unavailable")))
             gaps.Add(CoverageGap.IncompleteExtraction);
+        var graphFunctions = functions.Where(f => PolicyYaml.IsOwner(f.Identity.Owner) && PolicyYaml.IsIdentifier(f.Identity.Name)
+            && !f.Diagnostics.Any(d => d.Code == "containing-function-identity-unresolved")).ToArray();
+        var graph = CallGraphContext.Bounded(graphFunctions.Select(f => new CallGraphFunction(input.FactIdentity, f.Identity.Qualified,
+                f.Identity.Owner, f.Identity.Name, f.Native)), graphFunctions.Length == functions.Count
+            && all.All(d => d.Code is "imported-signature-unavailable" or "parameter-metadata-unavailable"));
         return new(input, exports, inspectedExports, calls.ToImmutableArray(), functions.ToImmutableArray(), diagnostics.ToImmutableArray(),
-            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray(), dispatches is { Count: > 0 } ? dispatches.ToArray() : null));
+            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray(), dispatches is { Count: > 0 } ? dispatches.ToArray() : null, graph));
     }
 
     private static void Extract(UAsset asset, PackageInput input, FunctionIdentity containing,

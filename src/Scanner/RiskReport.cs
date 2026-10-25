@@ -11,6 +11,7 @@ public sealed record GateOptions(bool FailOnAnyForbidden = true, bool FailOnAnyF
     public bool Fails(bool forbidden, bool flagged, bool incomplete) =>
         (FailOnAnyForbidden && forbidden) || (FailOnAnyFlagged && flagged) || (FailOnIncomplete && incomplete);
     public bool Fails(RiskReport report) => report.ContentPolicy?.Decision is "reject" or "needs-review"
+        || report.CallChains?.NeedsReview == true
         || Fails(report.Counts.Forbidden > 0, report.Counts.Flagged > 0, !report.AnalysisComplete);
 }
 
@@ -23,14 +24,22 @@ public sealed record ReportPossibleDispatch(IndirectDispatch Evidence, bool Poss
 public sealed record ReportCoverage(string[] Gaps, bool EvaluationIncomplete);
 public sealed record ReportContext(string ToolVersion, string EngineVersion, string? PakSha256,
     string? ProducerVersion, DependencyIdentity[] Dependencies,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PolicyRevision);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PolicyRevision,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CapabilityCatalogRevision = null);
 public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisComplete,
     ReportContext Context, ReportCounts Counts, ReportCoverage Coverage,
     ReportFinding[] FlaggedInvocations, ReportFinding[] ForbiddenInvocations, string[] Diagnostics,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContentResult? ContentPolicy = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReportPossibleDispatch[]? PossibleDispatches = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReportPossibleDispatch[]? PossibleDispatches = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallChainEvidence? CallChains = null)
 {
+    public RiskReport WithCallChains(CallChainEvidence? evidence) => evidence is null ? this : this with
+    {
+        CallChains = evidence,
+        AnalysisComplete = AnalysisComplete && evidence.Complete,
+        Status = !evidence.Complete && Status == "successful" ? "partial" : Status
+    };
     public RiskReport WithContent(ContentResult? result) => result is null ? this : this with
     {
         ContentPolicy = result,
@@ -43,7 +52,8 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
         WriteIndented = true
     };
 
-    public static RiskReport Create(FactsDocument facts, PolicyEvaluation evaluation, bool detail, string? revision)
+    public static RiskReport Create(FactsDocument facts, PolicyEvaluation evaluation, bool detail, string? revision,
+        CapabilityCatalog? catalog = null)
     {
         var byLocation = facts.Analysis.Invocations.DistinctBy(f => f.Location).ToDictionary(f => f.Location);
         var possibleByOrigin = evaluation.PossibleDispatches.IsDefault
@@ -67,8 +77,8 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
             }).ToArray();
         var flagged = Findings(RuleEffect.Flag);
         var forbidden = Findings(RuleEffect.Forbid);
-        return new(1, evaluation.IsIncomplete ? "partial" : "successful", !evaluation.IsIncomplete,
-            ContextFor(facts, revision), new(byLocation.Count, flagged.Length, forbidden.Length, evaluation.Findings.Length),
+        var report = new RiskReport(1, evaluation.IsIncomplete ? "partial" : "successful", !evaluation.IsIncomplete,
+            ContextFor(facts, revision, catalog), new(byLocation.Count, flagged.Length, forbidden.Length, evaluation.Findings.Length),
             new(evaluation.CoverageGaps.Select(g => JsonNamingPolicy.KebabCaseLower.ConvertName(g.ToString())).ToArray(),
                  !evaluation.Uncertainties.IsEmpty), flagged, forbidden, [], facts.Inspection, PossibleDispatches:
              facts.Analysis.Dispatches is { Length: > 0 } dispatches ? dispatches
@@ -77,12 +87,22 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
                      { Candidates = d.Candidates.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),
                        Diagnostics = d.Diagnostics.Order(StringComparer.Ordinal).ToImmutableArray() },
                      PossibleEffect(d, RuleEffect.Flag), PossibleEffect(d, RuleEffect.Forbid))).ToArray() : null);
+        return report.WithCallChains(facts.Analysis.CallGraph is not null || catalog is not null
+            ? Scanner.CallChains.Analyze(facts.Analysis, evaluation, catalog) : null);
     }
 
     public static RiskReport Failed(string code, FactsDocument? facts = null, string? revision = null) =>
         new(1, "failed", false, ContextFor(facts, revision), new(0, 0, 0, 0), new([], true), [], [], [code]);
 
-    private static ReportContext ContextFor(FactsDocument? facts, string? revision) => new(
-        typeof(RiskReport).Assembly.GetName().Version!.ToString(), "4.25", facts?.PakSha256, facts?.ProducerVersion,
-        facts?.Dependencies.OrderBy(d => d.Kind, StringComparer.Ordinal).ToArray() ?? [], revision);
+    private static ReportContext ContextFor(FactsDocument? facts, string? revision, CapabilityCatalog? catalog = null)
+    {
+        var dependencies = facts?.Dependencies.ToList() ?? [];
+        if (catalog is not null)
+        {
+            if (dependencies.Any(d => d.Kind == "capability-summaries") || dependencies.Count >= 256) throw new FactsException();
+            dependencies.Add(new("capability-summaries", catalog.Sha256));
+        }
+        return new(typeof(RiskReport).Assembly.GetName().Version!.ToString(), "4.25", facts?.PakSha256, facts?.ProducerVersion,
+            dependencies.OrderBy(d => d.Kind, StringComparer.Ordinal).ToArray(), revision, catalog?.Document.Revision);
+    }
 }

@@ -17,11 +17,12 @@ are implied. See [operator examples](operators.md) for setup and safe collection
 | `--image` | local image reference | `ue-pak-static-risk-analysis:dev` | `ue-pak-release-check:local` | Operator-built image; resolves to immutable local ID; never pulled during scan. |
 | `--timeout` | number, seconds `(0,600]` | `60` | `90` | Per-container deadline, not whole-command deadline. |
 | `--policy-rules` | file path | none | `/private/rules.yaml` | Exactly one file or raw environment policy source. |
+| `--capability-summaries` | trusted nonsecret file path | none | `/approved/catalog.json` | Optional catalog v1, 256 KiB/256 exact targets; matched capabilities always require review. Parser never receives it. |
 | `--log-level` | enum: `error`, `warn`, `info`, `verbose` | `info` | `info` | **Warning: verbose prints the full policy to logs; anyone with log access can read it. Env values are not masked secrets; step setup/admin access can expose them independently.** |
 | `--policy-revision` | opaque ASCII token, 1–128 characters | none | `review-2026-001` | Operator-controlled revision, not policy-content hash; required for moderation context. |
 | `--fail-on-any-forbidden` | enum: `true`, `false` | `true` | `true` | Fail if any forbidden invocation exists. |
 | `--fail-on-any-flagged` | enum: `true`, `false` | `false` | `true` | Fail if any flagged invocation exists. |
-| `--fail-on-incomplete` | enum: `true`, `false` | `true` | `true` | Fail for coverage, rule uncertainty or content incompleteness. |
+| `--fail-on-incomplete` | enum: `true`, `false` | `true` | `true` | Fail for coverage, rule uncertainty, content or call-chain incompleteness. |
 | `--moderator-detail` | presence switch | absent | `--moderator-detail` | Add matched rule IDs; requires separately restricted readers, not authentication. |
 | `--mapping` | file path | none | `/approved/owned.usmap` | One authorized property mapping, at most 16 MiB. |
 | `--content-root` | `VIRTUAL_PREFIX=/LogicalRoot` | none | `Content=/Game` | One explicit virtual-to-logical mapping; no game root inferred. |
@@ -41,7 +42,7 @@ See [content semantics/limits](content-policy.md).
 
 `dotnet src/Scanner/bin/Release/net10.0/Scanner.dll COMMAND` has no help switch.
 Unknown or repeated nonrepeatable options fail. It accepts the shared policy,
-log/revision, three gates, moderator-detail and four content flags above, with
+log/revision, capability summaries, three gates, moderator-detail and four content flags above, with
 the same defaults. Host-only image/timeout/pak/mapping/content-root are not flags.
 
 | Input | Type | Default | Example | Description |
@@ -54,11 +55,12 @@ the same defaults. Host-only image/timeout/pak/mapping/content-root are not flag
 | `--expected-mapping-sha256` | lowercase SHA-256 | none | trusted 64-hex digest | Bind the unique mapping dependency; pak binding required too. |
 | `--reason` | enum: `parser-failed`, `parser-output-limit`, `wall-timeout`, `cancelled`, `container-unavailable`, `input-failed`, `invalid-configuration` | required for failure-report | `parser-failed` | Internal wrapper failure report; not an alternate empty-success path. |
 | `--policy-rules` | file path | none | `/private/rules.yaml` | Exactly one file/env source for evaluate/validate. |
+| `--capability-summaries` | trusted nonsecret file path | none | `/approved/catalog.json` | Optional bounded catalog v1; validates before verbose policy disclosure. Exact digest/revision bind report context. |
 | `--log-level` | enum: `error`, `warn`, `info`, `verbose` | `info` | `info` | **Warning: verbose prints the full policy to logs; anyone with log access can read it. Env is not masked; step setup/admin access can expose it independently.** |
 | `--policy-revision` | opaque ASCII token, 1–128 characters | none | `review-2026-001` | Caller-owned identity, not policy-content hash. |
 | `--fail-on-any-forbidden` | enum: `true`, `false` | `true` | `true` | Fail on any forbidden invocation. |
 | `--fail-on-any-flagged` | enum: `true`, `false` | `false` | `true` | Fail on any flagged invocation. |
-| `--fail-on-incomplete` | enum: `true`, `false` | `true` | `true` | Fail on coverage, evaluation or content incompleteness. |
+| `--fail-on-incomplete` | enum: `true`, `false` | `true` | `true` | Fail on coverage, evaluation, content or call-chain incompleteness. |
 | `--moderator-detail` | presence switch | absent | `--moderator-detail` | Adds matched rule IDs; separately restrict report readers. |
 | `--allowed-path` | repeatable virtual prefix | empty list | `Content/Mods` | Reject known nonmatching members. |
 | `--allowed-class` | repeatable exact class identity | empty list | `/Script/CoreUObject.Function` | Reject known nonmatching classes. |
@@ -81,6 +83,7 @@ allowlists, policy revision or moderator-detail input exists.
 | --- | --- | --- | --- | --- |
 | `pak` | runner file path | required | `/approved/mod.pak` | Original pak only; no submission checkout. |
 | `policy-rules` | file path | none | `/private/rules.yaml` | Alternative to raw step environment YAML; exactly one source. |
+| `capability-summaries` | trusted nonsecret runner file path | none | `/approved/catalog.json` | Optional bounded catalog v1, never submission-controlled; capability matches always require review. |
 | `engine-version` | enum: `4.25` | `4.25` | `'4.25'` | Supported parsing hint. |
 | `log-level` | enum: `error`, `warn`, `info`, `verbose` | `info` | `info` | **Warning: verbose prints the full policy to workflow logs; anyone with log access can read it. Env values are not masked secrets; step setup/admin access can expose them independently.** |
 | `fail-on-any-forbidden` | enum: `true`, `false` | `true` | `'true'` | Fail on forbidden findings. |
@@ -94,7 +97,9 @@ See [Action outputs and failures](action.md#outputs-and-failures). Reports remai
 authoritative when arrays are omitted. The Action source pin is a full reviewed
 commit; remote private use is blocked pending named-consumer authorization/test.
 Indirect candidates appear only in the full report's optional `possible-dispatches`,
-not direct invocation arrays/counts. No new input, YAML predicate or gate is added.
+not direct invocation arrays/counts. [Call chains](call-chains.md) likewise remain
+separate; no YAML predicate is added. Explicit catalog matches always require
+review regardless of the three existing gate values.
 
 ## Environment policy source
 

@@ -6,6 +6,16 @@ policy evaluator. It makes no network requests, writes no launcher/registry, and
 does not change publication or access settings. Integration in other repositories
 and signing/authentication remain separate work.
 
+Optional [call-chain evidence](call-chains.md) is bound by the exact report-byte
+hash, not copied into another graph model. Handoffs/feedback add only
+`call-chain-analysis` completeness/review booleans. Catalog matches route
+`needs-review`; missing/truncated graph context routes `analysis-incomplete`.
+For an explicit nonsecret catalog, trusted `report-context` also includes
+`capability-catalog-revision` and dependency kind `capability-summaries`; supply
+its exact bytes with `--dependency capability-summaries=FILE`. Changed catalog
+bytes/revision or witness evidence invalidate approval. Feedback omits catalog
+identities/capabilities and caller witnesses.
+
 ## Ownership and provenance
 
 1. The trusted platform snapshots the original pak and **every** relevant mapping

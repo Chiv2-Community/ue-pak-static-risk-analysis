@@ -19,11 +19,26 @@
       "properties": {
         "invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/invocation"}},
         "dispatches": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/dispatch"}},
+        "call-graph": {"$ref": "#/$defs/call-graph"},
         "coverage-gaps": {"type": "array", "maxItems": 256, "items": {"enum": ["unsupported-parsing", "unresolved-dispatch", "incomplete-extraction"]}}
       }
     }
   },
   "$defs": {
+    "call-graph": {
+      "type": "object", "additionalProperties": false, "required": ["schema-version", "complete", "functions"],
+      "properties": {
+        "schema-version": {"const": 1}, "complete": {"type": "boolean"},
+        "functions": {"type": "array", "maxItems": 4096, "items": {
+          "type": "object", "additionalProperties": false, "required": ["asset", "location-function", "owner", "function", "native"],
+          "properties": {
+            "asset": {"$ref": "#/$defs/text"}, "location-function": {"$ref": "#/$defs/text"},
+            "owner": {"type": "string", "maxLength": 4096, "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$"},
+            "function": {"type": "string", "maxLength": 4096, "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}, "native": {"type": "boolean"}
+          }
+        }}
+      }
+    },
     "dispatch": {
       "type": "object", "additionalProperties": false,
       "required": ["schema-version", "origin", "opcode", "kind", "function-name", "receiver", "resolution", "candidates", "diagnostics", "source"],

@@ -22,6 +22,9 @@ try
     var report = manifest.RootElement;
     var calls = ImmutableArray.CreateBuilder<InvocationFact>();
     var dispatches = new List<IndirectDispatch>();
+    var graphFunctions = new List<CallGraphFunction>();
+    var graphCharacters = 0;
+    var graphComplete = true;
     var candidateCount = 0;
     var gaps = new HashSet<CoverageGap>();
     if (report.GetProperty("ingestion_status").GetString() != "validated") gaps.Add(CoverageGap.IncompleteExtraction);
@@ -82,6 +85,13 @@ try
             var id = record.GetProperty("id").GetString()!;
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
+            var graph = extraction.Analysis.CallGraph!;
+            graphComplete &= graph.Complete;
+            foreach (var function in graph.Functions)
+                if (graphFunctions.Count < CallGraphContext.MaxFunctions
+                    && graphCharacters + CallGraphContext.Characters(function) <= CallGraphContext.MaxCharacters)
+                { graphFunctions.Add(function); graphCharacters += CallGraphContext.Characters(function); }
+                else graphComplete = false;
             foreach (var dispatch in extraction.Analysis.Dispatches ?? [])
             {
                 if (dispatches.Count == PolicyEvaluator.MaxInvocations)
@@ -147,7 +157,8 @@ try
             r.TryGetProperty("virtual_path", out _));
     }).ToImmutableArray();
     var facts = new FactsDocument(1, pakHash, "4.25", "container-v1",
-        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray()),
+        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray(),
+            CallGraphContext.Bounded(graphFunctions, graphComplete && gaps.Count == 0)),
         new InspectionEvidence(report.GetProperty("ingestion_status").GetString()!,
             report.GetProperty("diagnostic").GetString()!, evidence));
     // Indirect evidence is additive: transport exhaustion must not erase direct facts
