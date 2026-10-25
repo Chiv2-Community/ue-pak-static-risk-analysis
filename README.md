@@ -4,7 +4,7 @@ Linux-based inspection of cooked UE 4.25 assets and Blueprint calls.
 
 **Current status: compatibility experiment, not a moderation scanner.**
 There are a typed YAML policy parser, standalone three-valued evaluator, and
-normalized extraction API, but no CLI extraction/policy integration, production sandbox,
+normalized extraction API and [trusted facts evaluation CLI](docs/evaluate.md), but no pak CLI extraction/policy integration, production sandbox,
 Docker image, or reusable Action yet. Successful parsing does not mean a mod is safe.
 
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
@@ -22,6 +22,8 @@ dotnet restore tests/Policy.Tests/Policy.Tests.csproj --locked-mode
 dotnet test tests/Policy.Tests/Policy.Tests.csproj -c Release --no-restore
 dotnet restore tests/PolicyInput.Tests/PolicyInput.Tests.csproj --locked-mode
 dotnet test tests/PolicyInput.Tests/PolicyInput.Tests.csproj -c Release --no-restore
+dotnet restore tests/Scanner.Tests/Scanner.Tests.csproj --locked-mode
+dotnet test tests/Scanner.Tests/Scanner.Tests.csproj -c Release --no-restore
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_cli --no-default-features
 ```
@@ -84,13 +86,14 @@ and global coverage gaps remain separate from findings and gate decisions.
 See [the starter example](examples/starter-policy.yaml) and
 [machine-readable structural schema](schemas/policy-v1.schema.json).
 
-### Planned transport and integration
+### Trusted facts evaluation and pending integration
 
 The Linux [shared policy input boundary](docs/policy-input.md) implements bounded
-file/environment loading and safe verbose rendering. It is not wired into the
-probe, CLI, Docker, or Action; issue #14 remains open pending integration.
+file/environment loading and safe verbose rendering. The [evaluate CLI](docs/evaluate.md)
+uses it for bounded normalized facts and versioned reports, not pak parsing.
+It is not wired into the probe, Docker, or Action; issue #14 remains open pending integration.
 
-The evaluator is not connected to asset extraction or a CLI gate. The planned transport is a
+The evaluator is not connected to pak extraction. The evaluation CLI accepts a
 `policy-rules` file or raw YAML in `UE_PAK_POLICY_RULES`, with exactly one source.
 The Action will expose `log-level`: `error`, `warn`, `info`, or `verbose`, default
 `info`.

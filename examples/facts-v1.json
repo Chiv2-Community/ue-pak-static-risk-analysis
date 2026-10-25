@@ -1,0 +1,15 @@
+{
+  "schema-version": 1,
+  "pak-sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "engine-version": "4.25",
+  "producer-version": "test-1",
+  "dependencies": [{"kind": "mappings", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+  "analysis": {
+    "invocations": [{
+      "location": {"asset": "/Game/Asset0", "function": "Execute", "offset": 0},
+      "target": {"kind": "resolved", "owner": "/Script/Engine.Actor", "function": "Destroy"},
+      "arguments": {"kind": "known", "arguments": []}
+    }],
+    "coverage-gaps": []
+  }
+}

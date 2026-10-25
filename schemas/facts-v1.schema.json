@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/schemas/facts-v1.schema.json",
+  "title": "Bounded invocation facts v1",
+  "description": "Structural contract only; FactsCodec also enforces duplicate keys, byte/depth/node bounds, Unicode, identities and evaluator invariants.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema-version", "pak-sha256", "engine-version", "producer-version", "dependencies", "analysis"],
+  "properties": {
+    "schema-version": {"const": 1},
+    "pak-sha256": {"$ref": "#/$defs/hash"},
+    "engine-version": {"const": "4.25"},
+    "producer-version": {"$ref": "#/$defs/identity"},
+    "dependencies": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/dependency"}},
+    "analysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["invocations", "coverage-gaps"],
+      "properties": {
+        "invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/invocation"}},
+        "coverage-gaps": {"type": "array", "maxItems": 256, "items": {"enum": ["unsupported-parsing", "unresolved-dispatch", "incomplete-extraction"]}}
+      }
+    }
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "identity": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._+\\-]+$"},
+    "text": {"type": "string", "maxLength": 4096},
+    "dependency": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "sha256"],
+      "properties": {"kind": {"$ref": "#/$defs/identity"}, "sha256": {"$ref": "#/$defs/hash"}}
+    },
+    "location": {
+      "type": "object", "additionalProperties": false, "required": ["asset", "function", "offset"],
+      "properties": {"asset": {"$ref": "#/$defs/text"}, "function": {"$ref": "#/$defs/text"}, "offset": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}}
+    },
+    "target": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["kind", "owner", "function"],
+       "properties": {"kind": {"const": "resolved"}, "owner": {"$ref": "#/$defs/text"}, "function": {"$ref": "#/$defs/text"}}},
+      {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "unresolved"}}}
+    ]},
+    "literal": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "string"}, "value": {"$ref": "#/$defs/text"}}},
+      {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "integer"}, "value": {"type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807}}},
+      {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "boolean"}, "value": {"type": "boolean"}}},
+      {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "null"}}}
+    ]},
+    "argument-value": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "constant"}, "value": {"$ref": "#/$defs/literal"}}},
+      {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"enum": ["dynamic", "missing"]}}}
+    ]},
+    "arguments": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["kind", "arguments"], "properties": {
+        "kind": {"const": "known"},
+        "arguments": {"type": "array", "maxItems": 256, "items": {
+          "type": "object", "additionalProperties": false, "required": ["name", "value"],
+          "properties": {"name": {"$ref": "#/$defs/text"}, "value": {"$ref": "#/$defs/argument-value"}}
+        }}
+      }},
+      {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "unavailable"}}}
+    ]},
+    "invocation": {
+      "type": "object", "additionalProperties": false, "required": ["location", "target", "arguments"],
+      "properties": {"location": {"$ref": "#/$defs/location"}, "target": {"$ref": "#/$defs/target"}, "arguments": {"$ref": "#/$defs/arguments"}}
+    }
+  }
+}
