@@ -79,9 +79,9 @@ def prepare():
         append(os.environ["GITHUB_OUTPUT"], f"image={image}\n".encode("ascii"))
 
 
-def destination():
+def destination(input_key="INPUT_REPORT", default="ue-pak-risk-report.json"):
     workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve(strict=True)
-    value = os.environ.get("INPUT_REPORT", "ue-pak-risk-report.json")
+    value = os.environ.get(input_key, default)
     require(len(value) <= 512 and re.fullmatch(r"[A-Za-z0-9_./-]+", value) is not None)
     relative = Path(value)
     require(not relative.is_absolute() and ".." not in relative.parts and relative.parts)
@@ -98,7 +98,9 @@ def destination():
     for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY", "GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"):
         if os.environ.get(key):
             require(target != Path(os.environ[key]).resolve())
-    for key in ("INPUT_PAK", "INPUT_POLICY_RULES", "INPUT_MAPPING", "INPUT_CAPABILITY_SUMMARIES"):
+    for key in ("INPUT_PAK", "INPUT_POLICY_RULES", "INPUT_MAPPING", "INPUT_CAPABILITY_SUMMARIES", "INPUT_DATA_RULES", "INPUT_BASELINE_PAK", "INPUT_DATA_CONTEXT", "INPUT_REPORT"):
+        if key == input_key:
+            continue
         if os.environ.get(key):
             require(target != Path(os.environ[key]).resolve())
     return target, value
@@ -109,6 +111,7 @@ def outputs(report, path, reason=None):
               "report-available": "false", "diagnostics": compact([reason or "report-unavailable"]),
               "flagged-invocations": "[]", "forbidden-invocations": "[]",
               "arrays-omitted": "true", "omission-reason": reason or "report-unavailable"}
+    result.update({"data-analysis-status": "unknown", "data-review-count": "unknown", "data-reject-count": "unknown"})
     for kind in ("invocations", "flagged", "forbidden", "affected-union"):
         result[kind + "-count"] = "unknown"
     if report is None:
@@ -117,6 +120,10 @@ def outputs(report, path, reason=None):
     result["analysis-complete"] = str(report["analysis-complete"]).lower()
     result["report-available"] = "true"
     result["arrays-omitted"], result["omission-reason"] = "false", "none"
+    data = report.get("data-analysis")
+    result["data-analysis-status"] = "not-performed" if data is None else "complete" if data["complete"] else "incomplete"
+    for action in ("review", "reject"):
+        result["data-" + action + "-count"] = str(sum(f["action"] == action for f in data["findings"])) if data else "0"
     for kind, count in report["counts"].items():
         result[kind + "-count"] = str(count)
     for kind in ("flagged", "forbidden"):
@@ -134,6 +141,7 @@ def publish(result):
     summary = ("## Pak static-risk scan\n\n"
                f"Status: {result['status']}. Analysis complete: {result['analysis-complete']}.\n\n"
                f"Flagged: {result['flagged-count']}. Forbidden: {result['forbidden-count']}.\n\n"
+               f"Data analysis: {result['data-analysis-status']}. Review: {result['data-review-count']}. Reject: {result['data-reject-count']}.\n\n"
                f"Report available: {result['report-available']}. Arrays omitted: {result['arrays-omitted']}.\n\n"
                "Use the report-path output to collect the authoritative report with restricted access.\n"
                "This is not a safety verdict.\n")
@@ -155,10 +163,16 @@ def scan():
                              ("fail-on-any-forbidden", "true"), ("fail-on-any-flagged", "false"),
                              ("fail-on-incomplete", "true")):
             args += ["--" + key, os.environ.get("INPUT_" + key.upper().replace("-", "_"), default)]
-        for key in ("policy-rules", "content-root", "mapping", "capability-summaries"):
+        for key in ("policy-rules", "content-root", "mapping", "capability-summaries", "data-rules", "baseline-pak", "game-build"):
             value = os.environ.get("INPUT_" + key.upper().replace("-", "_"), "")
             if value:
                 args += ["--" + key, value]
+        if os.environ.get("INPUT_DATA_RULES"):
+            private_target, _ = destination("INPUT_DATA_CONTEXT", "")
+            require(private_target != target)
+            args += ["--data-context", str(private_target)]
+        else:
+            require(not os.environ.get("INPUT_DATA_CONTEXT"))
         # The shared renderer owns stderr. Do not decode/re-encode, prefix, or echo it.
         code = subprocess.run(args, env=environment(policy=True), stdin=subprocess.DEVNULL,
                               stdout=subprocess.DEVNULL, check=False).returncode

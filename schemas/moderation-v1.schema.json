@@ -7,6 +7,25 @@
     {"$ref": "#/$defs/review"}, {"$ref": "#/$defs/feedback"}
   ],
   "$defs": {
+    "data-analysis-summary": {
+      "type": "object", "additionalProperties": false, "required": ["complete", "decision", "review-count", "reject-count"],
+      "properties": {"complete": {"type": "boolean"}, "decision": {"enum": ["no-match", "needs-review", "reject"]},
+        "review-count": {"type": "integer", "minimum": 0, "maximum": 256}, "reject-count": {"type": "integer", "minimum": 0, "maximum": 256}}
+    },
+    "data-context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "kind", "report-sha256", "engine-version", "game-build", "content-root", "logical-root", "mount-policy", "dependencies"],
+      "properties": {"schema-version": {"const": 1}, "kind": {"const": "data-context"},
+        "report-sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "engine-version": {"const": "4.25"},
+        "game-build": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "content-root": {"type": "string", "minLength": 1, "maxLength": 4096}, "logical-root": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "mount-policy": {"const": "submission-over-baseline"},
+        "dependencies": {"type": "array", "minItems": 1, "maxItems": 2, "items": {
+          "type": "object", "additionalProperties": false, "required": ["kind", "sha256"],
+          "properties": {"kind": {"enum": ["data-rules", "baseline-pak"]}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+        }}
+      }
+    },
     "call-chain-analysis": {
       "type": "object", "additionalProperties": false, "required": ["complete", "needs-review"],
       "properties": {"complete": {"type": "boolean"}, "needs-review": {"type": "boolean"}}
@@ -18,7 +37,8 @@
         "schema-version": {"const": 1}, "kind": {"const": "scan-context"},
         "scanner-identity": {"type": "string", "pattern": "^(git:[a-f0-9]{40}|sha256:[a-f0-9]{64})$"},
         "game-build": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
-        "report-context": {"$ref": "report-v1.schema.json#/properties/context"}
+        "report-context": {"$ref": "report-v1.schema.json#/properties/context"},
+        "data-context": {"$ref": "#/$defs/data-context"}
       }
     },
     "routes": {
@@ -38,7 +58,8 @@
         "coverage": {"$ref": "report-v1.schema.json#/properties/coverage"},
         "routes": {"$ref": "#/$defs/routes"},
         "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
-        "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"}
+        "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"},
+        "data-analysis": {"$ref": "#/$defs/data-analysis-summary"}
       }
     },
     "review": {
@@ -64,7 +85,8 @@
         "coverage": {"$ref": "report-v1.schema.json#/properties/coverage"},
         "routes": {"$ref": "#/$defs/routes"},
         "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
-        "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"}
+        "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"},
+        "data-analysis": {"$ref": "#/$defs/data-analysis-summary"}
       }
     }
   }

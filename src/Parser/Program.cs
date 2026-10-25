@@ -11,7 +11,7 @@ using UAssetAPI.Unversioned;
 // Container-internal protocol. Input paths are fixed trusted supervisor arguments.
 try
 {
-    if (args.Length != 4) return 3;
+    if (args.Length is not (4 or 5)) return 3;
     static string Hash(string path)
     {
         using var stream = File.OpenRead(path);
@@ -25,6 +25,10 @@ try
     var graphFunctions = new List<CallGraphFunction>();
     var graphCharacters = 0;
     var graphComplete = true;
+    var dataPackages = ImmutableArray.CreateBuilder<PackageDataEvidence>();
+    var dataNodes = 0;
+    var dataCharacters = 0;
+    var dataComplete = true;
     var candidateCount = 0;
     var gaps = new HashSet<CoverageGap>();
     if (report.GetProperty("ingestion_status").GetString() != "validated") gaps.Add(CoverageGap.IncompleteExtraction);
@@ -83,6 +87,33 @@ try
             var extraction = InvocationExtractor.Inspect(asset, input);
             PolicyEvaluator.Validate(extraction.Analysis);
             var id = record.GetProperty("id").GetString()!;
+            if (dataNodes >= DataEvidenceValidation.MaxProperties || dataPackages.Count >= 4096
+                || dataCharacters + id.Length + input.FactIdentity.Length + 64 > DataEvidenceValidation.MaxCharacters)
+                dataComplete = false;
+            else try
+            {
+                var propertyData = AssetDataExtractor.Inspect(asset, input);
+                dataComplete &= propertyData.Complete;
+                var headerCharacters = id.Length + propertyData.Asset.Length + propertyData.Diagnostics.Sum(d => d.Length) + 64;
+                var keepPackage = dataPackages.Count < 4096 && dataCharacters + headerCharacters <= DataEvidenceValidation.MaxCharacters;
+                if (keepPackage) dataCharacters += headerCharacters;
+                else dataComplete = false;
+                var retainedData = ImmutableArray.CreateBuilder<SerializedProperty>();
+                foreach (var property in keepPackage ? propertyData.Properties : [])
+                {
+                    // Global bounds are independent of per-package bounds and mandatory invocation evidence.
+                    var characters = DataEvidenceValidation.Characters(property);
+                    if (dataNodes == DataEvidenceValidation.MaxProperties || dataCharacters + characters > DataEvidenceValidation.MaxCharacters)
+                    { dataComplete = false; break; }
+                    retainedData.Add(property); dataNodes++; dataCharacters += characters;
+                }
+                if (keepPackage)
+                    dataPackages.Add(new(id, propertyData with { Properties = retainedData.ToImmutable(),
+                        Complete = propertyData.Complete && retainedData.Count == propertyData.Properties.Length,
+                        Diagnostics = retainedData.Count == propertyData.Properties.Length ? propertyData.Diagnostics : ["data-global-limit"] }));
+                else dataComplete = false;
+            }
+            catch (Exception error) when (error is not OutOfMemoryException) { dataComplete = false; }
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
             var graph = extraction.Analysis.CallGraph!;
@@ -134,13 +165,15 @@ try
             paired.Add(record.GetProperty("id").GetString()!);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
-        { gaps.Add(CoverageGap.UnsupportedParsing); inspections[record.GetProperty("id").GetString()!] = "parse_failed"; }
+        { gaps.Add(CoverageGap.UnsupportedParsing); dataComplete = false; inspections[record.GetProperty("id").GetString()!] = "parse_failed"; }
     }
     if (records.Any(r => !paired.Contains(r.GetProperty("id").GetString()!)
         || (r.TryGetProperty("signatures", out var signatures)
             && signatures.EnumerateArray().Any(s => s.GetString() is not ("unknown_content" or "unreal_package_tag")))))
         gaps.Add(CoverageGap.IncompleteExtraction);
-    var pakHash = Hash("/input/submission");
+    // Optional explicit snapshot path supports local protocol tests. The container supervisor
+    // always uses /input/submission; this adds no host mount or policy access.
+    var pakHash = Hash(args.Length == 5 ? args[4] : "/input/submission");
     if (report.TryGetProperty("input_sha256", out var recordedHash) && recordedHash.GetString() != pakHash)
         throw new InvalidDataException();
     var evidence = records.Select(r =>
@@ -160,7 +193,8 @@ try
         dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray(),
             CallGraphContext.Bounded(graphFunctions, graphComplete && gaps.Count == 0)),
         new InspectionEvidence(report.GetProperty("ingestion_status").GetString()!,
-            report.GetProperty("diagnostic").GetString()!, evidence));
+            report.GetProperty("diagnostic").GetString()!, evidence),
+        new DataEvidence(1, contentRoot, logicalRoot, dataComplete && gaps.Count == 0, dataPackages.ToImmutable()));
     // Indirect evidence is additive: transport exhaustion must not erase direct facts
     // or inventory. Validate before trimming so malformed evidence cannot be hidden.
     PolicyEvaluator.Validate(facts.Analysis);

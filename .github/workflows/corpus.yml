@@ -25,7 +25,7 @@ jobs:
       - name: Full component suites, synthetic corpus, parity and removal mutations
         run: |
           python3 -m venv "$RUNNER_TEMP/corpus-venv"
-          "$RUNNER_TEMP/corpus-venv/bin/pip" install PyYAML==6.0.3 jsonschema==4.25.1
+          "$RUNNER_TEMP/corpus-venv/bin/pip" install -r tests/requirements.txt
           "$RUNNER_TEMP/corpus-venv/bin/python" scripts/regression_corpus.py --output "$RUNNER_TEMP/corpus-evidence" --docker-image ue-pak-corpus:local --components
       # No cook, game execution, registry publication, or generated artifact upload.
       # Authorized external cooked evidence remains a separate local release prerequisite.

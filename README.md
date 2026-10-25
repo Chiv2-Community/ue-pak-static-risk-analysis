@@ -24,8 +24,9 @@ Start with the [operator guide](docs/operators.md), [CLI/Action input tables](do
 [security boundaries](docs/security.md) and [controlled release checklist](docs/releases.md).
 No release/publication or expanded access is approved. [Partial indirect evidence](docs/indirect-dispatch.md)
 does not close #8; [bounded call-chain evidence](docs/call-chains.md) is partial #9,
-not exact-game native catalog proof. Data-driven effects (#10) and native implementation
-analysis are not shipped; exact
+not exact-game native catalog proof. Optional [private serialized-data rules](docs/data-policy.md)
+are partial #10, not effective-default or exact-game behavior proof. Native implementation
+analysis is not shipped; exact
 Windows/game fidelity and broader redistribution rights remain open.
 
 ## Build and test
@@ -44,12 +45,16 @@ dotnet restore tests/PolicyInput.Tests/PolicyInput.Tests.csproj --locked-mode
 dotnet test tests/PolicyInput.Tests/PolicyInput.Tests.csproj -c Release --no-restore
 dotnet restore tests/Scanner.Tests/Scanner.Tests.csproj --locked-mode
 dotnet test tests/Scanner.Tests/Scanner.Tests.csproj -c Release --no-restore
-python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 -m venv .venv
+.venv/bin/pip install -r tests/requirements.txt
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
 cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_cli --no-default-features
 ```
 
 The dependency submodules are pinned. Do not substitute the current NuGet release
 for the evaluated UAssetAPI source revision.
+The full Python suite requires the pinned test dependencies, including mandatory
+data-schema validation. Production Python remains standard-library-only.
 
 The [integrated regression gate](docs/regression-corpus.md) checks reviewed synthetic
 package/pak expectations, finding/coverage removal mutations, bounded boundary

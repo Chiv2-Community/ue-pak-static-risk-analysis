@@ -156,11 +156,13 @@ no source paths, parser output, upstream exception text, or policy values.
 ```sh
 dotnet restore tests/Scanner.Tests/Scanner.Tests.csproj --locked-mode
 dotnet test tests/Scanner.Tests/Scanner.Tests.csproj -c Release --no-restore
-python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 -m venv .venv
+.venv/bin/pip install -r tests/requirements.txt
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 Process tests launch the built DLL for gates, file/environment loading, log-level
 parity, warned disclosure, special files, malformed facts, deterministic ordering
-and output-write failures. Schema-example checks use Python `jsonschema` when
-installed; no new production dependency is required. Parser timeout, cancellation
+and output-write failures. Full-suite data-schema checks require the pinned Python
+test dependencies; no new production dependency is required. Parser timeout, cancellation
 and private-policy isolation tests run through the [Docker wrapper](container.md).

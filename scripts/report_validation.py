@@ -105,7 +105,9 @@ def matches(value, schema, document, documents):
         return False
 
 
-def load(data, root):
+def load(data, root, *, moderator_detail=False):
+    # Only trusted operator callers may select detail; public consumers stay strict.
+    require(type(moderator_detail) is bool)
     require(len(data) <= 16 * 1024 * 1024)
     report = json.loads(data.decode("utf-8", "strict"), object_pairs_hook=pairs,
                         parse_constant=lambda _: require(False))
@@ -115,7 +117,7 @@ def load(data, root):
         nodes += 1
         require(depth <= 32 and nodes <= 250000)
         if isinstance(value, dict):
-            require("rule-ids" not in value)  # Default consumers have no moderator-detail profile.
+            require(moderator_detail or "rule-ids" not in value)
             pending.extend((v, depth + 1) for v in value.values())
         elif isinstance(value, list):
             pending.extend((v, depth + 1) for v in value)
@@ -139,8 +141,10 @@ def load(data, root):
         sets.append(ids)
         for item in findings:
             require((item["argument-metadata"] == "known") == (item["known-argument-count"] is not None))
-            require(item["id"] not in by_id or by_id[item["id"]] == item)
-            by_id[item["id"]] = item
+            # Rule IDs describe this effect; every other field identifies the shared invocation.
+            shared = {key: value for key, value in item.items() if key != "rule-ids"}
+            require(item["id"] not in by_id or by_id[item["id"]] == shared)
+            by_id[item["id"]] = shared
     require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
     dispatch_origins = set()
     candidate_count = 0
@@ -162,7 +166,15 @@ def load(data, root):
         require(bool(evidence["candidates"]) or not (dispatch["possibly-flagged"] or dispatch["possibly-forbidden"]))
     incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
                       or report.get("content-policy", {}).get("incomplete", False)
+                      or not report.get("data-analysis", {}).get("complete", True)
                       or not report.get("call-chains", {}).get("complete", True))
+    if "data-analysis" in report:
+        data = report["data-analysis"]
+        require(data["complete"] == (not data["diagnostics"]))
+        actions = {f["action"] for f in data["findings"]}
+        require(data["decision"] == ("reject" if "reject" in actions else "needs-review" if actions else "no-match"))
+        members = {m["id"] for m in report.get("inspection", {}).get("members", [])}
+        require(all(f["member-id"] in members for f in data["findings"]))
     if "call-chains" in report:
         chains = report["call-chains"]
         require(chains["complete"] == (not chains["diagnostics"]))

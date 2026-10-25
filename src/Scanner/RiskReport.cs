@@ -11,6 +11,7 @@ public sealed record GateOptions(bool FailOnAnyForbidden = true, bool FailOnAnyF
     public bool Fails(bool forbidden, bool flagged, bool incomplete) =>
         (FailOnAnyForbidden && forbidden) || (FailOnAnyFlagged && flagged) || (FailOnIncomplete && incomplete);
     public bool Fails(RiskReport report) => report.ContentPolicy?.Decision is "reject" or "needs-review"
+        || report.DataAnalysis is { } data && (!data.Complete || data.Decision is "reject" or "needs-review")
         || report.CallChains?.NeedsReview == true
         || Fails(report.Counts.Forbidden > 0, report.Counts.Flagged > 0, !report.AnalysisComplete);
 }
@@ -32,8 +33,15 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContentResult? ContentPolicy = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReportPossibleDispatch[]? PossibleDispatches = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallChainEvidence? CallChains = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallChainEvidence? CallChains = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DataAnalysis? DataAnalysis = null)
 {
+    public RiskReport WithData(DataAnalysis? result) => result is null ? this : this with
+    {
+        DataAnalysis = result,
+        AnalysisComplete = AnalysisComplete && result.Complete,
+        Status = !result.Complete && Status == "successful" ? "partial" : Status
+    };
     public RiskReport WithCallChains(CallChainEvidence? evidence) => evidence is null ? this : this with
     {
         CallChains = evidence,

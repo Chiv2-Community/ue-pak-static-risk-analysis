@@ -132,8 +132,10 @@ foundation production-ready hostile-code containment.
 
 ## Validation
 
-Run `python3 -m unittest discover -s tests -v`. Existing CI discovery includes the
-new tests without workflow changes. The owned deterministic V9 builder generates
+Install the [pinned test dependencies](../README.md#build-and-test), then run
+`.venv/bin/python -m unittest discover -s tests -v`. The full suite includes mandatory
+data-schema checks; ingestion runtime remains standard-library-only.
+The owned deterministic V9 builder generates
 fixtures in temporary directories; no engine, game assets or downloads are needed.
 Negative mutations recompute index hashes to reach structural checks. Tests cover
 duplicate/path conflicts, flags/codecs, headers/ranges/blocks, exact decoding,

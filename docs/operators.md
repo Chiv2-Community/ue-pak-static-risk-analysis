@@ -40,9 +40,13 @@ dotnet build src/Scanner/Scanner.csproj -c Release --no-restore
 For full component/schema tests, install Python dependencies in a private venv:
 
 ```sh
-python3 -m venv /tmp/opencode/pak-test-venv
-/tmp/opencode/pak-test-venv/bin/pip install PyYAML==6.0.3 jsonschema==4.25.1
+python3 -m venv .venv
+.venv/bin/pip install -r tests/requirements.txt
 ```
+
+Use `.venv/bin/python` for the full Python suite and corpus runner. Data-schema
+assertions are mandatory; a standard-library-only environment cannot run the full
+suite. Production Python needs no third-party packages.
 
 ## File policy: recommended for private rules
 
@@ -73,7 +77,7 @@ Ordinary env is not masked; runner setup/admin visibility is outside filtering.
 No Docker test runs unless `--docker-image` is explicitly supplied.
 
 ```sh
-python3 scripts/regression_corpus.py --output /tmp/opencode/operator-corpus
+.venv/bin/python scripts/regression_corpus.py --output /tmp/opencode/operator-corpus
 ```
 
 ```sh

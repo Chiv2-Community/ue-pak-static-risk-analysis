@@ -38,6 +38,13 @@ public static class Program
                 Boolean(options, "fail-on-any-flagged", false), Boolean(options, "fail-on-incomplete", true));
             // Validate public catalog input before any verbose policy output.
             var catalog = options.TryGetValue("capability-summaries", out var catalogPath) ? CapabilityCatalog.Load(catalogPath) : null;
+            var dataPolicy = options.TryGetValue("data-rules", out var dataPath) ? DataPolicy.Load(dataPath) : null;
+            var buildScope = options.GetValueOrDefault("game-build");
+            if (dataPolicy is not null && buildScope != dataPolicy.Document.Context.BuildScope
+                || dataPolicy is null && (buildScope is not null || options.ContainsKey("baseline-facts") || options.ContainsKey("expected-baseline-sha256"))
+                || options.ContainsKey("baseline-facts") != options.ContainsKey("expected-baseline-sha256")
+                || options.ContainsKey("baseline-facts") != options.ContainsKey("baseline-facts-assertion")
+                || options.TryGetValue("baseline-facts-assertion", out var assertion) && assertion != "caller-supplied-not-authenticated") throw new DataConfigurationException();
             var loaded = PolicyLoader.Load(options.GetValueOrDefault("policy-rules"), options.GetValueOrDefault("log-level"),
                 Console.Error.WriteLine);
             if (args[0] == "validate") return 0;
@@ -46,12 +53,19 @@ public static class Program
             FactsContext.Verify(candidate, options.GetValueOrDefault("expected-pak-sha256"),
                 options.GetValueOrDefault("expected-mapping-sha256"));
             facts = candidate;
+            FactsDocument? baseline = null;
+            if (options.TryGetValue("baseline-facts", out var baselinePath))
+            {
+                baseline = FactsCodec.Read(FactsFile.Read(baselinePath));
+                FactsContext.Verify(baseline, Required(options, "expected-baseline-sha256"), options.GetValueOrDefault("expected-mapping-sha256"));
+            }
             var evaluation = new PolicyEvaluator(loaded.Document).Evaluate(facts.Analysis);
             report = RiskReport.Create(facts, evaluation, options.ContainsKey("moderator-detail"), revision, catalog);
             report = report.WithContent(contentPolicy?.Evaluate(facts.Inspection));
+            report = report.WithData(dataPolicy?.Evaluate(facts, buildScope!, baseline));
             exit = gates.Fails(report) ? 1 : 0;
         }
-        catch (Exception error) when (error is ConfigurationException or ContentConfigurationException or CapabilityConfigurationException or PolicyInputException or PolicyException)
+        catch (Exception error) when (error is ConfigurationException or DataConfigurationException or ContentConfigurationException or CapabilityConfigurationException or PolicyInputException or PolicyException)
         {
             Console.Error.WriteLine("Invalid configuration.");
             report = RiskReport.Failed("invalid-configuration", facts, revision);
@@ -117,7 +131,8 @@ public static class Program
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
         var allowed = new HashSet<string> { "facts", "report", "engine-version", "policy-rules", "log-level", "policy-revision",
             "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "moderator-detail",
-            "expected-pak-sha256", "expected-mapping-sha256", "reason", "capability-summaries" };
+            "expected-pak-sha256", "expected-mapping-sha256", "reason", "capability-summaries",
+            "data-rules", "game-build", "baseline-facts", "expected-baseline-sha256", "baseline-facts-assertion" };
         for (var i = 1; i < args.Length; i++)
         {
             if (!args[i].StartsWith("--", StringComparison.Ordinal)) throw new ConfigurationException();

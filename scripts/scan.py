@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import selectors
@@ -175,6 +176,30 @@ def write_report(path, data):
             temporary.unlink(missing_ok=True)
 
 
+def output_destinations(args):
+    # Resolve existing parents, not the final component: final symlinks and
+    # special files must remain occupied destinations, never overwrite targets.
+    paths = [Path(args.report)]
+    if args.data_context is not None:
+        paths.append(Path(args.data_context))
+    try:
+        paths = [path.parent.resolve(strict=True) / path.name for path in paths]
+    except RuntimeError:
+        # pathlib versions before 3.13 report parent symlink loops this way.
+        raise Failure("input-failed") from None
+    if len(set(paths)) != len(paths):
+        raise Failure("invalid-configuration")
+    for path in paths:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        raise FileExistsError()
+    args.report = paths[0]
+    if args.data_context is not None:
+        args.data_context = paths[1]
+
+
 def options(argv):
     parser = Arguments(description=__doc__, allow_abbrev=False)
     parser.add_argument("command", choices=["scan"])
@@ -182,7 +207,8 @@ def options(argv):
         parser.add_argument("--" + key, required=True)
     parser.add_argument("--image", default="ue-pak-static-risk-analysis:dev")
     parser.add_argument("--timeout", type=float, default=60)
-    for key in ("policy-rules", "log-level", "policy-revision", "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "mapping", "content-root", "capability-summaries"):
+    for key in ("policy-rules", "log-level", "policy-revision", "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "mapping", "content-root", "capability-summaries",
+                "data-rules", "baseline-pak", "game-build", "data-context"):
         parser.add_argument("--" + key)
     parser.add_argument("--moderator-detail", action="store_true")
     for key in ("allowed-path", "allowed-class", "protected-path"):
@@ -190,6 +216,11 @@ def options(argv):
     parser.add_argument("--replacement-policy", action="append", default=[])
     result = parser.parse_args(argv)
     if os.getuid() == 0 or not 0 < result.timeout <= 600:
+        raise Failure("invalid-configuration")
+    if result.data_rules:
+        if not result.game_build or not result.content_root or not result.data_context:
+            raise Failure("invalid-configuration")
+    elif result.baseline_pak or result.game_build or result.data_context:
         raise Failure("invalid-configuration")
     return result
 
@@ -199,6 +230,9 @@ def main(argv=None):
     args = None
     try:
         args = options(sys.argv[1:] if argv is None else argv)
+        # Reject output aliases/occupied paths before policy disclosure, parsing,
+        # or either artifact write. Parents remain operator-controlled.
+        output_destinations(args)
         # No source-policy copies. Only a file-only evaluator mount, never a parser mount.
         policy_mount = mount(args.policy_rules, "/policy/rules") if args.policy_rules is not None else []
         shared = ["--report", "-", "--engine-version", args.engine_version]
@@ -229,6 +263,13 @@ def main(argv=None):
                 raise Failure("invalid-configuration") from None
         with tempfile.TemporaryDirectory(prefix="pak-scan-") as stage:
             stage = Path(stage)
+            private_dependencies = []
+            if args.data_rules is not None:
+                rules = stage / "data-rules"
+                rules_hash = snapshot(args.data_rules, rules, 256 * 1024)
+                policy_mount += mount(rules, "/policy/data-rules")
+                shared += ["--data-rules", "/policy/data-rules", "--game-build", args.game_build]
+                private_dependencies.append({"kind": "data-rules", "sha256": rules_hash})
             if args.capability_summaries is not None:
                 catalog = stage / "summaries"
                 snapshot(args.capability_summaries, catalog, 256 * 1024)
@@ -255,6 +296,25 @@ def main(argv=None):
                 mapping_hash = snapshot(args.mapping, mapping, 16 * 1024 * 1024)
                 parser_mounts += mount(mapping, "/input/mapping")
                 mapping_arg = "/input/mapping"
+            baseline_mounts = []
+            baseline_expected = []
+            if args.baseline_pak is not None:
+                baseline_pak = stage / "baseline"
+                baseline_hash = snapshot(args.baseline_pak, baseline_pak, INPUT_LIMIT)
+                private_dependencies.append({"kind": "baseline-pak", "sha256": baseline_hash})
+                baseline_parser_mounts = mount(baseline_pak, "/input/submission")
+                if args.mapping:
+                    baseline_parser_mounts += mount(mapping, "/input/mapping")
+                baseline_code, baseline_facts = docker.run(baseline_parser_mounts, "/usr/local/bin/python3",
+                    ["-m", "pak_ingest.container_parser", mapping_arg, root, logical], parser=True)
+                if baseline_code or not baseline_facts:
+                    raise Failure("parser-failed")
+                baseline_path = stage / "baseline-facts"
+                baseline_path.write_bytes(baseline_facts)
+                baseline_path.chmod(0o400)
+                baseline_mounts = mount(baseline_path, "/input/baseline-facts")
+                baseline_expected = ["--baseline-facts", "/input/baseline-facts", "--expected-baseline-sha256", baseline_hash,
+                    "--baseline-facts-assertion", "caller-supplied-not-authenticated"]
             code, facts = docker.run(parser_mounts, "/usr/local/bin/python3",
                 ["-m", "pak_ingest.container_parser", mapping_arg, root, logical], parser=True)
             if code or not facts:
@@ -266,10 +326,21 @@ def main(argv=None):
             expected = ["--expected-pak-sha256", pak_hash]
             if mapping_hash:
                 expected += ["--expected-mapping-sha256", mapping_hash]
-            code, report = docker.run(policy_mount + mount(facts_path, "/input/facts"), "/usr/bin/dotnet",
-                ["/app/evaluator/Scanner.dll", "evaluate", "--facts", "/input/facts", *expected, *shared], policy=True)
+            code, report = docker.run(policy_mount + mount(facts_path, "/input/facts") + baseline_mounts, "/usr/bin/dotnet",
+                ["/app/evaluator/Scanner.dll", "evaluate", "--facts", "/input/facts", *expected, *baseline_expected, *shared], policy=True)
             if not report or code not in (0, 1, 2, 3):
                 raise Failure("parser-failed")
+            if args.data_rules is not None and code in (0, 1):
+                # Separate private artifact. No policy/baseline fingerprint enters ordinary reports.
+                from report_validation import load
+                checked = load(report, Path(__file__).resolve().parents[1], moderator_detail=args.moderator_detail)
+                if "data-analysis" not in checked:
+                    raise Failure("parser-failed")
+                private = {"schema-version": 1, "kind": "data-context", "report-sha256": hashlib.sha256(report).hexdigest(),
+                    "engine-version": args.engine_version, "game-build": args.game_build,
+                    "content-root": root, "logical-root": logical,
+                    "mount-policy": "submission-over-baseline", "dependencies": sorted(private_dependencies, key=lambda d: d["kind"])}
+                write_report(args.data_context, (json.dumps(private, separators=(",", ":")) + "\n").encode("utf-8"))
             write_report(args.report, report)
             return code
     except (Failure, OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as error:

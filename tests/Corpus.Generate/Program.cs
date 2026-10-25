@@ -9,11 +9,29 @@ using UAssetAPI.FieldTypes;
 using UAssetAPI.Kismet.Bytecode;
 using UAssetAPI.Kismet.Bytecode.Expressions;
 using UAssetAPI.UnrealTypes;
+using UAssetAPI.PropertyTypes.Objects;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 // Original synthetic serialization, not engine-cooked or game-derived content.
-if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets")) return 2;
+if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget")) return 2;
 if (args[0] == "properties") return Properties();
 if (args[0] == "chains") return Chains(args[1]);
+if (args[0] == "data-policy") return DataPolicyFixtures(args[1]);
+if (args[0] == "data-budgets") return DataBudgetFixtures(args[1]);
+if (args[0] == "data-marker-budget")
+{
+    if (Directory.Exists(args[1])) return 2;
+    Directory.CreateDirectory(args[1]);
+    var asset = DataFixtureAsset();
+    AddFunction(asset, "Consume", Enumerable.Range(0, 7996).Select(_ => (KismetExpression)
+        new EX_FinalFunction { StackNode = new(-3), Parameters = [] }).ToArray());
+    foreach (var index in new[] { -6, -2 })
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Data" + -index), OuterIndex = new(0),
+            ClassIndex = new(index), Data = [], Extras = [] });
+    asset.Write(Path.Combine(args[1], "Data.uasset"));
+    return 0;
+}
 var root = Path.GetFullPath(args[1]);
 if (args[0] == "dispatch-budgets") return DispatchBudgets(root);
 if (args[0] == "generate")
@@ -219,6 +237,98 @@ static int DispatchBudgets(string root)
 static void Check(bool valid, string name)
 {
     if (!valid) throw new InvalidOperationException(name);
+}
+
+static int DataPolicyFixtures(string destination)
+{
+    if (Directory.Exists(destination)) return 2;
+    Directory.CreateDirectory(destination);
+    var bytecodes = new List<byte[]>();
+    var analyses = new List<InvocationAnalysis>();
+    foreach (var version in new[] { "baseline", "submission" })
+    {
+        var directory = Path.Combine(destination, version);
+        Directory.CreateDirectory(directory);
+        var asset = DataFixtureAsset();
+        asset.AddNameReference(new("StrProperty"));
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Data"), OuterIndex = new(0),
+            ClassIndex = new(-6), Data = [new StrPropertyData(new(asset, "Destination"))
+                { Value = new(version == "baseline" ? "original-fixture-destination" : "private-data-canary") }], Extras = [] });
+        // Original illustrative source model: Record(self.Destination). This serialized
+        // property pointer is source proof, not engine execution or a game/native catalog.
+        AddFunction(asset, "Consume", [new EX_FinalFunction { StackNode = new(-3), Parameters = [
+            new EX_InstanceVariable { Variable = new KismetPropertyPointer(new FFieldPath
+                { Path = [new(asset, "Destination")], ResolvedOwner = new(1) }) }] }]);
+        var path = Path.Combine(directory, "Data.uasset");
+        asset.Write(path);
+        var input = new PackageInput("submission", "Content/Data.uasset", "/Game/Data", path);
+        var parsed = PackageReader.Read(path, null);
+        var function = (FunctionExport)parsed.Exports[1];
+        using var stream = new MemoryStream();
+        using (var writer = new AssetBinaryWriter(stream, parsed))
+            foreach (var expression in function.ScriptBytecode) ExpressionSerializer.WriteExpression(expression, writer);
+        var code = stream.ToArray();
+        Check(File.ReadAllBytes(path).AsSpan().IndexOf(code) >= 0, "data-bytecode-stored-exactly");
+        bytecodes.Add(code);
+        var extraction = InvocationExtractor.Read(input);
+        analyses.Add(extraction.Analysis);
+        var data = AssetDataExtractor.Read(input);
+        Check(data.Complete && data.Properties.Length == 1, "data-serialized-properties");
+        var facts = new FactsDocument(1, new(version == "baseline" ? 'b' : 'a', 64), "4.25", "original-data-fixture-v1", [], extraction.Analysis,
+            new("validated", "ok", [new("r00000000", input.Entry, new FileInfo(path).Length,
+                Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))), "payload_verified", ["unreal_package_tag"], [], "parsed", "resolved", PathNormalized: true)]),
+            new(1, "Content", "/Game", true, [new("r00000000", data)]));
+        File.WriteAllBytes(Path.Combine(destination, version + "-facts.json"), FactsCodec.Write(facts));
+    }
+    Check(bytecodes[0].SequenceEqual(bytecodes[1]), "data-bytecode-unchanged");
+    Check(analyses[0].Invocations.SequenceEqual(analyses[1].Invocations), "data-invocations-unchanged");
+    var context = new DataBuildContext("4.25", "original-fixture-v1", "Content", "/Game", null, "submission-over-baseline");
+    var rules = new DataPolicyDocument(1, "private", context, new(new('b', 64), context), [
+        new("private-original-model", "Content/Data.uasset", "/Game/Data.Data", "Object", false,
+            [new("Destination", 0)], "changed", null, "review", "Original fixture Record(self.Destination) model only",
+            "tests/Corpus.Generate/Program.cs; not a game implementation or native-code certification")]);
+    // Read the actual resolved class identity; do not guess an import's owning namespace.
+    var submitted = FactsCodec.Read(File.ReadAllBytes(Path.Combine(destination, "submission-facts.json")));
+    rules = rules with { Rules = [rules.Rules[0] with { ClassIdentity = submitted.AssetData!.Packages[0].Evidence.Properties[0].ClassIdentity! }] };
+    var json = JsonSerializer.SerializeToUtf8Bytes(rules, RiskReport.JsonOptions);
+    File.WriteAllBytes(Path.Combine(destination, "data-rules.json"), json);
+    var result = DataPolicy.Read(json).Evaluate(submitted, context.BuildScope,
+        FactsCodec.Read(File.ReadAllBytes(Path.Combine(destination, "baseline-facts.json"))));
+    Check(result.Complete && result.Findings.Length == 1, "data-policy-finding");
+    File.WriteAllText(Path.Combine(destination, "proof.json"), JsonSerializer.Serialize(new
+    {
+        bytecodeSha256 = Convert.ToHexStringLower(SHA256.HashData(bytecodes[0])), bytecodeUnchanged = true,
+        invocationFactsUnchanged = true, invocations = analyses[0].Invocations.Length, dataFindings = result.Findings.Length,
+        evidence = "Original serialized fixture and reviewed source model; not engine/game execution"
+    }));
+    return 0;
+}
+
+static UAsset DataFixtureAsset()
+{
+    var asset = Asset();
+    asset.UseSeparateBulkDataFiles = false;
+    asset.Imports.Add(new Import("/Script/CoreUObject", "Package", new(0), "/Script/CoreUObject", false, asset));
+    asset.Imports[5].OuterIndex = new(-8);
+    asset.Imports[6].OuterIndex = new(-8);
+    return asset;
+}
+
+static int DataBudgetFixtures(string destination)
+{
+    if (Directory.Exists(destination)) return 2;
+    Directory.CreateDirectory(destination);
+    foreach (var name in new[] { "A", "B", "C", "D", "E", "Later" })
+    {
+        var asset = DataFixtureAsset();
+        asset.AddNameReference(new("IntProperty"));
+        asset.Exports.Add(new NormalExport { Asset = asset, ObjectName = new(asset, "Data"), OuterIndex = new(0),
+            ClassIndex = new(-6), Data = Enumerable.Range(0, 4096).Select(i => (PropertyData)new IntPropertyData(new(asset, "Property" + i))
+                { Value = i }).ToList(), Extras = [] });
+        AddFunction(asset, "Consume", [new EX_FinalFunction { StackNode = new(-3), Parameters = [] }]);
+        asset.Write(Path.Combine(destination, name + ".uasset"));
+    }
+    return 0;
 }
 
 static void Reject<T>(Action operation) where T : Exception
