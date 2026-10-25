@@ -68,6 +68,11 @@ Reviewed source scope: local authorized UE4.25Plus commit
 - Constant ANSI/Unicode function strings retain candidates; runtime strings retain
   `target-name-unavailable`. A directly serialized instance delegate supplies its
   callback name; opaque delegate expressions retain binding-flow uncertainty.
+  `NAME_None` (ASCII-case-insensitive) is an unbound name in delegate and timer
+  evidence, never a candidate for a local function named `None`.
+  At the same pinned commit, `Core/Public/UObject/ScriptDelegates.h:38–45`
+  rejects `NAME_None` in `IsBound_Internal`; `Core/Public/UObject/NameTypes.h:394,
+  515–536` defines case-insensitive FName equality and the zero-number EName check.
 - `Engine/Source/Runtime/CoreUObject/Private/UObject/ScriptCore.cpp:2898–2917,
   3189–3215` corroborates name-based virtual dispatch and bind/instance delegate
   operands. Pinned UAssetAPI Read/Write/Visit, not source pseudocode, determines
@@ -91,6 +96,12 @@ Exhausting the evidence-origin budget adds a global diagnostic without stopping
 original direct-call traversal.
 Transport enforces 10,000 aggregate candidates, byte/node/depth budgets, closed
 string enums, unknown-key rejection, unique origins and unique candidate identities.
+Parser aggregation caps origins and candidates globally, marking truncation with
+`unresolved-dispatch` and `incomplete-extraction`. Candidate tails receive
+`target-expansion-limit`. If indirect evidence exceeds transport node/byte limits,
+the parser retains the largest fitting origin prefix; direct facts and inventory
+must fit independently and are never trimmed to make room for indirect evidence.
+Later packages still undergo direct extraction and inventory inspection.
 Malformed UTF-16/U+FFFD, ANSI non-ASCII, embedded NUL and unsupported cast-layout
 preflight rejections remain unchanged. Missing signatures remain query-specific.
 
@@ -120,3 +131,15 @@ Local image ID: `sha256:e5a2cef068522bff6b60d97f7718b251aaf8131777ea9503bed4677a
 This dirty-worktree local test is not independent review, publication approval or
 clean release-source provenance. Initial failed/timeout attempts remain separate
 receipts; the component-suite deadline is now 1200 seconds, not a scanner limit.
+
+FIX1: `/tmp/opencode/pr32-fix1-release-proof1/execution.json` completed the same
+serial release path: 135 extraction, 115 Policy, 26 PolicyInput, 158 Scanner and
+150 Python tests, with no skips; 32 seeded properties and three removal mutations.
+Local image: `sha256:46ac4ecb0d72bc586911e939787d3edcb4182dd0ede0bdf18215baf0b5e774d8`.
+New serialized-package checks cover global origin/node, candidate and byte
+exhaustion while retaining all direct forbidden calls, later-package extraction
+and inventory. Timer `None`/ASCII-case and valid-name checks use serialized
+bytecode; Action and moderation reject reordered duplicate origins.
+`/tmp/opencode/pr32-fix1-proof` retains old-image failures and initial test-expectation
+failures separately. Original owned evidence is unchanged; tests used a copy.
+This remains an uncommitted local proof, not independent review or release approval.

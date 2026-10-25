@@ -146,7 +146,7 @@ def load(data, root):
     candidate_count = 0
     for dispatch in report.get("possible-dispatches", []):
         evidence = dispatch["evidence"]
-        origin = compact(evidence["origin"])
+        origin = tuple(evidence["origin"][key] for key in ("asset", "function", "offset"))
         require(origin not in dispatch_origins)
         dispatch_origins.add(origin)
         require("open-world" in evidence["diagnostics"])
