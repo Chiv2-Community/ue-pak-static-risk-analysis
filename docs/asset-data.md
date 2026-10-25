@@ -1,9 +1,10 @@
 # Serialized asset-data evidence: partial #10
 
-`PakRisk.Extraction.AssetDataExtractor` is an experimental library API, not a
-shipped data-risk gate. **#10 remains open.** It collects bounded typed serialized
+`PakRisk.Extraction.AssetDataExtractor` collects bounded typed serialized
 values without classifying property names, inventing sensitive APIs, or changing
-Policy AST v1. Exact-game property-purpose metadata (#7) is unavailable.
+Policy AST v1. **#10 remains open.** Exact-game property-purpose metadata (#7) is unavailable.
+The optional [data-policy path](data-policy.md) now transports these values privately
+to trusted evaluation and emits separate gated, sanitized data findings.
 
 ## API and evidence
 
@@ -79,40 +80,36 @@ consume an occurrence per expansion. Container count records are not proof that
 all children fit. All limits describe **post-parse** traversal; upstream reads
 still require external resource/isolation controls.
 
-This API is deliberately **not connected** to `Parser`, `FactsCodec`, the shared
-report schema, scanner CLI, Action outputs or moderation feedback. Raw submitted
+`Parser` now includes an additive bounded `asset-data` block in private facts;
+the shared typed models live in Policy without changing invocation AST v1. Raw submitted
 properties must not be copied into ordinary reports, logs, workflow commands,
 summaries or public feedback. They are untrusted, potentially private data, even
-when valid Unicode. No data-policy or baseline CLI/Action inputs exist in this
-slice. Existing direct/possible invocation arrays, counts, call-chain evidence,
+when valid Unicode. Optional private data-policy and baseline CLI/Action inputs
+are documented separately. Existing direct/possible invocation arrays, counts, call-chain evidence,
 catalog digest disclosure, gates and exact report-byte binding are unchanged.
-Standalone extraction cannot evict later packages' mandatory facts/inventory or
-consume the global FactsCodec 8 MiB/200,000-token budget.
+Extraction is aggregated under 4096 property/262,144 text-character global caps.
+FactsCodec retains a bounded useful prefix, then a fixed incomplete data marker
+at the shared 8 MiB/200,000-token limit. Later mandatory calls/inventory are not evicted.
 
 ## Remaining delivery gates
 
-- Add a separately versioned, closed data extension, reviewed exact owner/class/
-  property identities, purpose, build scope and source provenance. Do not extend
-  invocation YAML implicitly or infer sensitivity from names/URLs.
-- Accept baselines only through authorized operator input and isolated read-only
-  parsing. Bind original hashes, build, engine, explicit namespace mapping,
-  dependency/mapping and tool context. A user-supplied fact file is not a verified
-  clean installation. Rights to inspect or redistribute baselines are external;
-  no automatic discovery, download or game-content publication is authorized.
+The generic transport, optional exact data rules, isolated original-pak baseline,
+separate findings, mandatory gates and private moderation binding below are now
+implemented; see [current integration/limits](data-policy.md). The remaining
+acceptance boundary is effective dependency closure and exact-game provenance,
+plus authorized container validation and independent review of this integration.
+
+- Supply reviewed exact-game property-purpose metadata, not merely the original
+  illustrative fixture model. Build assertions do not authenticate implementations.
+- Establish effective dependency closure where supported; absent child overrides,
+  external/native constructors, compound merging and cross-package ancestry remain
+  unknown. Local structural provenance is not an engine-effective value.
 - [Protected paths](content-policy.md) already recognize normalized, ASCII
   case-insensitive component identities. Those matches remain **replacement
   candidates**, not proven vanilla overrides. No mount/load precedence is guessed.
-- Retain optional evidence under package **and global** aggregation bounds without
-  displacing mandatory calls/inventory, including at transport exhaustion.
-- Add separate non-invocation findings and mandatory review/reject gates using the
-  existing trusted evaluation path. Bind catalog/baseline dependencies and opaque
-  revisions in shared report validation and moderation; invalidate changed context.
-  Private conditions/provenance/paths must not leak through ordinary reports.
-- Prove a reviewed original property-purpose model drives a finding when trusted
-  Blueprint code is unchanged. Current tests prove changed typed data and stable
-  real invocation facts, not that an engine consumes that property or that an
-  exact-game behavior catalog exists. Local inherited provenance and class-target
-  substitutions are exercised; cross-package effective defaults remain open.
+- Complete parent-authorized serial Docker/Action validation and independent
+  integration review. Original fixture source/property-pointer and stable-bytecode
+  proofs do not prove engine execution, actual game behavior or baseline safety.
 
 ## Proofs
 

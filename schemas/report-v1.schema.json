@@ -40,6 +40,7 @@
     "diagnostics": {"type": "array", "maxItems": 1, "items": {"enum": ["invalid-configuration", "analysis-failed", "parser-failed", "parser-output-limit", "wall-timeout", "cancelled", "container-unavailable", "input-failed"]}},
     "inspection": {"$ref": "facts-v1.schema.json#/$defs/inspection"},
     "call-chains": {"$ref": "#/$defs/call-chains"},
+    "data-analysis": {"$ref": "#/$defs/data-analysis"},
     "possible-dispatches": {"type": "array", "maxItems": 10000, "items": {
       "type": "object", "additionalProperties": false, "required": ["evidence", "possibly-flagged", "possibly-forbidden"],
       "properties": {"evidence": {"$ref": "facts-v1.schema.json#/$defs/dispatch"},
@@ -69,6 +70,24 @@
     {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"properties": {"diagnostics": {"minItems": 1}, "flagged-invocations": {"maxItems": 0}, "forbidden-invocations": {"maxItems": 0}}}}
   ],
   "$defs": {
+    "data-analysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "decision", "complete", "findings", "diagnostics"],
+      "properties": {
+        "schema-version": {"const": 1}, "decision": {"enum": ["no-match", "needs-review", "reject"]}, "complete": {"type": "boolean"},
+        "diagnostics": {"type": "array", "maxItems": 6, "uniqueItems": true, "items": {"enum": ["data-baseline-unavailable", "data-evidence-incomplete", "data-baseline-incomplete", "data-property-unavailable", "data-comparison-unavailable"]}},
+        "findings": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {
+          "type": "object", "additionalProperties": false, "required": ["member-id", "export-index", "property-ordinal", "reason", "action"],
+          "properties": {
+            "member-id": {"$ref": "facts-v1.schema.json#/$defs/identity"},
+            "export-index": {"type": "integer", "minimum": 1, "maximum": 4096},
+            "property-ordinal": {"type": "integer", "minimum": 0, "maximum": 4095},
+            "reason": {"enum": ["reviewed-serialized-property-changed", "reviewed-serialized-assertion-matched"]},
+            "action": {"enum": ["review", "reject"]}
+          }
+        }}
+      }
+    },
     "chain-target": {
       "type": "object", "additionalProperties": false, "required": ["owner", "function"],
       "properties": {"owner": {"type": "string", "maxLength": 4096}, "function": {"type": "string", "maxLength": 4096}}

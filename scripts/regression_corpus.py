@@ -395,6 +395,42 @@ def components(run, image=None, evidence=None):
                 env=env, timeout=1200)
 
 
+def data_policy_oracle(report):
+    require(report["data-analysis"] == {"schema-version": 1, "decision": "needs-review", "complete": True,
+        "findings": [{"member-id": "r00000000", "export-index": 1, "property-ordinal": 0,
+            "reason": "reviewed-serialized-property-changed", "action": "review"}], "diagnostics": []},
+        "reviewed original data finding mismatch")
+
+
+def data_policy_gate(run, policy):
+    generated = run.root / "data-policy"
+    run.command(["dotnet", GENERATOR, "data-policy", generated])
+    facts = generated / "submission-facts.json"
+    extra = ["--data-rules", generated / "data-rules.json", "--game-build", "original-fixture-v1",
+        "--fail-on-any-forbidden", "false", "--fail-on-any-flagged", "false", "--fail-on-incomplete", "false"]
+    missing = run.evaluate(facts, policy=policy, extra=extra)
+    require(not missing["data-analysis"]["complete"] and "data-baseline-unavailable" in missing["data-analysis"]["diagnostics"],
+            "data missing-baseline uncertainty lost")
+    compared = run.evaluate(facts, policy=policy, extra=[*extra, "--baseline-facts", generated / "baseline-facts.json",
+        "--expected-baseline-sha256", "b" * 64, "--baseline-facts-assertion", "caller-supplied-not-authenticated"])
+    data_policy_oracle(compared)
+    require(compared["counts"] == missing["counts"], "data altered invocation counts")
+    for value in (missing, compared):
+        public = json.dumps(value).encode()
+        require(b"private-data-canary" not in public and b"private-original-model" not in public and b"Destination" not in public,
+                "private serialized values or data policy leaked")
+    mutant = copy.deepcopy(compared)
+    mutant["data-analysis"]["findings"] = []
+    mutant["data-analysis"]["decision"] = "no-match"
+    report_validation.load(json.dumps(mutant).encode(), ROOT)
+    try:
+        data_policy_oracle(mutant)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("oracle accepted removed-data-finding")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="new private directory outside checkout")
@@ -455,6 +491,7 @@ def main():
             require(value is None or value["status"] == "failed", "invalid configuration succeeded")
         output_properties(baseline)
         call_chain_gate(run, args.docker_image)
+        data_policy_gate(run, policy)
         if args.docker_image:
             integrated(run, args.docker_image, pak, expected, policy)
         if args.owned_evidence:
@@ -464,7 +501,7 @@ def main():
         if args.components:
             components(run, args.docker_image, args.owned_evidence)
         completed = True
-        print("PASS: integrated synthetic corpus; three removal mutations rejected; Docker=" + str(bool(args.docker_image))
+        print("PASS: integrated synthetic corpus; four removal mutations rejected; Docker=" + str(bool(args.docker_image))
               + "; external owned cook=" + str(bool(args.owned_evidence)))
         return 0
     finally:

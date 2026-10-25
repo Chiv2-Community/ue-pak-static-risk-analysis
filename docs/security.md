@@ -45,12 +45,14 @@ Partial [bounded call chains](call-chains.md) use actual matched endpoints and
 explicit nonsecret, provenance-bearing operator summaries; they do not prove #7–9
 complete. Missing context/summaries and possible edges remain incomplete.
 Not shipped: complete indirect resolution (#8), complete cross-package call-chain
-behavior (#9), data/default/configuration-driven effects (#10), native
+behavior (#9), complete data/default/configuration-driven effects (#10), native
 implementation analysis/nativized behavior, reachability, exploit detection,
 full serialization coverage, runtime computed arguments, or complete reconstruction.
-An experimental [serialized asset-data library](asset-data.md) collects bounded
-typed values and local default provenance only; it is not a data-risk evaluator
-or scanner/report integration and does not close #10.
+The [serialized asset-data library](asset-data.md) supplies bounded private facts
+for optional [reviewed data rules](data-policy.md). Separate sanitized findings and
+mandatory gates do not establish effective defaults/native behavior or close #10.
+Private catalogs and original baselines never enter parser policy mounts; their
+dependency fingerprints stay in a separately restricted moderation artifact.
 Imported signatures can remain unavailable: exact invocation-only rules may
 complete while argument-dependent rules stay Unknown, including under negation.
 See [exact matching/three-valued rules](policies.md) and

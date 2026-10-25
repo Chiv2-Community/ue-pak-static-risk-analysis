@@ -168,5 +168,7 @@ verification passed. This validated a local gate; it published no release.
 local receipt above records the external cooked release-path evidence. This is
 not release publication authorization. Exact game/Windows fidelity and broader
 redistribution rights remain #2; private external Action access remains #13.
-Indirect/data-driven/native implementation analyses are not shipped and have no
-claimed corpus proof. Owner publication/access decisions remain #18 gates.
+The runner now also checks partial indirect/call-chain and private serialized-data
+rules, including missing-baseline gates, unchanged stored fixture bytecode and a
+data-finding removal mutation. These are not full behavior/native implementation
+proofs. Owner publication/access decisions remain #18 gates.

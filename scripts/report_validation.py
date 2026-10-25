@@ -162,7 +162,15 @@ def load(data, root):
         require(bool(evidence["candidates"]) or not (dispatch["possibly-flagged"] or dispatch["possibly-forbidden"]))
     incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
                       or report.get("content-policy", {}).get("incomplete", False)
+                      or not report.get("data-analysis", {}).get("complete", True)
                       or not report.get("call-chains", {}).get("complete", True))
+    if "data-analysis" in report:
+        data = report["data-analysis"]
+        require(data["complete"] == (not data["diagnostics"]))
+        actions = {f["action"] for f in data["findings"]}
+        require(data["decision"] == ("reject" if "reject" in actions else "needs-review" if actions else "no-match"))
+        members = {m["id"] for m in report.get("inspection", {}).get("members", [])}
+        require(all(f["member-id"] in members for f in data["findings"]))
     if "call-chains" in report:
         chains = report["call-chains"]
         require(chains["complete"] == (not chains["diagnostics"]))

@@ -10,6 +10,14 @@ inputs:
   capability-summaries:
     description: Optional trusted nonsecret capability-catalog FILE PATH. Exact bytes are context-bound; matched capabilities always require review. Never supplied by the submission.
     required: false
+  data-rules:
+    description: Optional PRIVATE reviewed data-policy JSON FILE PATH, never inline or supplied by the submission. Requires game-build, content-root and data-context. No game model is bundled.
+  baseline-pak:
+    description: Optional authorized original pak FILE PATH. Independently snapshotted and isolated; never a verified clean installation or native-code guarantee.
+  game-build:
+    description: Explicit operator build-scope assertion matching the private data rules. Does not authenticate a build.
+  data-context:
+    description: New workspace-relative PRIVATE context artifact path, required with data-rules. Bind this artifact and dependencies in moderation; never publish it.
   engine-version:
     description: Supported Unreal Engine version (4.25 only).
     default: '4.25'
@@ -33,6 +41,15 @@ inputs:
   mapping:
     description: Optional path to a property mapping file (.usmap).
 outputs:
+  data-analysis-status:
+    description: not-performed, complete, incomplete, or unknown. Complete is not a safety verdict.
+    value: ${{ steps.scan.outputs.data-analysis-status }}
+  data-review-count:
+    description: Separate data review finding count, or unknown. No invocation counts are changed.
+    value: ${{ steps.scan.outputs.data-review-count }}
+  data-reject-count:
+    description: Separate data reject finding count, or unknown. Data gates cannot be disabled by invocation gate inputs.
+    value: ${{ steps.scan.outputs.data-reject-count }}
   flagged-invocations:
     description: Private-profile JSON array. Check arrays-omitted; the report is authoritative.
     value: ${{ steps.scan.outputs.flagged-invocations }}
@@ -91,6 +108,10 @@ runs:
         INPUT_PAK: ${{ inputs.pak }}
         INPUT_POLICY_RULES: ${{ inputs.policy-rules }}
         INPUT_CAPABILITY_SUMMARIES: ${{ inputs.capability-summaries }}
+        INPUT_DATA_RULES: ${{ inputs.data-rules }}
+        INPUT_BASELINE_PAK: ${{ inputs.baseline-pak }}
+        INPUT_GAME_BUILD: ${{ inputs.game-build }}
+        INPUT_DATA_CONTEXT: ${{ inputs.data-context }}
         INPUT_ENGINE_VERSION: ${{ inputs.engine-version }}
         INPUT_LOG_LEVEL: ${{ inputs.log-level }}
         INPUT_FAIL_ON_ANY_FORBIDDEN: ${{ inputs.fail-on-any-forbidden }}

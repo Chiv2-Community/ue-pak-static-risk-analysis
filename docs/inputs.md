@@ -4,9 +4,9 @@ Run from the trusted checkout root. No shorthand policy files or game defaults
 are implied. See [operator examples](operators.md) for setup and safe collection.
 `none` means omitted, not an empty string. Enum values below are exhaustive.
 
-No data-policy or trusted-baseline flags are shipped. The experimental
-[asset-data API](asset-data.md) is library-only; it neither compares a clean game
-installation nor expands CLI/Action coverage to data-driven behavior (#10).
+Optional [private data rules](data-policy.md) compare typed serialized evidence
+against an explicitly supplied original pak. They do not verify a clean game
+installation, effective defaults or native behavior. #10 remains open.
 
 ## Host scanner
 
@@ -22,6 +22,10 @@ installation nor expands CLI/Action coverage to data-driven behavior (#10).
 | `--timeout` | number, seconds `(0,600]` | `60` | `90` | Per-container deadline, not whole-command deadline. |
 | `--policy-rules` | file path | none | `/private/rules.yaml` | Exactly one file or raw environment policy source. |
 | `--capability-summaries` | trusted nonsecret file path | none | `/approved/catalog.json` | Optional catalog v1, 256 KiB/256 exact targets; matched capabilities always require review. Parser never receives it. |
+| `--data-rules` | private trusted file path | none | `/private/data-rules.json` | Closed data-policy v1; requires game-build, content-root and private data-context output. Never mounted in parser. |
+| `--baseline-pak` | authorized file path | none | `/private/original.pak` | Optional original pak, independently bounded/snapshotted/parsed read-only; requires data-rules. Not authenticated clean or a safety guarantee. |
+| `--game-build` | operator assertion | none | `original-fixture-v1` | Exact private data-rule build scope. Does not authenticate build metadata. |
+| `--data-context` | new private file path | none | `/private/new-context.json` | Required with data-rules; mode-0600 private report/dependency binding. Never publish. |
 | `--log-level` | enum: `error`, `warn`, `info`, `verbose` | `info` | `info` | **Warning: verbose prints the full policy to logs; anyone with log access can read it. Env values are not masked secrets; step setup/admin access can expose them independently.** |
 | `--policy-revision` | opaque ASCII token, 1–128 characters | none | `review-2026-001` | Operator-controlled revision, not policy-content hash; required for moderation context. |
 | `--fail-on-any-forbidden` | enum: `true`, `false` | `true` | `true` | Fail if any forbidden invocation exists. |
@@ -60,6 +64,11 @@ the same defaults. Host-only image/timeout/pak/mapping/content-root are not flag
 | `--reason` | enum: `parser-failed`, `parser-output-limit`, `wall-timeout`, `cancelled`, `container-unavailable`, `input-failed`, `invalid-configuration` | required for failure-report | `parser-failed` | Internal wrapper failure report; not an alternate empty-success path. |
 | `--policy-rules` | file path | none | `/private/rules.yaml` | Exactly one file/env source for evaluate/validate. |
 | `--capability-summaries` | trusted nonsecret file path | none | `/approved/catalog.json` | Optional bounded catalog v1; validates before verbose policy disclosure. Exact digest/revision bind report context. |
+| `--data-rules` | private trusted file path | none | `/private/data-rules.json` | Optional closed data extension; validated before any verbose invocation-policy disclosure. Never logged, even verbose. |
+| `--game-build` | operator assertion | none | `original-fixture-v1` | Required with data-rules; exact reviewed build scope. |
+| `--baseline-facts` | private facts file path | none | `/private/baseline-facts.json` | Internal isolated-parser transport; standalone facts are caller assertions, not authenticated baseline content. Requires data-rules and both baseline options below. |
+| `--expected-baseline-sha256` | lowercase SHA-256 | none | trusted 64-hex digest | Bind baseline facts to the independently snapshotted original pak; must match reviewed data-rule context too. |
+| `--baseline-facts-assertion` | enum: `caller-supplied-not-authenticated` | none | `caller-supplied-not-authenticated` | Required explicit acknowledgement with baseline-facts. Shape/digest matching is not authenticity. |
 | `--log-level` | enum: `error`, `warn`, `info`, `verbose` | `info` | `info` | **Warning: verbose prints the full policy to logs; anyone with log access can read it. Env is not masked; step setup/admin access can expose it independently.** |
 | `--policy-revision` | opaque ASCII token, 1–128 characters | none | `review-2026-001` | Caller-owned identity, not policy-content hash. |
 | `--fail-on-any-forbidden` | enum: `true`, `false` | `true` | `true` | Fail on any forbidden invocation. |
@@ -88,6 +97,10 @@ allowlists, policy revision or moderator-detail input exists.
 | `pak` | runner file path | required | `/approved/mod.pak` | Original pak only; no submission checkout. |
 | `policy-rules` | file path | none | `/private/rules.yaml` | Alternative to raw step environment YAML; exactly one source. |
 | `capability-summaries` | trusted nonsecret runner file path | none | `/approved/catalog.json` | Optional bounded catalog v1, never submission-controlled; capability matches always require review. |
+| `data-rules` | private trusted runner file path | none | `/private/data-rules.json` | Optional data-policy v1; requires game-build, content-root and data-context. No inline policy or submission-controlled model. |
+| `baseline-pak` | authorized runner file path | none | `/private/original.pak` | Optional bounded original pak; isolated read-only parsing, not a verified clean installation. |
+| `game-build` | operator assertion | none | `original-fixture-v1` | Exact reviewed private data-model build scope; not authentication. |
+| `data-context` | new private workspace-relative path | none | `private/new-context.json` | Required with data-rules; restrict collection and never publish private dependency/context fingerprints. |
 | `engine-version` | enum: `4.25` | `4.25` | `'4.25'` | Supported parsing hint. |
 | `log-level` | enum: `error`, `warn`, `info`, `verbose` | `info` | `info` | **Warning: verbose prints the full policy to workflow logs; anyone with log access can read it. Env values are not masked secrets; step setup/admin access can expose them independently.** |
 | `fail-on-any-forbidden` | enum: `true`, `false` | `true` | `'true'` | Fail on forbidden findings. |

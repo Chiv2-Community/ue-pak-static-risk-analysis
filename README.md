@@ -24,8 +24,9 @@ Start with the [operator guide](docs/operators.md), [CLI/Action input tables](do
 [security boundaries](docs/security.md) and [controlled release checklist](docs/releases.md).
 No release/publication or expanded access is approved. [Partial indirect evidence](docs/indirect-dispatch.md)
 does not close #8; [bounded call-chain evidence](docs/call-chains.md) is partial #9,
-not exact-game native catalog proof. Data-driven effects (#10) and native implementation
-analysis are not shipped; exact
+not exact-game native catalog proof. Optional [private serialized-data rules](docs/data-policy.md)
+are partial #10, not effective-default or exact-game behavior proof. Native implementation
+analysis is not shipped; exact
 Windows/game fidelity and broader redistribution rights remain open.
 
 ## Build and test

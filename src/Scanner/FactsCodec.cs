@@ -3,13 +3,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using PakRisk.Policy;
+using PakRisk.Extraction;
 
 namespace PakRisk.Scanner;
 
 public sealed record DependencyIdentity(string Kind, string Sha256);
 public sealed record FactsDocument(int SchemaVersion, string PakSha256, string EngineVersion,
     string ProducerVersion, ImmutableArray<DependencyIdentity> Dependencies, InvocationAnalysis Analysis,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DataEvidence? AssetData = null);
 
 public sealed record ParsedClassEvidence(string Identity, string Provenance);
 public sealed record MemberEvidence(string Id, string Path, long? Size, string? Sha256, string Status,
@@ -34,6 +36,12 @@ public static class FactsCodec
         var resolver = new DefaultJsonTypeInfoResolver();
         resolver.Modifiers.Add(info =>
         {
+            if (info.Type == typeof(SerializedValue)) Tags(info,
+                (typeof(SerializedValue.Unknown), "unknown"), (typeof(SerializedValue.Text), "text"),
+                (typeof(SerializedValue.Boolean), "boolean"), (typeof(SerializedValue.Integer), "integer"),
+                (typeof(SerializedValue.Name), "name"), (typeof(SerializedValue.Enumeration), "enumeration"),
+                (typeof(SerializedValue.NullReference), "null-reference"), (typeof(SerializedValue.Reference), "reference"),
+                (typeof(SerializedValue.Delegate), "delegate"), (typeof(SerializedValue.Container), "container"));
             if (info.Type == typeof(InvocationTarget)) Tags(info,
                 (typeof(InvocationTarget.Resolved), "resolved"), (typeof(InvocationTarget.Unresolved), "unresolved"));
             if (info.Type == typeof(ArgumentMetadata)) Tags(info,
@@ -104,10 +112,48 @@ public static class FactsCodec
         {
             Validate(document);
             try { return Serialize(document); }
-            catch (FactsException) when (document.Analysis.CallGraph is { Functions.Length: > 0 })
+            catch (FactsException) when (document.AssetData is not null || document.Analysis.CallGraph is { Functions.Length: > 0 })
             {
-                // The additive graph must not evict already extracted invocations at the transport limit.
-                return Serialize(document with { Analysis = document.Analysis with { CallGraph = new(1, false, []) } });
+                // Additive evidence must not evict mandatory calls or inventory. First drop data;
+                // retain a fixed incomplete marker even when no property fits.
+                var bounded = document.AssetData is null ? document : document with
+                    { AssetData = document.AssetData with { Complete = false, Packages = [] } };
+                byte[] retained;
+                try { retained = Serialize(bounded); }
+                catch (FactsException) when (document.Analysis.CallGraph is { Functions.Length: > 0 })
+                {
+                    bounded = bounded with { Analysis = bounded.Analysis with { CallGraph = new(1, false, []) } };
+                    retained = Serialize(bounded);
+                }
+                if (document.AssetData is not { } original) return retained;
+                // Retain a deterministic prefix of useful typed values under the shared byte/token
+                // budget. Known values are not replaced by invented nulls or zeroes.
+                var low = 0;
+                var high = original.Packages.Sum(p => 1 + p.Evidence.Properties.Length);
+                while (low < high)
+                {
+                    var count = low + (high - low + 1) / 2;
+                    var remaining = count;
+                    var packages = ImmutableArray.CreateBuilder<PackageDataEvidence>();
+                    foreach (var package in original.Packages)
+                    {
+                        if (remaining-- <= 0) break;
+                        var keep = Math.Min(remaining, package.Evidence.Properties.Length);
+                        packages.Add(keep == package.Evidence.Properties.Length ? package : package with
+                        { Evidence = package.Evidence with { Complete = false,
+                            Properties = package.Evidence.Properties.Take(keep).ToImmutableArray(), Diagnostics = ["data-transport-limit"] } });
+                        remaining -= keep;
+                    }
+                    try
+                    {
+                        var candidate = bounded with { AssetData = original with { Complete = false, Packages = packages.ToImmutable() } };
+                        Validate(candidate);
+                        retained = Serialize(candidate);
+                        low = count;
+                    }
+                    catch (FactsException) { high = count - 1; }
+                }
+                return retained;
             }
         }
         catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException
@@ -152,6 +198,7 @@ public static class FactsCodec
                         || !ContentPolicy.ClassIdentity(c.Identity) || c.Provenance is not ("export-class-index-import" or "export-class-index-export")))) throw new FactsException();
         }
         PolicyEvaluator.Validate(document.Analysis);
+        if (document.AssetData is { } data) DataEvidenceValidation.Validate(data);
     }
 
     private static bool Hash(string? value) => value is { Length: 64 }
@@ -178,6 +225,7 @@ public static class FactsCodec
             if (++nodes > maxNodes) throw new FactsException();
             if (property == "dispatches" && reader.TokenType != JsonTokenType.StartArray) throw new FactsException();
             if (property == "call-graph" && reader.TokenType != JsonTokenType.StartObject) throw new FactsException();
+            if (property == "asset-data" && reader.TokenType != JsonTokenType.StartObject) throw new FactsException();
             if (reader.TokenType is JsonTokenType.PropertyName or JsonTokenType.String)
             {
                 if (reader.ValueSpan.Length > PolicyEvaluator.MaxFactStringLength * 6) throw new FactsException();
@@ -196,7 +244,7 @@ public static class FactsCodec
                 throw new FactsException();
             if (reader.TokenType == JsonTokenType.StartObject) frames.Push(new Frame(new HashSet<string>(StringComparer.Ordinal), 0));
             if (reader.TokenType == JsonTokenType.StartArray)
-                frames.Push(new Frame(null, property is "arguments" or "coverage-gaps" or "dependencies" or "candidates" ? 256 : property == "functions" ? 4096 : property == "diagnostics" ? 16 : PolicyEvaluator.MaxInvocations));
+                frames.Push(new Frame(null, property is "arguments" or "coverage-gaps" or "dependencies" or "candidates" ? 256 : property == "functions" ? 4096 : property == "diagnostics" ? 64 : PolicyEvaluator.MaxInvocations));
             property = null;
         }
     }

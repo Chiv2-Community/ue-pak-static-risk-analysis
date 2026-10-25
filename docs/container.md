@@ -24,7 +24,10 @@ prefix for your input; there is no built-in game namespace. Only one content-roo
 mapping is supported. Unknown roots become incomplete, not invented identities.
 `--mapping /approved/owned.usmap` supplies one optional, bounded property mapping.
 Encrypted paks and keys, other dependency bundles, complete indirect resolution (#8),
-transitive packages (#9), and default/configuration effects (#10) are unsupported.
+transitive packages (#9), and engine-effective default/configuration behavior (#10)
+are unsupported. Optional [private serialized-data rules](data-policy.md) accept
+an explicit original pak through a separate isolated read-only parser; no game
+installation or native-code trust is inferred.
 [Possible indirect evidence](indirect-dispatch.md) stays explicitly incomplete.
 
 Optional trusted [content-policy flags](content-policy.md) restrict virtual paths

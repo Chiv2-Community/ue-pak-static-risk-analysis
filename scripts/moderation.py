@@ -68,6 +68,12 @@ def validate(value, profile):
         # Dependency order is not identity. Reject noncanonical storage rather
         # than making equivalent records compare differently at approval time.
         reports.require(kinds == sorted(kinds))
+        if "data-context" in value:
+            private = value["data-context"]
+            reports.require(private["game-build"] == value["game-build"])
+            private_kinds = [d["kind"] for d in private["dependencies"]]
+            reports.require(private_kinds == sorted(set(private_kinds)) and "data-rules" in private_kinds)
+            reports.require(not set(private_kinds) & set(kinds))
     elif profile in ("handoff", "feedback"):
         if profile == "handoff":
             validate(value["context"], "context")
@@ -75,6 +81,7 @@ def validate(value, profile):
         reports.require(max(counts["flagged"], counts["forbidden"]) <= counts["affected-union"] <=
                         min(counts["invocations"], counts["flagged"] + counts["forbidden"]))
         incomplete = bool(coverage["gaps"] or coverage["evaluation-incomplete"]
+                          or not value.get("data-analysis", {}).get("complete", True)
                           or value.get("content-policy", {}).get("incomplete", False)
                           or not value.get("call-chain-analysis", {}).get("complete", True))
         reports.require(value["analysis-complete"] == (not incomplete))
@@ -83,6 +90,11 @@ def validate(value, profile):
         else:
             reports.require(value["status"] == ("partial" if incomplete else "successful"))
         reports.require(value["routes"] == routes(value))
+        if "data-analysis" in value:
+            data = value["data-analysis"]
+            reports.require(data["decision"] == ("reject" if data["reject-count"] else "needs-review" if data["review-count"] else "no-match"))
+        if profile == "handoff" and value["status"] != "failed":
+            reports.require(("data-analysis" in value) == ("data-context" in value["context"]))
     elif profile == "review":
         validate(value["handoff"], "handoff")
         datetime.strptime(value["time"], "%Y-%m-%dT%H:%M:%SZ")
@@ -115,18 +127,21 @@ def verify_bytes(context, pak, dependencies):
     validate(context, "context")
     expected = context["report-context"]
     reports.require(digest(pak, PAK_LIMIT) == expected["pak-sha256"])
-    reports.require(len(dependencies) == len(expected["dependencies"]))
-    actual = [{"kind": kind, "sha256": digest(path, DEPENDENCY_LIMIT)} for kind, path in dependencies]
-    reports.require(sorted(actual, key=lambda d: d["kind"]) == expected["dependencies"])
+    identities = expected["dependencies"] + context.get("data-context", {}).get("dependencies", [])
+    reports.require(len(dependencies) == len(identities))
+    actual = [{"kind": kind, "sha256": digest(path, PAK_LIMIT if kind == "baseline-pak" else DEPENDENCY_LIMIT)} for kind, path in dependencies]
+    reports.require(sorted(actual, key=lambda d: d["kind"]) == sorted(identities, key=lambda d: d["kind"]))
 
 
 def routes(value):
     if value["status"] == "failed":
         return ["operational-failed"]
     result = []
-    if value["counts"]["forbidden"] or value.get("content-policy", {}).get("decision") == "reject":
+    if (value["counts"]["forbidden"] or value.get("content-policy", {}).get("decision") == "reject"
+            or value.get("data-analysis", {}).get("decision") == "reject"):
         result.append("policy-violation")
     if (value["counts"]["flagged"] or value.get("content-policy", {}).get("decision") == "needs-review"
+            or value.get("data-analysis", {}).get("decision") == "needs-review"
             or value.get("call-chains", value.get("call-chain-analysis", {})).get("needs-review", False)):
         result.append("needs-review")
     if not value["analysis-complete"]:
@@ -138,6 +153,13 @@ def handoff(report_data, context, pak, dependencies):
     """Accept report bytes through the shared strict default report loader."""
     report = reports.load(report_data, ROOT)
     verify_bytes(context, pak, dependencies)
+    if report["status"] != "failed":
+        reports.require(("data-analysis" in report) == ("data-context" in context))
+    if "data-context" in context:
+        reports.require(context["data-context"]["report-sha256"] == hashlib.sha256(report_data).hexdigest())
+        if "data-analysis" in report:
+            kinds = {d["kind"] for d in context["data-context"]["dependencies"]}
+            reports.require(("baseline-pak" in kinds) == ("data-baseline-unavailable" not in report["data-analysis"]["diagnostics"]))
     if report["status"] != "failed":
         expected = deepcopy(context["report-context"])
         actual = deepcopy(report["context"])
@@ -153,6 +175,11 @@ def handoff(report_data, context, pak, dependencies):
         value["content-policy"] = deepcopy(report["content-policy"])
     if "call-chains" in report:
         value["call-chain-analysis"] = {key: report["call-chains"][key] for key in ("complete", "needs-review")}
+    if "data-analysis" in report:
+        data = report["data-analysis"]
+        value["data-analysis"] = {"complete": data["complete"], "decision": data["decision"],
+            "review-count": sum(f["action"] == "review" for f in data["findings"]),
+            "reject-count": sum(f["action"] == "reject" for f in data["findings"])}
     return validate(value, "handoff")
 
 
@@ -181,6 +208,8 @@ def feedback(value):
         public["content-policy"] = deepcopy(value["content-policy"])
     if "call-chain-analysis" in value:
         public["call-chain-analysis"] = deepcopy(value["call-chain-analysis"])
+    if "data-analysis" in value:
+        public["data-analysis"] = deepcopy(value["data-analysis"])
     return validate(public, "feedback")
 
 
