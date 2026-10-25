@@ -35,7 +35,8 @@ classes. The reusable Action does not expose these flags; use the trusted CLI.
   recorded owner; local export classes use the explicitly mapped logical package.
   Provenance is `export-class-index-import` or `export-class-index-export`.
   These are recorded identities, not authenticated native types or inheritance
-  inventory (#7). A missing/unrepresentable class owner remains unavailable.
+  inventory (#7). Ownership uses the existing bounded package-index traversal;
+  cycles, invalid references and missing/unrepresentable owners remain unavailable.
 - Empty allowlists impose no restriction of that kind. Each repeatable flag is
   bounded to 256 distinct values; prefixes are at most 4096 ASCII characters.
   Class identifiers use the existing bounded owner-name grammar. Duplicates
@@ -50,6 +51,9 @@ classes. The reusable Action does not expose these flags; use the trusted CLI.
   an allowlist. Verified, unclassified paired export bytes are accounted for by
   their parsed package; recognized signatures never receive that exemption.
   Known disallowed classes still reject when other class identities are missing.
+  Parsed-package class inventory gaps remain incomplete with path-only or
+  protected-only settings too; only class membership rejection needs a class
+  allowlist. Non-package members retain content gaps, not class requirements.
 
 ## Reports and gates
 

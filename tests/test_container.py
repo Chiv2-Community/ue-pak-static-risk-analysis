@@ -333,6 +333,44 @@ except scan.Failure: sys.exit(3)
         self.assertEqual(1, result.returncode, result.stderr)
         self.assertEqual("reject", partial["content-policy"]["decision"])
 
+    @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for class ownership mutations")
+    def test_serialized_class_ownership_coverage_is_independent_of_restrictions(self):
+        fixtures = self.root / "class-fixtures"
+        generated = subprocess.run(["dotnet", "run", "--project", str(ROOT / "tests/OwnedFixtures.Verify"),
+            "-c", "Release", "--", os.environ["OWNED_FIXTURE_EVIDENCE"], "--class-fixtures", str(fixtures)],
+            capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        cases = json.loads(generated.stdout)
+        root = ["--content-root", "Content=/Game"]
+        for case in cases:
+            payload = build([("Content/Ownership.uasset", (fixtures / (case["name"] + ".uasset")).read_bytes(), False),
+                             ("Content/Ownership.uexp", (fixtures / (case["name"] + ".uexp")).read_bytes(), False)])
+            identity = case["identity"]
+            allowed = identity or "/Script/OwnedFixtures.FixtureData"
+            for settings in ([], ["--allowed-path", "Content"], ["--protected-path", "Other"], ["--allowed-class", allowed]):
+                with self.subTest(case=case["name"], settings=settings):
+                    result, report = self.invoke(payload, extra=root + settings)
+                    member = report["inspection"]["members"][0]
+                    self.assertEqual(identity is not None, member["parsed-classes-complete"])
+                    self.assertEqual([] if identity is None else [identity], [c["identity"] for c in member["parsed-classes"]])
+                    if identity is not None:
+                        self.assertEqual("export-class-index-export" if case["name"] == "valid-local" else "export-class-index-import",
+                                         member["parsed-classes"][0]["provenance"])
+                    self.assertEqual("paired_export_data", report["inspection"]["members"][1]["inspection-status"])
+                    # Unconfigured invocation-only behavior remains unchanged.
+                    # Bounds failures already carry invocation-extraction gaps, even unconfigured.
+                    incomplete = (bool(settings) and identity is None) or case["name"] in ("owner-out-of-range", "class-out-of-range")
+                    self.assertEqual(int(incomplete), result.returncode, result.stderr)
+                    self.assertEqual(not incomplete, report["analysis-complete"])
+                    self.assertEqual(0, report["counts"]["invocations"])
+                    if settings:
+                        self.assertEqual("allow", report["content-policy"]["decision"])
+                        self.assertEqual(identity is None, report["content-policy"]["incomplete"])
+                        diagnostics = [f["diagnostic"] for f in report["content-policy"]["findings"]]
+                        self.assertEqual(["class-inspection-unavailable"] if identity is None else [], diagnostics)
+                    else:
+                        self.assertNotIn("content-policy", report)
+
     @unittest.skipUnless(os.environ.get("OWNED_FIXTURE_EVIDENCE"), "set OWNED_FIXTURE_EVIDENCE for cooked-package scan")
     def test_real_cooked_calls_file_environment_direct_evaluator_and_hashes(self):
         original = Path(os.environ["OWNED_FIXTURE_EVIDENCE"])

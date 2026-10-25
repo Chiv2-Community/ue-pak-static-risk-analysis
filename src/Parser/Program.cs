@@ -80,17 +80,17 @@ try
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
             foreach (var gap in extraction.Analysis.CoverageGaps) gaps.Add(gap);
-            var classNames = asset.Exports.Select(e => e.GetClassTypeForAncestry(asset, out _)?.ToString())
-                .Where(n => n is not null).Select(n => n!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+            var classTargets = asset.Exports.Select(e => TargetResolver.ResolveIdentity(asset, e.ClassIndex, logical)).ToArray();
+            var classNames = classTargets.Where(c => c is not null).Select(c => c!.Function)
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
             classes[id] = classNames.Take(256).ToImmutableArray();
             if (classNames.Length > 256) gaps.Add(CoverageGap.IncompleteExtraction);
-            var identities = asset.Exports.Select(e =>
+            var identities = classTargets.Select(target =>
             {
-                var name = e.GetClassTypeForAncestry(asset, out var module)?.ToString();
-                var owner = e.ClassIndex.IsExport() ? logical : module?.ToString();
-                var identity = owner + "." + name;
-                return name is not null && owner is not null && ContentPolicy.ClassIdentity(identity)
-                    ? new ParsedClassEvidence(identity, e.ClassIndex.IsExport() ? "export-class-index-export" : "export-class-index-import") : null;
+                if (target is null) return null;
+                var identity = target.Owner + "." + target.Function;
+                return ContentPolicy.ClassIdentity(identity)
+                    ? new ParsedClassEvidence(identity, target.PackageIndex > 0 ? "export-class-index-export" : "export-class-index-import") : null;
             }).ToArray();
             // Missing class-index ownership is unavailable, never a guessed class.
             var knownClasses = identities.Where(c => c is not null).Select(c => c!).Distinct()

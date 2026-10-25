@@ -248,3 +248,20 @@ Local Linux validation, 2026-10-25; no image publication or engine/game executio
   all 23 recorded receipt hashes match. No scanner containers remained.
 - This validates the bounded V9 contract, not exact game-build fidelity (#2),
   native class hierarchy (#7), clean-install replacements or mod safety.
+
+### Content-policy ownership fix validation
+
+Local Linux validation, 2026-10-25; no publication or engine/game execution:
+
+- Image: `sha256:d51c1ff1b11cb1fb10e6c190d59ed078fe0cc907487b54a8796dfe0a5b82cd4b`
+  (`ue-pak-static-risk-analysis:content-policy-fix1-local`).
+- 142 Scanner, 111 extraction, 110 Policy and 26 PolicyInput tests passed.
+  Ordinary Python: 111 passed, 22 opt-in tests skipped. Serialized runs passed
+  all 18 container and 19 Action tests; the read-only cooked verifier passed.
+- Copied serialized fixtures cover imported/local classes, cyclic/null/out-of-range
+  references and missing owners through the production reader/parser. Class-only,
+  path-only and protected-only settings retain unknown class coverage. Known
+  classes and paired raw exports remain complete. Unconfigured behavior and
+  pre-existing bounds-failure extraction gaps remain unchanged.
+- All 495 original evidence files remain unchanged; all 23 receipt hashes match.
+  No scanner containers remained. The preceding fidelity/safety limits still apply.

@@ -124,6 +124,38 @@ public sealed class ContentPolicyTests
         Assert.True(policy.Evaluate(Inventory(member with { Signatures = ["elf"] })).Incomplete);
     }
 
+    [Theory]
+    [InlineData("--allowed-path", "Owned")]
+    [InlineData("--allowed-class", "/Script/Engine.Actor")]
+    [InlineData("--protected-path", "Other")]
+    public void ClassInventoryCoverageDoesNotDependOnAClassRestriction(string flag, string value)
+    {
+        var policy = Config(flag, value);
+        Assert.False(policy.Evaluate(Inventory(Member())).Incomplete);
+        foreach (var member in new[] { Member() with { ParsedClasses = null },
+            Member() with { ParsedClasses = [] }, Member() with { ParsedClassesComplete = false },
+            Member() with { ParsedClassesComplete = null } })
+        {
+            var result = policy.Evaluate(Inventory(member));
+            Assert.Equal("allow", result.Decision);
+            Assert.True(result.Incomplete);
+            Assert.Equal("class-inspection-unavailable", Assert.Single(result.Findings).Diagnostic);
+        }
+        var paired = Member() with { InspectionStatus = "paired_export_data", Signatures = ["unknown_content"],
+            ParsedClasses = null, ParsedClassesComplete = null };
+        Assert.False(policy.Evaluate(Inventory(paired)).Incomplete);
+    }
+
+    [Fact]
+    public void PathOnlyNonPackageHasContentGapNotAClassRequirement()
+    {
+        var result = Config("--allowed-path", "Owned").Evaluate(Inventory(Member() with {
+            Signatures = ["config_candidate"], InspectionStatus = "uninspected", ParsedClasses = null,
+            ParsedClassesComplete = null }));
+        Assert.True(result.Incomplete);
+        Assert.Equal("content-inspection-unavailable", Assert.Single(result.Findings).Diagnostic);
+    }
+
     [Fact]
     public void IncompleteOrAdditionalSignaturesCannotHideKnownClassRejection()
     {

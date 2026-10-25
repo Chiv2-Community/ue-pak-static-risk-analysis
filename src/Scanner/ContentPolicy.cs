@@ -84,12 +84,14 @@ public sealed class ContentPolicy
                 && member.Signatures.Contains("unreal_package_tag");
             if (!parsedPackage || !member.Signatures.SequenceEqual(["unreal_package_tag"]))
             { Add("content-inspection-unavailable"); incomplete = true; }
-            if (classes.Length == 0) continue;
+            // Package inventory coverage is independent of an optional class restriction.
+            // Non-packages already have a content gap; they do not require class metadata.
+            if (!parsedPackage && classes.Length == 0) continue;
             if (!parsedPackage || member.ParsedClasses is not { Length: > 0 } parsed)
             { Add("class-inspection-unavailable"); incomplete = true; continue; }
             if (member.ParsedClassesComplete != true)
             { Add("class-inspection-unavailable"); incomplete = true; }
-            if (parsed.Any(c => !classes.Contains(c.Identity, StringComparer.Ordinal)))
+            if (classes.Length != 0 && parsed.Any(c => !classes.Contains(c.Identity, StringComparer.Ordinal)))
             { Add("class-not-allowed"); reject = true; }
         }
         if (inspection is null || inspection.Members.IsEmpty) findings.Add(new("inventory", "inventory-unavailable"));
