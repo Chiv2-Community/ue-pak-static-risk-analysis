@@ -170,13 +170,13 @@ public static class AssetDataExtractor
 
         private string? Name(FName? value)
         {
-            try { return Text(value?.ToString()); }
+            try { return Text(TargetResolver.StoredName(value)); }
             catch (Exception error) when (error is not OutOfMemoryException)
             { gaps.Add("property-name-unavailable"); return null; }
         }
         private string? Identity(FPackageIndex? index)
         {
-            var identity = TargetResolver.ResolveIdentity(asset, index, input.LogicalPath);
+            var identity = TargetResolver.ResolveDataIdentity(asset, index, input.LogicalPath);
             return identity is null ? null : Text(identity.Owner + "." + identity.Function);
         }
 
@@ -273,7 +273,7 @@ public static class AssetDataExtractor
         {
             if (index is null) return Unknown("reference-unavailable");
             if (index.Index == 0) return new SerializedValue.NullReference();
-            var identity = TargetResolver.ResolveIdentity(asset, index, input.LogicalPath);
+            var identity = TargetResolver.ResolveDataIdentity(asset, index, input.LogicalPath);
             if (identity is null) return Unknown("reference-owner-unavailable");
             var owner = Text(identity.Owner);
             var name = Text(identity.Function);

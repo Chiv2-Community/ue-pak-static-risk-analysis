@@ -122,6 +122,175 @@ public sealed class AssetDataTests
     }
 
     [Theory]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    public void PublicReadAndInspectRejectMissingNameStorage(int index)
+    {
+        var asset = Asset();
+        Data(asset).Data = [
+            new NamePropertyData(new(asset, "Named")) { Value = new(asset, index) },
+            new EnumPropertyData(new(asset, "EnumType")) { EnumType = new(asset, index), Value = new(asset, "OwnedMode::One") },
+            new EnumPropertyData(new(asset, "EnumValue")) { EnumType = new(asset, "OwnedMode"), Value = new(asset, index) },
+            new DelegatePropertyData(new(asset, "Binding")) { Value = new(new(1), new(asset, index)) }
+        ];
+        using var package = new TemporaryPackage(asset);
+        var inspected = Inspect(asset);
+        Assert.False(inspected.Complete);
+        Assert.Equal(new SerializedValue.Unknown("name-value-unavailable"), Value(inspected, "Named"));
+        Assert.Equal(new SerializedValue.Unknown("enum-metadata-unavailable"), Value(inspected, "EnumType"));
+        Assert.Equal(new SerializedValue.Unknown("enum-metadata-unavailable"), Value(inspected, "EnumValue"));
+        Assert.Equal(new SerializedValue.Unknown("delegate-unavailable"), Value(inspected, "Binding"));
+        var read = package.Read();
+        Assert.False(read.Complete);
+        Assert.Equal(inspected.Properties.Select(p => p.Value), read.Properties.Select(p => p.Value));
+        Assert.Equal(inspected.Diagnostics.ToArray(), read.Diagnostics.ToArray());
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    public void PublicReadAndInspectRejectInvalidStaticPropertyName(int index)
+    {
+        var asset = Asset();
+        Data(asset).Data = [new IntPropertyData(new(asset, index)) { ArrayIndex = 3, Value = 424242 }];
+        using var package = new TemporaryPackage(asset);
+        var inspected = Inspect(asset);
+        Assert.False(inspected.Complete);
+        Assert.Empty(inspected.Properties);
+        Assert.Contains("property-identity-unavailable", inspected.Diagnostics);
+        var read = package.Read();
+        Assert.False(read.Complete);
+        Assert.Empty(read.Properties);
+        Assert.Equal(index < 0 ? new[] { "export-properties-unavailable" } : inspected.Diagnostics.ToArray(), read.Diagnostics.ToArray());
+    }
+
+    [Theory]
+    [InlineData("export", -1)]
+    [InlineData("import", -1)]
+    [InlineData("outer", -1)]
+    [InlineData("export", int.MaxValue)]
+    [InlineData("import", int.MaxValue)]
+    [InlineData("outer", int.MaxValue)]
+    public void PublicReadAndInspectRejectMissingDataIdentityStorage(string location, int index)
+    {
+        var asset = Asset();
+        Data(asset).Data = [new ObjectPropertyData(new(asset, "Target")) { Value = new(1) }];
+        if (location == "export") Data(asset).ObjectName = new(asset, index);
+        else if (location == "import") asset.Imports[1].ObjectName = new(asset, index);
+        else
+        {
+            Data(asset).OuterIndex = new(-1);
+            asset.Imports[0].ObjectName = new(asset, index);
+        }
+        using var package = new TemporaryPackage(asset);
+        foreach (var evidence in new[] { Inspect(asset), package.Read() })
+        {
+            Assert.False(evidence.Complete);
+            if (location == "import" && evidence.Properties.IsEmpty)
+            {
+                Assert.Equal(new[] { "export-properties-unavailable" }, evidence.Diagnostics.ToArray());
+                continue; // Invalid class identity prevents upstream typed export reading.
+            }
+            Assert.Contains("property-owner-or-class-unavailable", evidence.Diagnostics);
+            var property = Assert.Single(evidence.Properties);
+            if (location == "import") Assert.Null(property.ClassIdentity);
+            else
+            {
+                Assert.Null(property.ObjectIdentity);
+                Assert.Equal(new SerializedValue.Unknown("reference-owner-unavailable"), property.Value);
+            }
+        }
+        // Data validation must not change the existing invocation identity contract.
+        Assert.NotNull(TargetResolver.ResolveIdentity(asset, new(1), Input.LogicalPath));
+    }
+
+    [Theory]
+    [InlineData("null", 0, "null")]
+    [InlineData("null", 2, "null_1")]
+    [InlineData("None", 0, "None")]
+    [InlineData("None", 1, "None_0")]
+    public void PublicReadAndInspectPreserveStoredNamesAndInstanceSuffixes(string name, int number, string expected)
+    {
+        var asset = Asset();
+        Data(asset).ObjectName = new(asset, name, number);
+        Data(asset).Data = [
+            new NamePropertyData(new(asset, "Named")) { ArrayIndex = 3, Value = new(asset, name, number) },
+            new EnumPropertyData(new(asset, "Mode")) { EnumType = new(asset, "OwnedMode"), Value = new(asset, name, number) },
+            new DelegatePropertyData(new(asset, "Binding")) { Value = new(new(1), new(asset, name, number)) }
+        ];
+        using var package = new TemporaryPackage(asset);
+        foreach (var evidence in new[] { Inspect(asset), package.Read() })
+        {
+            Assert.True(evidence.Complete, string.Join(",", evidence.Diagnostics));
+            Assert.Equal(new SerializedValue.Name(expected), Value(evidence, "Named"));
+            Assert.Equal(3, evidence.Properties[0].Path[0].ArrayIndex);
+            Assert.Equal(new SerializedValue.Enumeration("OwnedMode", expected), Value(evidence, "Mode"));
+            Assert.Equal(new SerializedValue.Delegate(new SerializedValue.Reference(1, "/Game/Data", expected, "local-object"), expected), Value(evidence, "Binding"));
+            Assert.All(evidence.Properties, p => Assert.Equal("/Game/Data." + expected, p.ObjectIdentity));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InspectSupportsAssetlessDummyNamesButNotNullBackingText(bool missing)
+    {
+        var asset = Asset();
+        var name = FName.DefineDummy(null, new FString(missing ? null : "null"), 2);
+        Data(asset).ObjectName = name;
+        Data(asset).Data = [new NamePropertyData(new(asset, "Named")) { Value = name }];
+        var evidence = Inspect(asset);
+        Assert.Equal(!missing, evidence.Complete);
+        Assert.Equal(missing ? new SerializedValue.Unknown("name-value-unavailable") : (SerializedValue)new SerializedValue.Name("null_1"), Value(evidence, "Named"));
+        Assert.Equal(missing ? null : "/Game/Data.null_1", Assert.Single(evidence.Properties).ObjectIdentity);
+    }
+
+    [Theory]
+    [InlineData("null", 0, "null")]
+    [InlineData("null", 2, "null_1")]
+    [InlineData("None", 1, "None_0")]
+    public void PublicReadPreservesLiteralStaticPropertyAndEnumTypeNames(string name, int number, string expected)
+    {
+        var asset = Asset();
+        // Pinned tagged-property reading treats base NAME_None as the terminator,
+        // even with a number. It is valid value/enum text, not a property tag here.
+        var propertyName = name == "None" ? new FName(asset, "Mode") : new FName(asset, name, number);
+        Data(asset).Data = [new EnumPropertyData(propertyName)
+            { ArrayIndex = 3, EnumType = new(asset, name, number), Value = new(asset, "OwnedMode::One") }];
+        using var package = new TemporaryPackage(asset);
+        var evidence = package.Read();
+        Assert.True(evidence.Complete, string.Join(",", evidence.Diagnostics));
+        Assert.Equal(new DataPathPart(propertyName.ToString(), 3), Assert.Single(evidence.Properties).Path[0]);
+        Assert.Equal(new SerializedValue.Enumeration(expected, "OwnedMode::One"), Value(evidence, propertyName.ToString()));
+    }
+
+    [Fact]
+    public void AssetlessNonDummyNameDoesNotBecomeEvidence()
+    {
+        var asset = Asset();
+        Data(asset).Data = [new NamePropertyData(new(asset, "Named")) { Value = new FName() }];
+        var evidence = Inspect(asset);
+        Assert.False(evidence.Complete);
+        Assert.Equal(new SerializedValue.Unknown("name-value-unavailable"), Value(evidence, "Named"));
+        Assert.Contains("property-name-unavailable", evidence.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InvalidNameCannotSupplyLocalDefaultOverride(bool propertyName)
+    {
+        var asset = Asset();
+        var (_, child) = AddDefaults(asset);
+        ((NormalExport)asset.Exports[2]).Data = [new NamePropertyData(new(asset, propertyName ? -1 : asset.AddNameReference(new("Destination"))))
+            { Value = propertyName ? new(asset, "OwnedValue") : new(asset, -1) }];
+        var result = AssetDataExtractor.FindLocalDefaultOverride(asset, Input, child, propertyName ? "null" : "Destination");
+        Assert.Equal(new SerializedValue.Unknown("property-evidence-incomplete"), result.Value);
+        Assert.Null(result.OriginDefaultExportIndex);
+        Assert.Equal("local-chain-incomplete", result.Context);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void PublicReadLossyStringDecodingRemainsUnknown(bool unicode)
