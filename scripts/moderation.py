@@ -143,6 +143,7 @@ def handoff(report_data, context, pak, dependencies):
     # Failure reports can lack identities. They route operations only and cannot
     # be approved; trusted context still identifies the attempted submission.
     value = {"schema-version": 1, "kind": "moderation-handoff", "context": deepcopy(context),
+             "report-sha256": hashlib.sha256(report_data).hexdigest(),
              **{key: deepcopy(report[key]) for key in ("status", "analysis-complete", "counts", "coverage")},
              "routes": routes(report)}
     return validate(value, "handoff")
@@ -158,10 +159,9 @@ def review(value, actor, decision, rationale, now=None):
     return validate(record, "review")
 
 
-def verify(record, context, pak, dependencies):
+def verify(record, context, pak, dependencies, report_data):
     validate(record, "review")
-    verify_bytes(context, pak, dependencies)
-    reports.require(record["handoff"]["context"] == context)
+    reports.require(record["handoff"] == handoff(report_data, context, pak, dependencies))
     return record["decision"] == "approve"
 
 
@@ -195,19 +195,17 @@ def main(argv=None):
         for command in ("handoff", "review", "verify", "feedback"):
             child = commands.add_parser(command)
             if command in ("handoff", "verify"):
-                for key in ("context", "pak"):
+                for key in ("context", "pak", "report"):
                     child.add_argument("--" + key, required=True)
                 child.add_argument("--dependency", action="append", default=[], metavar="KIND=PATH")
             if command != "verify":
                 child.add_argument("--output", required=True)
-            if command == "handoff":
-                child.add_argument("--report", required=True)
-            elif command == "review":
+            if command == "review":
                 for key in ("handoff", "actor", "decision", "rationale"):
                     child.add_argument("--" + key, required=True)
             elif command == "verify":
                 child.add_argument("--approval", required=True)
-            else:
+            elif command == "feedback":
                 child.add_argument("--handoff", required=True)
         args = parser.parse_args(argv)
         if args.command in ("handoff", "verify"):
@@ -224,7 +222,7 @@ def main(argv=None):
         elif args.command == "feedback":
             value = feedback(load(args.handoff, "handoff"))
         else:
-            approved = verify(load(args.approval, "review"), context, args.pak, dependencies)
+            approved = verify(load(args.approval, "review"), context, args.pak, dependencies, read(args.report))
             print("Approved bytes and context." if approved else "Not approved.")
             return 0 if approved else 1
         write_report(args.output, (reports.compact(value) + "\n").encode("utf-8"))

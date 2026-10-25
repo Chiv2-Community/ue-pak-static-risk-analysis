@@ -35,6 +35,9 @@ and signing/authentication remain separate work.
    provenance against its own scan record, then runs `handoff`. Nonfailed report
    context must match the complete trusted report context. Failed reports may lack
    identities; they identify an attempted scan, never accepted analysis/approval.
+   The private handoff retains `report-sha256`, the SHA-256 of the exact validated
+   input report bytes, including findings, locations, targets and coverage. Retain
+   those bytes with the handoff and review; even reformatting changes this identity.
 
 Hash equality is **not report authenticity**. A compromised parser can fabricate
 calls, coverage and hashes. This module cannot authenticate an arbitrary report
@@ -75,13 +78,15 @@ store, expiry, concurrency control or revocation service.
 ## Invalidation and consumption
 
 The consumer verifies the current approved record, a newly obtained trusted
-context, and **the exact pak/dependency bytes about to be delivered/installed**.
-`verify` compares all context fields and recomputes byte hashes. Missing, extra,
+context, the retained report, and **the exact pak/dependency bytes about to be
+delivered/installed**. `verify` validates the report, recomputes its private digest,
+regenerates the handoff and compares the whole reviewed handoff, including all
+context fields and recomputed byte hashes. Missing, extra,
 duplicate-kind or changed dependencies fail. Dependency argument order does not
 matter; stored context is canonical. A changed URL with identical bytes/context
 does not invalidate identity. Replacing bytes at the same URL does.
 
-Any changed pak, dependency, scanner identity/tool/producer version, engine,
+Any changed report bytes, pak, dependency, scanner identity/tool/producer version, engine,
 game build or policy revision invalidates the approval: obtain a new scan/context
 and explicit decision. Never substitute context copied from the old approval for
 the consumer's current trusted context. Approval records are private, not publicly
@@ -100,16 +105,17 @@ context, handoff and human-review records, plus public `submitter-feedback`.
 The module adds cross-field/identity validation beyond the structural schema.
 API: `handoff(report_bytes, context, pak_path, dependencies)`,
 `review(handoff, actor, decision, rationale, now=None)`,
-`verify(review, current_context, pak_path, dependencies) -> bool`, `feedback(handoff)`.
+`verify(review, current_context, pak_path, dependencies, report_bytes) -> bool`, `feedback(handoff)`.
 `dependencies` is a list of `(kind, path)` pairs. Module inputs are validated;
 `now` is injectable for deterministic tests.
 
 - The handoff accepts only the strict **default** report profile: no `rule-ids`.
-  It does not carry invocation locations/targets or inspection metadata forward.
+  It retains the report digest, not invocation locations/targets or inspection
+  metadata. This is a private report identity, never a policy-content fingerprint.
 - Store detailed `--moderator-detail` reports separately with restricted moderator
   access. They cannot be used as handoff inputs. Never publish them to submitters.
 - Publish only `feedback` output: fixed status/route codes, counts and coverage.
-  It omits policy revision, context, scanner/build IDs, rule IDs, descriptions,
+  It omits the report digest, policy revision, context, scanner/build IDs, rule IDs, descriptions,
   predicates, raw policy, fingerprints, findings and human rationale/identity.
   Access controls and release of even these counts remain platform decisions.
 - `log-level=verbose` intentionally discloses policy to approved operators/log
@@ -158,6 +164,7 @@ python3 scripts/moderation.py feedback \
   --output /tmp/opencode/moderation-demo/feedback.json
 python3 scripts/moderation.py verify \
   --approval /tmp/opencode/moderation-demo/review.json \
+  --report examples/moderation/report.json \
   --context examples/moderation/context.json \
   --pak examples/moderation/submission.txt \
   --dependency mapping=examples/moderation/mapping.txt

@@ -23,10 +23,11 @@
     },
     "handoff": {
       "type": "object", "additionalProperties": false,
-      "required": ["schema-version", "kind", "context", "status", "analysis-complete", "counts", "coverage", "routes"],
+      "required": ["schema-version", "kind", "context", "report-sha256", "status", "analysis-complete", "counts", "coverage", "routes"],
       "properties": {
         "schema-version": {"const": 1}, "kind": {"const": "moderation-handoff"},
         "context": {"$ref": "#/$defs/context"},
+        "report-sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "status": {"$ref": "report-v1.schema.json#/properties/status"},
         "analysis-complete": {"type": "boolean"},
         "counts": {"$ref": "report-v1.schema.json#/properties/counts"},

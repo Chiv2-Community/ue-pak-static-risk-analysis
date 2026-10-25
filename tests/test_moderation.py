@@ -12,6 +12,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+try:
+    from jsonschema import Draft202012Validator
+    from referencing import Registry, Resource
+except ImportError:
+    Draft202012Validator = None
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import moderation as mod
@@ -43,6 +49,7 @@ class ModerationTests(unittest.TestCase):
                             "tool-version": "1.0.0.0", "engine-version": "4.25", "pak-sha256": sha(self.pak.read_bytes()),
                             "producer-version": "owned-test-v1", "policy-revision": "d17eb2b6-9029-44c8-9858-b4fe90abf617",
                             "dependencies": [{"kind": "mapping", "sha256": sha(self.mapping.read_bytes())}]}}
+        self.report_data = encoded(self.report())
 
     def report(self, *, flag=False, forbid=False, incomplete=False, failed=False):
         finding = {"id": "1" * 64, "location": {"asset": "/Game/Owned", "function": "Run", "offset": 0},
@@ -83,24 +90,26 @@ class ModerationTests(unittest.TestCase):
                 self.assertEqual(int(options.get("flag", False)), value["counts"]["flagged"])
                 self.assertEqual(int(options.get("forbid", False)), value["counts"]["forbidden"])
 
-    def test_shipped_owned_fixture_matches_exact_bytes_and_schema(self):
+    def test_shipped_owned_fixture_matches_exact_bytes(self):
         example = ROOT / "examples/moderation"
         context = mod.load(example / "context.json", "context")
         value = mod.handoff((example / "report.json").read_bytes(), context, example / "submission.txt",
                             [("mapping", example / "mapping.txt")])
         self.assertEqual(["qualified-completed"], value["routes"])
         self.assertTrue(mod.verify(self.review(value), context, example / "submission.txt",
-                                   [("mapping", example / "mapping.txt")]))
-        try:
-            import jsonschema
-        except ImportError:
-            return
-        from referencing import Registry, Resource
+                                   [("mapping", example / "mapping.txt")], (example / "report.json").read_bytes()))
+
+    @unittest.skipIf(Draft202012Validator is None, "optional jsonschema/referencing unavailable")
+    def test_shipped_owned_fixture_full_schema(self):
+        example = ROOT / "examples/moderation"
+        context = mod.load(example / "context.json", "context")
+        value = mod.handoff((example / "report.json").read_bytes(), context, example / "submission.txt",
+                            [("mapping", example / "mapping.txt")])
         documents = {name: json.loads((ROOT / "schemas" / name).read_bytes()) for name in
                      ("moderation-v1.schema.json", "report-v1.schema.json", "facts-v1.schema.json")}
         registry = Registry().with_resources((document["$id"], Resource.from_contents(document))
                                               for document in documents.values())
-        validator = jsonschema.Draft202012Validator(documents["moderation-v1.schema.json"], registry=registry)
+        validator = Draft202012Validator(documents["moderation-v1.schema.json"], registry=registry)
         for record in (context, value, self.review(value), mod.feedback(value)):
             validator.validate(record)
 
@@ -110,7 +119,7 @@ class ModerationTests(unittest.TestCase):
             self.assertEqual("2026-10-25T12:30:00Z", record["time"])
             self.assertEqual("moderator-7", record["actor"])
             self.assertEqual(CANARY, record["rationale"])
-            self.assertEqual(expected, mod.verify(record, self.context, self.pak, self.dependencies))
+            self.assertEqual(expected, mod.verify(record, self.context, self.pak, self.dependencies, self.report_data))
 
     def test_operational_failure_never_approved_even_without_report_identity(self):
         report = self.report(failed=True)
@@ -120,23 +129,23 @@ class ModerationTests(unittest.TestCase):
         self.assertEqual(["operational-failed"], value["routes"])
         with self.assertRaises(ValueError):
             self.review(value)
-        self.assertFalse(mod.verify(self.review(value, "reject"), self.context, self.pak, self.dependencies))
+        self.assertFalse(mod.verify(self.review(value, "reject"), self.context, self.pak, self.dependencies, encoded(report)))
 
     def test_replacement_at_same_url_invalidates_approval(self):
         approval = self.review()
         self.pak.write_bytes(b"replacement upload at same URL")
         with self.assertRaises(ValueError):
-            mod.verify(approval, self.context, self.pak, self.dependencies)
+            mod.verify(approval, self.context, self.pak, self.dependencies, self.report_data)
         changed = deepcopy(self.context)
         changed["report-context"]["pak-sha256"] = sha(self.pak.read_bytes())
         with self.assertRaises(ValueError):
-            mod.verify(approval, changed, self.pak, self.dependencies)
+            mod.verify(approval, changed, self.pak, self.dependencies, self.report_data)
 
     def test_renamed_identical_bytes_remain_identical(self):
         approval = self.review()
         renamed = self.root / "different-url.pak"
         renamed.write_bytes(self.pak.read_bytes())
-        self.assertTrue(mod.verify(approval, self.context, renamed, self.dependencies))
+        self.assertTrue(mod.verify(approval, self.context, renamed, self.dependencies, self.report_data))
 
     def test_all_context_changes_invalidate_approval(self):
         approval = self.review()
@@ -149,7 +158,7 @@ class ModerationTests(unittest.TestCase):
                 target = changed if key in changed else changed["report-context"]
                 target[key] = value
                 with self.assertRaises(ValueError):
-                    mod.verify(approval, changed, self.pak, self.dependencies)
+                    mod.verify(approval, changed, self.pak, self.dependencies, self.report_data)
 
     def test_report_must_match_every_trusted_context_field(self):
         for key in self.context["report-context"]:
@@ -159,18 +168,48 @@ class ModerationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     mod.handoff(encoded(report), self.context, self.pak, self.dependencies)
 
+    def test_exact_report_bytes_bind_findings_coverage_and_serialization(self):
+        original = self.report(forbid=True, incomplete=True)
+        original_data = encoded(original)
+        value = mod.handoff(original_data, self.context, self.pak, self.dependencies)
+        approval = self.review(value)
+        self.assertEqual(sha(original_data), value["report-sha256"])
+        variants = [original_data + b"\n"]
+        for key, replacement in (("id", "2" * 64),
+                                 ("location", {"asset": "/Game/Other", "function": "Other", "offset": 42}),
+                                 ("target", {"owner": "/Script/Owned.Actor", "function": "OtherCall"})):
+            changed = deepcopy(original)
+            changed["forbidden-invocations"][0][key] = replacement
+            variants.append(encoded(changed))
+        changed = deepcopy(original)
+        changed["coverage"]["gaps"] = ["unsupported-parsing"]
+        variants.append(encoded(changed))
+        for data in variants:
+            with self.subTest(data=data):
+                other = mod.handoff(data, self.context, self.pak, self.dependencies)
+                self.assertEqual(value["counts"], other["counts"])
+                self.assertNotEqual(value["report-sha256"], other["report-sha256"])
+                self.assertNotEqual(approval, self.review(other))
+                with self.assertRaises(ValueError):
+                    mod.verify(approval, self.context, self.pak, self.dependencies, data)
+        # A report hash is not enough: compare the complete reviewed handoff.
+        tampered = deepcopy(approval)
+        tampered["handoff"]["counts"]["invocations"] += 1
+        with self.assertRaises(ValueError):
+            mod.verify(tampered, self.context, self.pak, self.dependencies, original_data)
+
     def test_dependency_missing_extra_duplicate_and_tampered_bytes(self):
         approval = self.review()
         for dependencies in ([], self.dependencies * 2, [("other", self.mapping)]):
             with self.subTest(dependencies=dependencies), self.assertRaises(ValueError):
-                mod.verify(approval, self.context, self.pak, dependencies)
+                mod.verify(approval, self.context, self.pak, dependencies, self.report_data)
         self.mapping.write_bytes(b"different mapping")
         with self.assertRaises(ValueError):
-            mod.verify(approval, self.context, self.pak, self.dependencies)
+            mod.verify(approval, self.context, self.pak, self.dependencies, self.report_data)
         changed = deepcopy(self.context)
         changed["report-context"]["dependencies"][0]["sha256"] = sha(self.mapping.read_bytes())
         with self.assertRaises(ValueError):
-            mod.verify(approval, changed, self.pak, self.dependencies)
+            mod.verify(approval, changed, self.pak, self.dependencies, self.report_data)
 
     def test_dependency_argument_order_not_identity_but_stored_context_is_canonical(self):
         extra = self.root / "baseline"
@@ -180,7 +219,7 @@ class ModerationTests(unittest.TestCase):
         report = self.report()
         report["context"]["dependencies"].reverse()
         value = mod.handoff(encoded(report), self.context, self.pak, self.dependencies)
-        self.assertTrue(mod.verify(self.review(value), self.context, self.pak, list(reversed(self.dependencies))))
+        self.assertTrue(mod.verify(self.review(value), self.context, self.pak, list(reversed(self.dependencies)), encoded(report)))
         self.context["report-context"]["dependencies"].reverse()
         with self.assertRaises(ValueError):
             mod.validate(self.context, "context")
@@ -191,6 +230,8 @@ class ModerationTests(unittest.TestCase):
         public = mod.feedback(value)
         self.assertNotIn(CANARY, json.dumps(public))
         self.assertNotIn("context", public)
+        self.assertNotIn("report-sha256", public)
+        self.assertNotIn(value["report-sha256"], json.dumps(public))
         self.assertEqual(["policy-violation", "needs-review", "analysis-incomplete"], public["routes"])
         report = self.report(forbid=True)
         report["forbidden-invocations"][0]["rule-ids"] = [CANARY]
@@ -225,6 +266,15 @@ class ModerationTests(unittest.TestCase):
                 value[key] = replacement
                 with self.subTest(profile=profile, key=key), self.assertRaises(ValueError):
                     mod.validate(value, profile)
+        for replacement in (None, "A" * 64, "a" * 63, "a" * 64 + "\n"):
+            value = self.handoff()
+            value["report-sha256"] = replacement
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                mod.validate(value, "handoff")
+        value = self.handoff()
+        del value["report-sha256"]
+        with self.assertRaises(ValueError):
+            mod.validate(value, "handoff")
         for key, replacement in (("actor", ""), ("actor", "actor\n::error::"), ("rationale", " "),
                                  ("actor", "bad\udcff"), ("rationale", "bad\udcff"),
                                  ("time", "2026-02-30T00:00:00Z"), ("decision", "approved")):
@@ -283,21 +333,58 @@ class ModerationTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertNotIn(CANARY, feedback.read_text())
         self.assertNotIn(self.context["report-context"]["policy-revision"], feedback.read_text())
+        self.assertNotIn(json.loads(handoff.read_bytes())["report-sha256"], feedback.read_text())
         self.assertEqual(3, len(json.loads(feedback.read_bytes())["routes"]))
-        result = self.invoke("verify", "--approval", approval, *byte_args)
+        result = self.invoke("verify", "--approval", approval, "--report", report, *byte_args)
         self.assertEqual(0, result.returncode, result.stderr)
         self.pak.write_bytes(b"same URL replacement")
-        result = self.invoke("verify", "--approval", approval, *byte_args)
+        result = self.invoke("verify", "--approval", approval, "--report", report, *byte_args)
         self.assertEqual(3, result.returncode)
         self.assertNotIn(CANARY.encode(), result.stdout + result.stderr)
 
     def test_cli_rejection_is_not_approval(self):
         approval = self.write("rejected.json", self.review(decision="reject"))
         context = self.write("context.json", self.context)
+        report = self.write("report.json", self.report())
         result = self.invoke("verify", "--approval", approval, "--context", context, "--pak", self.pak,
-                             "--dependency", "mapping=" + str(self.mapping))
+                             "--dependency", "mapping=" + str(self.mapping), "--report", report)
         self.assertEqual(1, result.returncode)
         self.assertEqual(b"Not approved.\n", result.stdout)
+
+    def test_cli_distinct_equal_count_reports_cannot_share_approval(self):
+        context = self.write("context.json", self.context)
+        byte_args = ["--context", context, "--pak", self.pak, "--dependency", "mapping=" + str(self.mapping)]
+        handoffs, approvals, reports = [], [], []
+        for index, call in enumerate(("FirstCall", "DifferentCall")):
+            report = self.report(forbid=True)
+            report["forbidden-invocations"][0].update(
+                id=str(index + 1) * 64,
+                location={"asset": f"/Game/Owned{index}", "function": "Run", "offset": index * 42},
+                target={"owner": "/Script/Owned.Actor", "function": call})
+            source = self.write(f"report{index}.json", report)
+            handoff, approval = [self.root / f"{kind}{index}.json" for kind in ("handoff", "approval")]
+            result = self.invoke("handoff", "--report", source, *byte_args, "--output", handoff)
+            self.assertEqual(0, result.returncode, result.stderr)
+            result = self.invoke("review", "--handoff", handoff, "--actor", "moderator", "--decision", "approve",
+                                 "--rationale", "Explicit exception for " + call, "--output", approval)
+            self.assertEqual(0, result.returncode, result.stderr)
+            handoffs.append(json.loads(handoff.read_bytes()))
+            approvals.append(approval)
+            reports.append(source)
+        self.assertEqual(handoffs[0]["counts"], handoffs[1]["counts"])
+        self.assertEqual(handoffs[0]["coverage"], handoffs[1]["coverage"])
+        self.assertNotEqual(handoffs[0]["report-sha256"], handoffs[1]["report-sha256"])
+        reviewed = [json.loads(path.read_bytes())["handoff"] for path in approvals]
+        self.assertEqual(handoffs, reviewed)
+        self.assertNotEqual(reviewed[0], reviewed[1])
+        for index, approval in enumerate(approvals):
+            result = self.invoke("verify", "--approval", approval, "--report", reports[index], *byte_args)
+            self.assertEqual(0, result.returncode, result.stderr)
+            result = self.invoke("verify", "--approval", approval, "--report", reports[1 - index], *byte_args)
+            self.assertEqual(3, result.returncode)
+            self.assertNotIn(handoffs[index]["report-sha256"].encode(), result.stdout + result.stderr)
+        result = self.invoke("verify", "--approval", approvals[0], *byte_args)
+        self.assertEqual(3, result.returncode)  # The retained report is required, not optional.
 
     def test_cli_malformed_and_special_inputs_no_output_no_leaks(self):
         context = self.write("context.json", self.context)
@@ -317,6 +404,25 @@ class ModerationTests(unittest.TestCase):
             self.assertEqual(3, result.returncode)
             self.assertFalse(destination.exists())
             self.assertNotIn(CANARY.encode(), result.stdout + result.stderr)
+
+    def test_cli_verify_report_uses_same_bounded_nofollow_validation(self):
+        context = self.write("context.json", self.context)
+        approval = self.write("approval.json", self.review())
+        report = self.write("report.json", self.report())
+        alias = self.root / "report-alias"
+        alias.symlink_to(report)
+        fifo = self.root / "fifo"
+        os.mkfifo(fifo)
+        oversized = self.root / "oversized"
+        with oversized.open("wb") as stream:
+            stream.truncate(mod.JSON_LIMIT + 1)
+        report.write_text('{"private": "' + CANARY + '"}')
+        for path in (report, alias, fifo, self.root, oversized, self.root / "missing"):
+            with self.subTest(path=path):
+                result = self.invoke("verify", "--approval", approval, "--report", path, "--context", context,
+                                     "--pak", self.pak, "--dependency", "mapping=" + str(self.mapping))
+                self.assertEqual(3, result.returncode)
+                self.assertNotIn(CANARY.encode(), result.stdout + result.stderr)
 
     def test_cli_report_batch_and_unknown_aliases_fail_closed(self):
         context = self.write("context.json", self.context)
