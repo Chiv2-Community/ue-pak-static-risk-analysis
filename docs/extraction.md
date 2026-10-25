@@ -59,16 +59,24 @@ control characters. Invalid caller identities/limits throw fixed setup errors.
 - Policy-unrepresentable owner/function identities remain structured extraction
   evidence, but the policy target is unresolved with coverage. More than 256 named
   arguments uses unavailable policy metadata with coverage. Positional evidence
-  remains in the extraction report.
+  remains in the extraction report. Public `PolicyYaml.IsIdentifier`/`IsOwner`
+  expose the authoritative policy/fact lexical checks; extraction reuses them.
 - Package coverage includes total and inspected export counts. Per-function and
   package diagnostics use fixed codes, never dependency exception
   text. Native functions/targets and native classes are explicit boundaries. This
   is not native-code analysis or a complete nativization detector.
 
-`Complete` describes only this package's extraction coverage, not safety, pak
-coverage, or a gate verdict. Every diagnostic contributes an analysis coverage
-gap; unresolved dispatch and unsupported parsing also get specific gap categories.
-The legacy probe still always reports `analysis-complete: false`.
+Function/package `Complete` describes full extraction evidence, including signature
+availability, not safety, pak coverage, or a gate verdict. Missing signatures
+(`imported-signature-unavailable`, `parameter-metadata-unavailable`) retain
+diagnostics and unavailable argument metadata but do not add global policy coverage
+gaps: argument rules produce Unknown only when that metadata matters. Invocation-only
+rules and decisive unrelated targets need no argument metadata. All other diagnostic
+codes remain global gaps, including malformed metadata, argument-count mismatches,
+unsupported constants, limits, traversal failures, and native boundaries. Unresolved
+dispatch and unsupported parsing also get specific gap categories. CLI gates must
+use `PolicyEvaluation.IsIncomplete`/`ShouldFail`, not extraction `Complete`, for
+policy completeness. The legacy probe still reports `analysis-complete: false`.
 
 ## Bounds and failure behavior
 
@@ -78,6 +86,11 @@ It follows active text-literal children, switch-case structs, expression fields,
 arrays, and wrapped SoftObject/FieldPath constants; unrelated `Tag`/raw user data
 are not bytecode children. Active-path cycles fail, while shared DAG nodes count
 once per expanded occurrence. Visit must reproduce the preflight sequence.
+
+`EX_PrimitiveCast` with `ObjectToInterface` is rejected before Visit: the pinned
+parser omits its class operand while Visit counts eight VM bytes. No calls from
+that root or later roots in the function are emitted; prior evidence survives.
+Other primitive casts remain supported. The vendor source is unchanged.
 
 Defaults and hard maxima: 100,000 exports, 100,000 expanded instructions/package,
 128 expression depth, 10,000 roots/array elements/signature fields, 4096 characters

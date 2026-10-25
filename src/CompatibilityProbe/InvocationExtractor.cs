@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Text.RegularExpressions;
 using CompatibilityProbe;
 using PakRisk.Policy;
 using UAssetAPI;
@@ -33,10 +32,6 @@ public static class InvocationExtractor
             if (char.IsSurrogate(text[i]) && (!char.IsHighSurrogate(text[i]) || ++i == text.Length || !char.IsLowSurrogate(text[i]))) return false;
         return true;
     }
-    private static bool Identifier(string text) => text.Length <= PolicyEvaluator.MaxFactStringLength &&
-        Regex.IsMatch(text, "^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.NonBacktracking);
-    private static bool Owner(string text) => text.Length <= PolicyEvaluator.MaxFactStringLength &&
-        Regex.IsMatch(text, "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$", RegexOptions.NonBacktracking);
 
     public static ExtractionReport Read(PackageInput input, Usmap? mappings = null, ExtractionLimits? limits = null)
     {
@@ -142,9 +137,12 @@ public static class InvocationExtractor
         var gaps = new List<CoverageGap>();
         if (all.Any(d => d.Code is "unresolved-virtual-target" or "unresolved-delegate-behavior" or "unresolved-direct-target"))
             gaps.Add(CoverageGap.UnresolvedDispatch);
-        if (all.Any(d => d.Code is "package-read-failed" or "unparsed-bytecode" or "raw-export" or "unsupported-instruction"))
+        if (all.Any(d => d.Code is "package-read-failed" or "unparsed-bytecode" or "raw-export" or "unsupported-instruction" or "unsupported-primitive-interface-cast"))
             gaps.Add(CoverageGap.UnsupportedParsing);
-        if (all.Length > 0) gaps.Add(CoverageGap.IncompleteExtraction);
+        // Missing signatures affect argument rules, not which invocations were traversed.
+        // Keep corruption, count mismatches, limits, and all other diagnostics global.
+        if (all.Any(d => d.Code is not ("imported-signature-unavailable" or "parameter-metadata-unavailable")))
+            gaps.Add(CoverageGap.IncompleteExtraction);
         return new(input, exports, inspectedExports, calls.ToImmutableArray(), functions.ToImmutableArray(), diagnostics.ToImmutableArray(),
             new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray()));
     }
@@ -182,7 +180,7 @@ public static class InvocationExtractor
             else
             {
                 resolvedIdentity = identity;
-                if (Owner(identity.Owner) && Identifier(identity.Function))
+                if (PolicyYaml.IsOwner(identity.Owner) && PolicyYaml.IsIdentifier(identity.Function))
                     target = new InvocationTarget.Resolved(identity.Owner, identity.Function);
                 else Gap("policy-target-unrepresentable");
                 name = identity.Function;
@@ -262,7 +260,7 @@ public static class InvocationExtractor
         {
             if (!flags.HasFlag(EPropertyFlags.CPF_Parm) || flags.HasFlag(EPropertyFlags.CPF_ReturnParm)) return;
             var text = name?.ToString();
-            if (string.IsNullOrEmpty(text) || !Identifier(text) || text.Length > limits.MaxLiteral || !seenNames.Add(text))
+            if (string.IsNullOrEmpty(text) || !PolicyYaml.IsIdentifier(text) || text.Length > limits.MaxLiteral || !seenNames.Add(text))
                 throw new ExtractionFailure("parameter-metadata-invalid");
             names.Add(text);
         }

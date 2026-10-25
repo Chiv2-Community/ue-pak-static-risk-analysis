@@ -25,6 +25,7 @@ public sealed record ExtractionReport(PackageInput Input, int ExportCount, int I
     ImmutableArray<FunctionCoverage> Functions, ImmutableArray<ExtractionDiagnostic> Diagnostics,
     InvocationAnalysis Analysis)
 {
+    // Full extraction evidence, including signature availability; not policy completeness.
     public bool Complete => Diagnostics.IsEmpty && Functions.All(f => f.Complete);
 }
 
