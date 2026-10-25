@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../vendor/UAssetAPI/UAssetAPI/UAssetAPI.csproj" />
+    <ProjectReference Include="../Policy/Policy.csproj" />
   </ItemGroup>
 </Project>

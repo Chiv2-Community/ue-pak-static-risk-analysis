@@ -3,8 +3,8 @@
 Linux-based inspection of cooked UE 4.25 assets and Blueprint calls.
 
 **Current status: compatibility experiment, not a moderation scanner.**
-There are a typed YAML policy parser and standalone three-valued evaluator, but
-no normalized fact extractor, evaluator/probe integration, production sandbox,
+There are a typed YAML policy parser, standalone three-valued evaluator, and
+normalized extraction API, but no CLI extraction/policy integration, production sandbox,
 Docker image, or reusable Action yet. Successful parsing does not mean a mod is safe.
 
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
@@ -76,7 +76,8 @@ licensing, unsupported cases, and remaining issue #2 work.
 
 The [YAML policy ADT/schema](docs/policies.md), strict parser, and standalone
 evaluator are implemented. Evaluation consumes explicit normalized invocation
-facts; the compatibility probe does not produce these yet. Unknown evaluations
+facts; the [extraction API](docs/extraction.md) produces these separately from the
+compatibility CLI. Unknown evaluations
 and global coverage gaps remain separate from findings and gate decisions.
 See [the starter example](examples/starter-policy.yaml) and
 [machine-readable structural schema](schemas/policy-v1.schema.json).
