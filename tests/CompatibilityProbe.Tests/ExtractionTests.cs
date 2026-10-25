@@ -38,6 +38,100 @@ public sealed class ExtractionTests
     private static PolicyEvaluation Evaluate(ExtractionReport report, MatchExpression match) =>
         new PolicyEvaluator(new PolicyDocument(1, [new("test", "Test", RuleEffect.Flag, match)])).Evaluate(report.Analysis);
 
+    private static (KismetExpression[] Code, int Size, int[] RootSizes) RoundTrip(UAsset asset, params KismetExpression[] code)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new AssetBinaryWriter(stream, asset);
+        var sizes = code.Select(e => ExpressionSerializer.WriteExpression(e, writer)).ToArray();
+        stream.Position = 0;
+        using var reader = new AssetBinaryReader(stream, asset);
+        var parsed = code.Select(_ => ExpressionSerializer.ReadExpression(reader)).ToArray();
+        Assert.Equal(stream.Length, stream.Position);
+        return (parsed, sizes.Sum(), sizes);
+    }
+
+    [Theory]
+    [InlineData("é", false)]
+    [InlineData("世界", false)]
+    [InlineData("é", true)]
+    [InlineData("世界", true)]
+    public void SerializedNonAsciiAnsiStringsRejectWholeRootAndLaterOffsets(string text, bool nested)
+    {
+        var asset = Asset();
+        KismetExpression literal = new EX_StringConst { Value = text };
+        var (code, size, _) = RoundTrip(asset, Call(), nested ? Call(literal, Call()) : literal, Call());
+        Function(asset, code).ScriptBytecodeSize = size;
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Equal(0, Assert.Single(report.Invocations).Offset);
+        Assert.Contains(report.Functions[0].Diagnostics, d => d.Code == "unsupported-string-literal-encoding");
+        Assert.Contains(CoverageGap.UnsupportedParsing, report.Analysis.CoverageGaps);
+        Assert.Contains(CoverageGap.IncompleteExtraction, report.Analysis.CoverageGaps);
+        var result = Evaluate(report, new MatchExpression.Invocation(new TargetMatcher.Exact("/Script/Engine.KismetSystemLibrary", "Run")));
+        Assert.Single(result.Findings);
+        Assert.True(result.IsIncomplete);
+    }
+
+    [Fact]
+    public void InvalidSerializedUtf8CannotBeReencodedToRecoverOffsets()
+    {
+        var asset = Asset();
+        // Read replaces one invalid byte with U+FFFD (three bytes when re-encoded).
+        byte[] bytes = [(byte)EExprToken.EX_StringConst, 0xff, 0];
+        using var stream = new MemoryStream(bytes);
+        using var reader = new AssetBinaryReader(stream, asset);
+        var literal = Assert.IsType<EX_StringConst>(ExpressionSerializer.ReadExpression(reader));
+        Assert.Equal("\ufffd", literal.Value);
+        Assert.Equal(3, stream.Position);
+        Function(asset, [Call(), Call(literal, Call()), Call()]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Equal(0, Assert.Single(report.Invocations).Offset);
+        Assert.Contains(report.Functions[0].Diagnostics, d => d.Code == "unsupported-string-literal-encoding");
+        Assert.Contains(CoverageGap.UnsupportedParsing, report.Analysis.CoverageGaps);
+    }
+
+    [Theory]
+    [InlineData(false, "")]
+    [InlineData(false, "ascii")]
+    [InlineData(true, "")]
+    [InlineData(true, "é世界")]
+    [InlineData(true, "😀")]
+    public void SupportedSerializedStringsUseWriterVmOffsets(bool unicode, string text)
+    {
+        var asset = Asset();
+        KismetExpression literal = unicode ? new EX_UnicodeStringConst { Value = text } : new EX_StringConst { Value = text };
+        var (code, size, sizes) = RoundTrip(asset, literal, Call());
+        Assert.Equal(unicode ? 1 + 2 * (text.Length + 1) : text.Length + 2, sizes[0]);
+        Function(asset, code).ScriptBytecodeSize = size;
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Equal((uint)sizes[0], Assert.Single(report.Invocations).Offset);
+        Assert.DoesNotContain(report.Functions[0].Diagnostics, d => d.Code == "bytecode-size-mismatch");
+        Assert.Empty(report.Analysis.CoverageGaps);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EmbeddedStringTerminatorsRejectSyntheticRootBeforeEmittingCalls(bool unicode)
+    {
+        var asset = Asset();
+        KismetExpression literal = unicode ? new EX_UnicodeStringConst { Value = "a\0b" } : new EX_StringConst { Value = "a\0b" };
+        using var stream = new MemoryStream();
+        using var writer = new AssetBinaryWriter(stream, asset);
+        ExpressionSerializer.WriteExpression(literal, writer);
+        stream.Position = 0;
+        using var reader = new AssetBinaryReader(stream, asset);
+        var parsed = Assert.IsAssignableFrom<KismetExpression<string>>(ExpressionSerializer.ReadExpression(reader));
+        Assert.Equal("a", parsed.Value);
+        Assert.Equal(unicode ? 5 : 3, stream.Position);
+        Assert.True(stream.Position < stream.Length); // The suffix is not part of the decoded literal.
+        Function(asset, [Call(), Call(literal, Call()), Call()]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Equal(0, Assert.Single(report.Invocations).Offset);
+        Assert.Contains(report.Functions[0].Diagnostics, d => d.Code == "embedded-string-terminator");
+        Assert.Contains(CoverageGap.UnsupportedParsing, report.Analysis.CoverageGaps);
+        Assert.Contains(CoverageGap.IncompleteExtraction, report.Analysis.CoverageGaps);
+    }
+
     [Theory]
     [InlineData("parameter")]
     [InlineData("target")]
