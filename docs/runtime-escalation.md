@@ -15,11 +15,10 @@ static report does not remove parser or engine exploit risk for data-only assets
 Record the question, reviewer, owner, authorization scope, stop conditions,
 time/resource budget, and unresolved findings before any runtime work.
 
-Use the moderation handoff contract from
-[issue #16](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/16)
-when available; this document does not define an alternative approval format.
+Use the [moderation handoff contract](moderation.md); this document does not
+define an alternative approval format. Retain the exact report required by
+`moderation.py verify --report`, not just its aggregate counts.
 Keep its artifact/report/context binding and restricted policy reference intact.
-Integration with the moderation runbook is pending that separate delivery.
 
 - FModel/UAssetGUI can help *static manual inspection*, but opening content still
   exercises potentially flawed parsers. Use disposable isolation for these too.
