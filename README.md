@@ -3,7 +3,7 @@
 Linux-based inspection of cooked UE 4.25 assets and Blueprint calls.
 
 **Current status: compatibility experiment, not a moderation scanner.**
-There is no policy evaluator, production sandbox, Docker image, or reusable
+There is a typed YAML policy parser, but no policy evaluator, production sandbox, Docker image, or reusable
 Action yet. Successful parsing does not mean a mod is safe.
 
 Work is tracked in [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1).
@@ -17,6 +17,8 @@ Requires Linux, .NET SDK 10, Rust/Cargo, a C compiler, Python 3.11+, and Git.
 git submodule update --init --recursive
 dotnet restore tests/CompatibilityProbe.Tests/CompatibilityProbe.Tests.csproj --locked-mode
 dotnet test tests/CompatibilityProbe.Tests/CompatibilityProbe.Tests.csproj -c Release --no-restore
+dotnet restore tests/Policy.Tests/Policy.Tests.csproj --locked-mode
+dotnet test tests/Policy.Tests/Policy.Tests.csproj -c Release --no-restore
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 cargo build --locked --release --manifest-path vendor/repak/Cargo.toml -p repak_cli --no-default-features
 ```
@@ -69,7 +71,13 @@ has `analysis-complete: false`.** These are not the future moderation gate codes
 See [the compatibility baseline](docs/compatibility.md) for measured results,
 licensing, unsupported cases, and remaining issue #2 work.
 
-## Planned policy interface
+## Policy rules
+
+The [YAML policy ADT/schema](docs/policies.md) and strict parser are implemented.
+See [the starter example](examples/starter-policy.yaml) and
+[machine-readable structural schema](schemas/policy-v1.schema.json).
+
+### Planned transport and evaluation
 
 The policy evaluator is not implemented yet. The agreed interface is a
 `policy-rules` file or raw YAML in `UE_PAK_POLICY_RULES`, with exactly one source.

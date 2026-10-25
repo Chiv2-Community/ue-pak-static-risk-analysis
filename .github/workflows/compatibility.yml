@@ -23,6 +23,10 @@ jobs:
         run: dotnet restore tests/CompatibilityProbe.Tests/CompatibilityProbe.Tests.csproj --locked-mode
       - name: Test synthetic Blueprint models
         run: dotnet test tests/CompatibilityProbe.Tests/CompatibilityProbe.Tests.csproj -c Release --no-restore
+      - name: Restore policy packages
+        run: dotnet restore tests/Policy.Tests/Policy.Tests.csproj --locked-mode
+      - name: Test YAML policy AST
+        run: dotnet test tests/Policy.Tests/Policy.Tests.csproj -c Release --no-restore
       - name: Test format rejection
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Build extractor without Oodle downloads

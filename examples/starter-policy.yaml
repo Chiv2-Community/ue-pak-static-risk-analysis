@@ -1,0 +1,42 @@
+# Illustrative policy only. Not a complete security policy for any game.
+schema-version: 1
+rules:
+  - id: forbid-console-commands
+    description: Console commands require explicit approval.
+    effect: forbid
+    match:
+      kind: invocation
+      target:
+        kind: exact
+        owner: /Script/Engine.KismetSystemLibrary
+        function: ExecuteConsoleCommand
+
+  - id: flag-external-urls
+    description: Review external destinations.
+    effect: flag
+    match:
+      kind: invocation
+      target:
+        kind: exact
+        owner: /Script/Engine.KismetSystemLibrary
+        function: LaunchURL
+
+  - id: forbid-unapproved-urls
+    description: Only approved HTTPS destinations are permitted.
+    effect: forbid
+    match:
+      kind: all
+      expressions:
+        - kind: invocation
+          target:
+            kind: exact
+            owner: /Script/Engine.KismetSystemLibrary
+            function: LaunchURL
+        - kind: not
+          expression:
+            kind: argument
+            name: URL
+            predicate:
+              kind: url-host-in
+              hosts:
+                - mods.example.org

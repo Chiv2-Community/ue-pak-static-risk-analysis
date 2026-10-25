@@ -1,0 +1,64 @@
+using System.Collections.Immutable;
+using System.Text.Json.Serialization;
+
+namespace PakRisk.Policy;
+
+public sealed record PolicyDocument(int SchemaVersion, ImmutableArray<PolicyRule> Rules);
+
+public sealed record PolicyRule(string Id, string Description, RuleEffect Effect, MatchExpression Match);
+
+public enum RuleEffect { Flag, Forbid }
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(MatchExpression.All), "all")]
+[JsonDerivedType(typeof(MatchExpression.Any), "any")]
+[JsonDerivedType(typeof(MatchExpression.Not), "not")]
+[JsonDerivedType(typeof(MatchExpression.Invocation), "invocation")]
+[JsonDerivedType(typeof(MatchExpression.Argument), "argument")]
+public abstract record MatchExpression
+{
+    private MatchExpression() { }
+    public sealed record All(ImmutableArray<MatchExpression> Expressions) : MatchExpression;
+    public sealed record Any(ImmutableArray<MatchExpression> Expressions) : MatchExpression;
+    public sealed record Not(MatchExpression Expression) : MatchExpression;
+    public sealed record Invocation(TargetMatcher Target) : MatchExpression;
+    public sealed record Argument(string Name, ValuePredicate Predicate) : MatchExpression;
+}
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(TargetMatcher.Exact), "exact")]
+[JsonDerivedType(typeof(TargetMatcher.ByOwner), "owner")]
+public abstract record TargetMatcher
+{
+    private TargetMatcher() { }
+    public sealed record Exact(string Owner, string Function) : TargetMatcher;
+    public sealed record ByOwner(string Owner) : TargetMatcher;
+}
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(ValuePredicate.EqualTo), "equals")]
+[JsonDerivedType(typeof(ValuePredicate.In), "in")]
+[JsonDerivedType(typeof(ValuePredicate.StringStartsWith), "string-starts-with")]
+[JsonDerivedType(typeof(ValuePredicate.UrlHostIn), "url-host-in")]
+public abstract record ValuePredicate
+{
+    private ValuePredicate() { }
+    public sealed record EqualTo(PolicyLiteral Value) : ValuePredicate;
+    public sealed record In(ImmutableArray<PolicyLiteral> Values) : ValuePredicate;
+    public sealed record StringStartsWith(string Prefix) : ValuePredicate;
+    public sealed record UrlHostIn(ImmutableArray<string> Hosts) : ValuePredicate;
+}
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(PolicyLiteral.String), "string")]
+[JsonDerivedType(typeof(PolicyLiteral.Integer), "integer")]
+[JsonDerivedType(typeof(PolicyLiteral.Boolean), "boolean")]
+[JsonDerivedType(typeof(PolicyLiteral.Null), "null")]
+public abstract record PolicyLiteral
+{
+    private PolicyLiteral() { }
+    public sealed record String(string Value) : PolicyLiteral;
+    public sealed record Integer(long Value) : PolicyLiteral;
+    public sealed record Boolean(bool Value) : PolicyLiteral;
+    public sealed record Null : PolicyLiteral;
+}
