@@ -1,0 +1,29 @@
+{
+  "schema-version": 1,
+  "status": "successful",
+  "analysis-complete": true,
+  "context": {
+    "tool-version": "1.0.0.0",
+    "engine-version": "4.25",
+    "pak-sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "producer-version": "test-1",
+    "dependencies": [{"kind": "mappings", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]
+  },
+  "counts": {"invocations": 1, "flagged": 1, "forbidden": 1, "affected-union": 1},
+  "coverage": {"gaps": [], "evaluation-incomplete": false},
+  "flagged-invocations": [{
+    "id": "3ff33a5c1ee423c747241fa5104c2caee5f51c085d4fe1ea981fa2a183adc9ee",
+    "location": {"asset": "/Game/Asset0", "function": "Execute", "offset": 0},
+    "target": {"owner": "/Script/Engine.Actor", "function": "Destroy"},
+    "argument-metadata": "known",
+    "known-argument-count": 0
+  }],
+  "forbidden-invocations": [{
+    "id": "3ff33a5c1ee423c747241fa5104c2caee5f51c085d4fe1ea981fa2a183adc9ee",
+    "location": {"asset": "/Game/Asset0", "function": "Execute", "offset": 0},
+    "target": {"owner": "/Script/Engine.Actor", "function": "Destroy"},
+    "argument-metadata": "known",
+    "known-argument-count": 0
+  }],
+  "diagnostics": []
+}

@@ -208,7 +208,7 @@ public sealed class PolicyEvaluator
         return hosts.Contains(uri.IdnHost.ToLowerInvariant(), StringComparer.Ordinal);
     }
 
-    private static void Validate(InvocationAnalysis analysis)
+    public static void Validate(InvocationAnalysis analysis)
     {
         if (analysis is null || analysis.Invocations.IsDefault || analysis.Invocations.Length > MaxInvocations
             || analysis.CoverageGaps.IsDefault || analysis.CoverageGaps.Length > 256

@@ -1,0 +1,17 @@
+{
+  "schema-version": 1,
+  "status": "partial",
+  "analysis-complete": false,
+  "context": {
+    "tool-version": "1.0.0.0",
+    "engine-version": "4.25",
+    "pak-sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "producer-version": "test-1",
+    "dependencies": [{"kind": "mappings", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]
+  },
+  "counts": {"invocations": 0, "flagged": 0, "forbidden": 0, "affected-union": 0},
+  "coverage": {"gaps": ["incomplete-extraction"], "evaluation-incomplete": false},
+  "flagged-invocations": [],
+  "forbidden-invocations": [],
+  "diagnostics": []
+}

@@ -1,7 +1,7 @@
 # Shared policy input boundary
 
-`src/PolicyInput` supplies trusted policy transport for future CLI, Docker, and
-Action entry points. It does not implement those interfaces. Issue #14 remains
+`src/PolicyInput` supplies trusted policy transport for the [evaluate CLI](evaluate.md)
+and future Docker/Action entry points. Issue #14 remains
 open until #11/#12/#13 integrate it and test job/process/report lifecycles.
 
 ## API
@@ -41,7 +41,7 @@ var policy = PolicyLoader.Load(filePath: null, logLevel: "info",
   `LoadedPolicy.ToString()` is constant and its document is ignored by default
   System.Text.Json serialization. Explicit AST access is private trusted data,
   not an approved report object. Existing evaluator findings may contain rule IDs;
-  future orchestration must apply its private/public result contract separately.
+   the evaluate CLI applies its private/public result contract separately.
 - Source errors have fixed codes and no original exception/path. Existing safe
   `PolicyException` retains only code and location. Callback exceptions are
   replaced with a fixed error without an inner exception. Callers must not dump
@@ -86,11 +86,11 @@ rules:
         function: LaunchURL'
 ```
 
-Future CLI orchestration should read the variable directly. Future Docker usage
+The evaluate CLI reads the variable directly. Future Docker usage
 can forward an existing variable with `docker run --env UE_PAK_POLICY_RULES ...`,
 not expand YAML into argv or bake it into an image. Future Action configuration
 can supply ordinary multiline `env: UE_PAK_POLICY_RULES: |` YAML; no GitHub secret
-is required. These are transport contracts, not working CLI/Action examples yet.
+is required. Docker/Action examples remain transport contracts, not working entry points.
 
 Environment variables are **not secrets**. GitHub may display them in step setup
 logs; host/container administrators and authorized processes can inspect them.
@@ -108,7 +108,7 @@ clears `ProcessStartInfo.Environment` and copies only that explicit allowlist;
 it rejects `UE_PAK_POLICY_RULES`. Never build the allowlist by copying host env.
 Do not pass policy/keys through argv, filesystem inheritance, or descriptors.
 The helper does not configure sandboxing or descriptor inheritance. Validate
-bounded parser facts before evaluator use. #11 must test success, gate failure,
+bounded parser facts before evaluator use. The #12 orchestrator must test success, gate failure,
 timeout, cancellation, and malformed-policy isolation across the real process
 boundary; this component does not claim that integration.
 

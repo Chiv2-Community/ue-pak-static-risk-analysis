@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/schemas/report-v1.schema.json",
+  "title": "Risk evaluation report v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema-version", "status", "analysis-complete", "context", "counts", "coverage", "flagged-invocations", "forbidden-invocations", "diagnostics"],
+  "properties": {
+    "schema-version": {"const": 1},
+    "status": {"enum": ["successful", "partial", "failed"]},
+    "analysis-complete": {"type": "boolean"},
+    "context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tool-version", "engine-version", "pak-sha256", "producer-version", "dependencies"],
+      "properties": {
+        "tool-version": {"type": "string"},
+        "engine-version": {"const": "4.25"},
+        "pak-sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "producer-version": {"type": ["string", "null"]},
+        "dependencies": {"type": "array", "maxItems": 256, "items": {
+          "type": "object", "additionalProperties": false, "required": ["kind", "sha256"],
+          "properties": {"kind": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+        }},
+        "policy-revision": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._\\-]+$"}
+      }
+    },
+    "counts": {
+      "type": "object", "additionalProperties": false, "required": ["invocations", "flagged", "forbidden", "affected-union"],
+      "properties": {"invocations": {"$ref": "#/$defs/count"}, "flagged": {"$ref": "#/$defs/count"}, "forbidden": {"$ref": "#/$defs/count"}, "affected-union": {"$ref": "#/$defs/count"}}
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false, "required": ["gaps", "evaluation-incomplete"],
+      "properties": {
+        "gaps": {"type": "array", "uniqueItems": true, "maxItems": 3, "items": {"enum": ["unsupported-parsing", "unresolved-dispatch", "incomplete-extraction"]}},
+        "evaluation-incomplete": {"type": "boolean"}
+      }
+    },
+    "flagged-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
+    "forbidden-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
+    "diagnostics": {"type": "array", "maxItems": 1, "items": {"enum": ["invalid-configuration", "analysis-failed"]}}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "successful"}}}, "then": {"properties": {"analysis-complete": {"const": true}, "diagnostics": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"enum": ["partial", "failed"]}}}, "then": {"properties": {"analysis-complete": {"const": false}}}},
+    {"if": {"properties": {"status": {"const": "partial"}}}, "then": {"properties": {"diagnostics": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"properties": {"diagnostics": {"minItems": 1}, "flagged-invocations": {"maxItems": 0}, "forbidden-invocations": {"maxItems": 0}}}}
+  ],
+  "$defs": {
+    "count": {"type": "integer", "minimum": 0, "maximum": 10000},
+    "finding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "location", "target", "argument-metadata", "known-argument-count"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "location": {
+          "type": "object", "additionalProperties": false, "required": ["asset", "function", "offset"],
+          "properties": {"asset": {"type": "string", "maxLength": 4096}, "function": {"type": "string", "maxLength": 4096}, "offset": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}}
+        },
+        "target": {"oneOf": [
+          {"type": "null"},
+          {"type": "object", "additionalProperties": false, "required": ["owner", "function"], "properties": {"owner": {"type": "string", "maxLength": 4096}, "function": {"type": "string", "maxLength": 4096}}}
+        ]},
+        "argument-metadata": {"enum": ["known", "unavailable"]},
+        "known-argument-count": {"type": ["integer", "null"], "minimum": 0, "maximum": 256},
+        "rule-ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}}
+      }
+    }
+  }
+}
