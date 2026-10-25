@@ -70,6 +70,9 @@ internal static class ExpressionPreflight
             if (!active.Add(node)) throw new ExtractionFailure("expression-cycle");
             if (!Registry.TryGetValue(node.GetType(), out var spec) || node.Token != spec.Token)
                 throw new ExtractionFailure("unsupported-instruction");
+            // Pinned Read/Write omit InterfaceClass, but Visit counts its eight VM bytes.
+            if (node is EX_PrimitiveCast { ConversionType: ECastToken.ObjectToInterface })
+                throw new ExtractionFailure("unsupported-primitive-interface-cast");
             ValidateLiteral(node, limits, ref budget);
             result.Add(new(node, item.Receivers));
             var children = Children(node, spec.Children, limits);

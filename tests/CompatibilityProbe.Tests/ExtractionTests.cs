@@ -35,6 +35,151 @@ public sealed class ExtractionTests
     private static FProperty Parameter(UAsset asset, string name, EPropertyFlags flags = EPropertyFlags.CPF_Parm) =>
         new FGenericProperty { Name = new(asset, name), PropertyFlags = flags };
 
+    private static PolicyEvaluation Evaluate(ExtractionReport report, MatchExpression match) =>
+        new PolicyEvaluator(new PolicyDocument(1, [new("test", "Test", RuleEffect.Flag, match)])).Evaluate(report.Analysis);
+
+    [Theory]
+    [InlineData("parameter")]
+    [InlineData("target")]
+    [InlineData("owner")]
+    public void ControlSuffixedNamesNeverProduceInvalidPolicyFacts(string kind)
+    {
+        var asset = Asset();
+        if (kind == "owner") asset.Exports[0].ObjectName = new(asset, "BP_Test_C\n");
+        var target = Function(asset, [], kind == "target" ? "Target\n" : "Target");
+        target.LoadedProperties = [Parameter(asset, kind == "parameter" ? "Value\n" : "Value")];
+        Function(asset, [new EX_FinalFunction { StackNode = new(2), Parameters = [new EX_IntOne()] }]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        var call = Assert.Single(report.Invocations);
+        if (kind == "parameter")
+        {
+            Assert.IsType<ArgumentMetadata.Unavailable>(call.Fact.Arguments);
+            Assert.Equal("malformed", call.MetadataState);
+            Assert.Contains(report.Functions[1].Diagnostics, d => d.Code == "parameter-metadata-invalid");
+        }
+        else
+        {
+            Assert.IsType<InvocationTarget.Unresolved>(call.Target);
+            Assert.NotNull(call.ResolvedIdentity);
+            Assert.Contains(report.Functions[1].Diagnostics, d => d.Code == "policy-target-unrepresentable");
+        }
+        Assert.False(report.Complete);
+        Assert.Contains(CoverageGap.IncompleteExtraction, report.Analysis.CoverageGaps);
+        Assert.True(Evaluate(report, new MatchExpression.Argument("Value", new ValuePredicate.EqualTo(new PolicyLiteral.Integer(1)))).IsIncomplete);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PrimitiveInterfaceCastIsRejectedBeforeAnyRootCallsAreEmitted(bool serialized)
+    {
+        var asset = Asset();
+        KismetExpression cast = new EX_PrimitiveCast { ConversionType = ECastToken.ObjectToInterface, Target = Call() };
+        if (serialized)
+        {
+            // Pinned Read mistakes the class index's first byte for the target opcode.
+            byte[] bytes = [(byte)EExprToken.EX_PrimitiveCast, (byte)ECastToken.ObjectToInterface,
+                (byte)EExprToken.EX_Nothing, 0, 0, 0, (byte)EExprToken.EX_ObjectConst, 1, 0, 0, 0];
+            using var stream = new MemoryStream(bytes);
+            using var reader = new AssetBinaryReader(stream, asset);
+            cast = ExpressionSerializer.ReadExpression(reader);
+            Assert.Equal(3, stream.Position);
+            Assert.IsType<EX_Nothing>(((EX_PrimitiveCast)cast).Target);
+        }
+        Function(asset, [Call(), new EX_Return { ReturnExpression = Call(cast) }, Call()]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Equal(0, Assert.Single(report.Invocations).Offset); // Prior roots survive, not the suspect root or later offsets.
+        Assert.Contains(report.Functions[0].Diagnostics, d => d.Code == "unsupported-primitive-interface-cast");
+        Assert.Contains(CoverageGap.UnsupportedParsing, report.Analysis.CoverageGaps);
+    }
+
+    [Fact]
+    public void OtherPrimitiveCastsStillTraverseNestedCalls()
+    {
+        var asset = Asset();
+        Function(asset, [new EX_PrimitiveCast { ConversionType = ECastToken.ObjectToBool, Target = Call() }]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Equal(2, Assert.Single(report.Invocations).Offset);
+        Assert.Empty(report.Analysis.CoverageGaps);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MissingSignaturesAreRuleSpecificNotGlobalCoverage(bool local)
+    {
+        var asset = Asset();
+        var call = Call(new EX_IntOne());
+        if (local)
+        {
+            var target = Function(asset, [], "Target");
+            target.LoadedProperties = null; target.Children = null;
+            call.StackNode = new(2);
+        }
+        Function(asset, [call]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.False(report.Complete); // Extraction evidence still records missing metadata.
+        Assert.Equal(local ? "parameter-metadata-unavailable" : "imported-signature-unavailable",
+            Assert.Single(report.Functions.SelectMany(f => f.Diagnostics)).Code);
+        Assert.IsType<ArgumentMetadata.Unavailable>(Assert.Single(report.Invocations).Fact.Arguments);
+        Assert.Empty(report.Analysis.CoverageGaps);
+        var targetMatch = new MatchExpression.Invocation(new TargetMatcher.Exact(
+            local ? "/Game/Maps/Test.BP_Test_C" : "/Script/Engine.KismetSystemLibrary", local ? "Target" : "Run"));
+        var unrelated = new MatchExpression.Invocation(new TargetMatcher.Exact("/Script/Other.Owner", "Unrelated"));
+        var argument = new MatchExpression.Argument("Value", new ValuePredicate.EqualTo(new PolicyLiteral.Integer(1)));
+        var exact = Evaluate(report, targetMatch);
+        Assert.Single(exact.Findings);
+        Assert.Empty(exact.Uncertainties);
+        Assert.False(exact.IsIncomplete);
+        foreach (var match in new MatchExpression[] { unrelated, new MatchExpression.All([argument, unrelated]),
+                     new MatchExpression.All([unrelated, new MatchExpression.Not(argument)]) })
+        {
+            var result = Evaluate(report, match);
+            Assert.Empty(result.Findings);
+            Assert.Empty(result.Uncertainties);
+            Assert.False(result.IsIncomplete);
+            Assert.False(result.ShouldFail(true));
+        }
+        foreach (var match in new MatchExpression[] { argument, new MatchExpression.Not(argument),
+                     new MatchExpression.All([targetMatch, argument]) })
+        {
+            var result = Evaluate(report, match);
+            Assert.Empty(result.Findings);
+            Assert.Equal(UncertaintyReason.ArgumentMetadataUnavailable, Assert.Single(Assert.Single(result.Uncertainties).Reasons));
+            Assert.True(result.IsIncomplete);
+            Assert.True(result.ShouldFail(true));
+        }
+    }
+
+    [Theory]
+    [InlineData("malformed", "parameter-metadata-invalid")]
+    [InlineData("count", "argument-count-mismatch")]
+    [InlineData("metadata-limit", "parameter-metadata-limit")]
+    [InlineData("policy-limit", "policy-argument-limit")]
+    [InlineData("native", "native-target-boundary")]
+    public void SignatureCorruptionLimitsAndNativeBoundariesRemainGlobal(string kind, string code)
+    {
+        var asset = Asset();
+        var target = Function(asset, [], "Target");
+        target.LoadedProperties = kind switch
+        {
+            "malformed" => [Parameter(asset, "Value\n")],
+            "metadata-limit" => [Parameter(asset, "First"), Parameter(asset, "Second")],
+            "policy-limit" => Enumerable.Range(0, PolicyEvaluator.MaxArguments + 1).Select(i => Parameter(asset, $"P{i}")).ToArray(),
+            _ => [Parameter(asset, "Value")]
+        };
+        if (kind == "native") target.FunctionFlags = EFunctionFlags.FUNC_Native;
+        Function(asset, [new EX_FinalFunction { StackNode = new(2), Parameters = kind == "count" ? [] : [new EX_IntOne()] }]);
+        var report = InvocationExtractor.Inspect(asset, Input, kind == "metadata-limit" ? new(MaxArray: 1) : null);
+        Assert.Contains(report.Functions[1].Diagnostics, d => d.Code == code);
+        Assert.Contains(CoverageGap.IncompleteExtraction, report.Analysis.CoverageGaps);
+        var result = Evaluate(report, new MatchExpression.Invocation(new TargetMatcher.Exact("/Script/Other.Owner", "Unrelated")));
+        Assert.Empty(result.Findings);
+        Assert.Empty(result.Uncertainties);
+        Assert.True(result.IsIncomplete);
+        Assert.True(result.ShouldFail(true));
+    }
+
     [Fact]
     public void MapGeneratedFunctionsAndNestedCallsKeepStableIdentityAndVmOffsets()
     {
