@@ -240,6 +240,8 @@ public static partial class PolicyYaml
     [GeneratedRegex("^[+-]?(?:0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|[0-9][0-9_]*|\\.(?:inf|Inf|INF|nan|NaN|NAN))$", RegexOptions.CultureInvariant)]
     private static partial Regex YamlNumber();
 
-    internal static bool IsIdentifier(string? value) => value is not null && value.Length <= 4096 && !value.Any(char.IsControl) && Identifier().IsMatch(value);
-    internal static bool IsOwner(string? value) => value is not null && value.Length <= 4096 && !value.Any(char.IsControl) && OwnerPath().IsMatch(value);
+    /// <summary>Checks the bounded, control-free identifier grammar used by policies and invocation facts.</summary>
+    public static bool IsIdentifier(string? value) => value is not null && value.Length <= 4096 && !value.Any(char.IsControl) && Identifier().IsMatch(value);
+    /// <summary>Checks the bounded, control-free owner grammar used by policies and invocation facts.</summary>
+    public static bool IsOwner(string? value) => value is not null && value.Length <= 4096 && !value.Any(char.IsControl) && OwnerPath().IsMatch(value);
 }

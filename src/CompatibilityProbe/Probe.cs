@@ -66,7 +66,11 @@ public static class Probe
                 {
                     expression.Visit(asset, ref offset, (instruction, position) =>
                     {
-                        if (instruction is EX_FinalFunction direct)
+                        if (instruction is EX_CallMulticastDelegate)
+                        {
+                            diagnostics.Add(new Diagnostic("unresolved-delegate-behavior", name, position.ToString()));
+                        }
+                        else if (instruction is EX_FinalFunction direct)
                         {
                             var target = TargetResolver.Resolve(asset, direct.StackNode, identity);
                             invocations.Add(new Invocation(name, position, instruction.Token.ToString(), target,
@@ -81,7 +85,8 @@ public static class Probe
                             diagnostics.Add(new Diagnostic("unresolved-virtual-target", name, position.ToString()));
                         }
                         else if (instruction.Token is EExprToken.EX_CallMulticastDelegate or EExprToken.EX_BindDelegate
-                                 or EExprToken.EX_InstanceDelegate or EExprToken.EX_AddMulticastDelegate)
+                                 or EExprToken.EX_InstanceDelegate or EExprToken.EX_AddMulticastDelegate
+                                 or EExprToken.EX_RemoveMulticastDelegate or EExprToken.EX_ClearMulticastDelegate)
                         {
                             diagnostics.Add(new Diagnostic("unresolved-delegate-behavior", name, position.ToString()));
                         }
