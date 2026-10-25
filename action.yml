@@ -1,0 +1,98 @@
+name: UE pak static-risk scan
+description: Scan an untrusted pak using a trusted host wrapper and isolated local Docker containers. Not a safety verdict.
+inputs:
+  pak:
+    description: Path to a pak file on the trusted Linux runner. Never check out submission code.
+    required: true
+  policy-rules:
+    description: Policy FILE PATH, not inline YAML. Alternatively set raw multiline UE_PAK_POLICY_RULES in step env. Exactly one source is required.
+    required: false
+  engine-version:
+    description: Supported Unreal Engine version (4.25 only).
+    default: '4.25'
+  log-level:
+    description: 'error, warn, info, or verbose. WARNING: verbose prints the policy to workflow logs; anyone with log access can read it. Environment variables are not secrets and do not guarantee masking or confidentiality.'
+    default: info
+  fail-on-any-forbidden:
+    description: Fail on forbidden invocations (true or false).
+    default: 'true'
+  fail-on-any-flagged:
+    description: Fail on flagged invocations (true or false).
+    default: 'false'
+  fail-on-incomplete:
+    description: Fail on incomplete analysis (true or false).
+    default: 'true'
+  report:
+    description: New workspace-relative report path; parent directory must exist. ASCII letters, digits, underscore, dot, slash and hyphen only. No overwrite.
+    default: ue-pak-risk-report.json
+  content-root:
+    description: Optional virtual pak prefix mapping, for example OwnedFixtures/Content=/Game.
+  mapping:
+    description: Optional path to a property mapping file (.usmap).
+outputs:
+  flagged-invocations:
+    description: Private-profile JSON array. Check arrays-omitted; the report is authoritative.
+    value: ${{ steps.scan.outputs.flagged-invocations }}
+  forbidden-invocations:
+    description: Private-profile JSON array. Check arrays-omitted; the report is authoritative.
+    value: ${{ steps.scan.outputs.forbidden-invocations }}
+  invocations-count:
+    description: Invocation count, or unknown when no valid report exists.
+    value: ${{ steps.scan.outputs.invocations-count }}
+  flagged-count:
+    description: Flagged count, or unknown when no valid report exists.
+    value: ${{ steps.scan.outputs.flagged-count }}
+  forbidden-count:
+    description: Forbidden count, or unknown when no valid report exists.
+    value: ${{ steps.scan.outputs.forbidden-count }}
+  affected-union-count:
+    description: Distinct affected invocation count, or unknown.
+    value: ${{ steps.scan.outputs.affected-union-count }}
+  analysis-complete:
+    description: Whether analysis completed. Not a safety verdict.
+    value: ${{ steps.scan.outputs.analysis-complete }}
+  status:
+    description: successful, partial, or failed. A gate failure may still have successful analysis.
+    value: ${{ steps.scan.outputs.status }}
+  diagnostics:
+    description: JSON array of fixed diagnostic codes; never supplied policy or filenames.
+    value: ${{ steps.scan.outputs.diagnostics }}
+  report-path:
+    description: Workspace-relative report path. Check report-available before collection.
+    value: ${{ steps.scan.outputs.report-path }}
+  report-available:
+    description: Whether a bounded schema-validated report is available.
+    value: ${{ steps.scan.outputs.report-available }}
+  arrays-omitted:
+    description: true if arrays are unavailable or exceed the combined 256 KiB UTF-16 output budget. Never treat omitted arrays as zero findings.
+    value: ${{ steps.scan.outputs.arrays-omitted }}
+  omission-reason:
+    description: none, output-budget, or a fixed adapter failure code. Counts and report remain authoritative when arrays exceed the budget.
+    value: ${{ steps.scan.outputs.omission-reason }}
+runs:
+  using: composite
+  steps:
+    - name: Prepare trusted local scanner image
+      id: prepare
+      continue-on-error: true
+      shell: bash
+      env:
+        ACTION_ROOT: ${{ github.action_path }}
+      run: python3 "$ACTION_ROOT/scripts/action.py" prepare
+    - name: Scan and publish outputs before propagating gates
+      id: scan
+      shell: bash
+      env:
+        ACTION_ROOT: ${{ github.action_path }}
+        UE_PAK_ACTION_IMAGE: ${{ steps.prepare.outputs.image }}
+        INPUT_PAK: ${{ inputs.pak }}
+        INPUT_POLICY_RULES: ${{ inputs.policy-rules }}
+        INPUT_ENGINE_VERSION: ${{ inputs.engine-version }}
+        INPUT_LOG_LEVEL: ${{ inputs.log-level }}
+        INPUT_FAIL_ON_ANY_FORBIDDEN: ${{ inputs.fail-on-any-forbidden }}
+        INPUT_FAIL_ON_ANY_FLAGGED: ${{ inputs.fail-on-any-flagged }}
+        INPUT_FAIL_ON_INCOMPLETE: ${{ inputs.fail-on-incomplete }}
+        INPUT_REPORT: ${{ inputs.report }}
+        INPUT_CONTENT_ROOT: ${{ inputs.content-root }}
+        INPUT_MAPPING: ${{ inputs.mapping }}
+      run: python3 "$ACTION_ROOT/scripts/action.py" scan

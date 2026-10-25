@@ -1,0 +1,73 @@
+name: Reusable Action parity
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  action-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Create owned synthetic input; no engine or submitted code
+        run: |
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'tests')
+          from ingestion_fixture import build
+          Path('action-test.pak').write_bytes(build())
+          PY
+      - name: Run same-repository composite Action
+        id: scan
+        continue-on-error: true
+        uses: ./
+        with:
+          pak: action-test.pak
+          report: action-test-report.json
+        env:
+          # Public test policy. Environment variables are not secrets.
+          UE_PAK_POLICY_RULES: |
+            schema-version: 1
+            rules:
+              - id: synthetic-review
+                description: Review this native invocation.
+                effect: forbid
+                match:
+                  kind: invocation
+                  target:
+                    kind: exact
+                    owner: /Script/OwnedFixtures.FixtureActor
+                    function: RecordFixture
+      - name: Check incomplete gate preserved outputs and report
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          SCAN_STATUS: ${{ steps.scan.outputs.status }}
+          SCAN_REPORT: ${{ steps.scan.outputs.report-available }}
+          SCAN_COMPLETE: ${{ steps.scan.outputs.analysis-complete }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          assert os.environ['SCAN_OUTCOME'] == 'failure'
+          assert os.environ['SCAN_STATUS'] == 'partial'
+          assert os.environ['SCAN_REPORT'] == 'true'
+          assert os.environ['SCAN_COMPLETE'] == 'false'
+          report = json.loads(Path('action-test-report.json').read_bytes())
+          assert report['status'] == 'partial' and not report['analysis-complete']
+          PY
+      - name: Test adapter and actual local Docker boundary
+        run: |
+          python3 -m venv "$RUNNER_TEMP/action-test-venv"
+          "$RUNNER_TEMP/action-test-venv/bin/pip" install PyYAML==6.0.3
+          export UE_PAK_CONTAINER_TEST_IMAGE="$(docker image ls --filter 'reference=ue-pak-action:*' --no-trunc --format '{{.ID}}' | head -n 1)"
+          test -n "$UE_PAK_CONTAINER_TEST_IMAGE"
+          "$RUNNER_TEMP/action-test-venv/bin/python" -m unittest discover -s tests -p test_action.py -v
+      # No artifact upload. CI reports stay in this disposable job's workspace.
