@@ -1,0 +1,24 @@
+name: Local sandbox image
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  container-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Build local image; never publish
+        run: docker build -t ue-pak-static-risk-analysis:dev .
+      - name: Exercise synthetic sandbox fixtures
+        env:
+          UE_PAK_CONTAINER_TEST_IMAGE: ue-pak-static-risk-analysis:dev
+        run: python3 -m unittest discover -s tests -p test_container.py -v

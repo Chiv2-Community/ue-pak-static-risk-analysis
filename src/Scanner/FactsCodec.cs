@@ -8,7 +8,12 @@ namespace PakRisk.Scanner;
 
 public sealed record DependencyIdentity(string Kind, string Sha256);
 public sealed record FactsDocument(int SchemaVersion, string PakSha256, string EngineVersion,
-    string ProducerVersion, ImmutableArray<DependencyIdentity> Dependencies, InvocationAnalysis Analysis);
+    string ProducerVersion, ImmutableArray<DependencyIdentity> Dependencies, InvocationAnalysis Analysis,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InspectionEvidence? Inspection = null);
+
+public sealed record MemberEvidence(string Id, string Path, long? Size, string? Sha256, string Status,
+    ImmutableArray<string> Signatures, ImmutableArray<string> Classes, string InspectionStatus, string SidecarStatus);
+public sealed record InspectionEvidence(string Status, string Diagnostic, ImmutableArray<MemberEvidence> Members);
 
 public sealed class FactsException() : Exception("Invalid facts input.");
 
@@ -115,6 +120,21 @@ public static class FactsCodec
         foreach (var dependency in document.Dependencies)
             if (dependency is null || !Identity(dependency.Kind) || !Hash(dependency.Sha256) || !kinds.Add(dependency.Kind))
                 throw new FactsException();
+        if (document.Inspection is { } inspection)
+        {
+            if (inspection.Status is not ("validated" or "rejected") || !Identity(inspection.Diagnostic)
+                || inspection.Members.IsDefault || inspection.Members.Length > 10_000) throw new FactsException();
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var member in inspection.Members)
+                if (member is null || !Identity(member.Id) || !ids.Add(member.Id)
+                    || member.Path is null || member.Path.Length > 4096 || !Unicode(member.Path)
+                    || member.Size < 0
+                    || member.Sha256 is not null && !Hash(member.Sha256)
+                    || member.Status is not ("uninspected" or "rejected" or "payload_verified")
+                    || member.Signatures.IsDefault || member.Signatures.Length > 16 || member.Signatures.Any(s => !Identity(s))
+                    || member.Classes.IsDefault || member.Classes.Length > 256 || member.Classes.Any(s => s is null || s.Length > 4096 || !Unicode(s))
+                    || !Identity(member.InspectionStatus) || !Identity(member.SidecarStatus)) throw new FactsException();
+        }
         PolicyEvaluator.Validate(document.Analysis);
     }
 

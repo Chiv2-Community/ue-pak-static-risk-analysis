@@ -1,8 +1,8 @@
 # Shared policy input boundary
 
 `src/PolicyInput` supplies trusted policy transport for the [evaluate CLI](evaluate.md)
-and future Docker/Action entry points. Issue #14 remains
-open until #11/#12/#13 integrate it and test job/process/report lifecycles.
+and the [Docker scan wrapper](container.md). Action integration and its workflow
+lifecycle remain pending in #13/#14.
 
 ## API
 
@@ -86,11 +86,11 @@ rules:
         function: LaunchURL'
 ```
 
-The evaluate CLI reads the variable directly. Future Docker usage
-can forward an existing variable with `docker run --env UE_PAK_POLICY_RULES ...`,
-not expand YAML into argv or bake it into an image. Future Action configuration
+The evaluate CLI reads the variable directly. The Docker wrapper forwards the
+existing variable with `--env UE_PAK_POLICY_RULES` to trusted evaluators only,
+never expands YAML into argv or bakes it into an image. Future Action configuration
 can supply ordinary multiline `env: UE_PAK_POLICY_RULES: |` YAML; no GitHub secret
-is required. Docker/Action examples remain transport contracts, not working entry points.
+is required. See the working [Docker usage](container.md); Action integration is pending.
 
 Environment variables are **not secrets**. GitHub may display them in step setup
 logs; host/container administrators and authorized processes can inspect them.
@@ -100,7 +100,7 @@ trusted workflow/scanner code; never execute submitter-controlled code in the
 policy-bearing job. A caller-selected secret store is optional, not automatic
 redaction or a confidentiality guarantee.
 
-## Untrusted parser handoff (not integrated)
+## Untrusted parser handoff
 
 Before starting any untrusted pak parser, trusted orchestration must construct a
 fresh allowlist of nonsecret runtime environment values. `SetParserEnvironment`
@@ -108,9 +108,10 @@ clears `ProcessStartInfo.Environment` and copies only that explicit allowlist;
 it rejects `UE_PAK_POLICY_RULES`. Never build the allowlist by copying host env.
 Do not pass policy/keys through argv, filesystem inheritance, or descriptors.
 The helper does not configure sandboxing or descriptor inheritance. Validate
-bounded parser facts before evaluator use. The #12 orchestrator must test success, gate failure,
-timeout, cancellation, and malformed-policy isolation across the real process
-boundary; this component does not claim that integration.
+bounded parser facts before evaluator use. The [Docker wrapper](container.md)
+uses separate containers and mounts, not this same-UID helper as its isolation
+boundary. Its opt-in integration tests cover policy isolation, gates, timeout,
+cancellation and malformed-policy rejection.
 
 ## Validation
 

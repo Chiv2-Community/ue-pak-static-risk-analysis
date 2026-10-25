@@ -36,7 +36,8 @@
     },
     "flagged-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
     "forbidden-invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/finding"}},
-    "diagnostics": {"type": "array", "maxItems": 1, "items": {"enum": ["invalid-configuration", "analysis-failed"]}}
+    "diagnostics": {"type": "array", "maxItems": 1, "items": {"enum": ["invalid-configuration", "analysis-failed", "parser-failed", "parser-output-limit", "wall-timeout", "cancelled", "container-unavailable", "input-failed"]}},
+    "inspection": {"$ref": "facts-v1.schema.json#/$defs/inspection"}
   },
   "allOf": [
     {"if": {"properties": {"status": {"const": "successful"}}}, "then": {"properties": {"analysis-complete": {"const": true}, "diagnostics": {"maxItems": 0}}}},

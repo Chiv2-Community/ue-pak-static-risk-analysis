@@ -1,0 +1,8 @@
+<Project>
+  <Target Name="ExcludeUnusedNativeBindings" BeforeTargets="AssignTargetPaths;CoreResGen">
+    <ItemGroup Condition="'$(MSBuildProjectName)' == 'UAssetAPI'">
+      <EmbeddedResource Remove="repak_bind.dll.gz;repak_bind.so.gz;Properties/Resources.resx" />
+      <None Remove="Resources/AC7Key.bin" />
+    </ItemGroup>
+  </Target>
+</Project>
