@@ -5,7 +5,7 @@
 - Scope: cooked UE 4.25 package parsing and legacy pak inventory/extraction
 - Repository: `Chiv2-Community/ue-pak-static-risk-analysis`
 - Canonical remote: `https://github.com/Chiv2-Community/ue-pak-static-risk-analysis.git`
-- Git provenance: unborn repository; no `HEAD`, tag, or commit SHA exists. All described implementation is uncommitted.
+- Git provenance: investigation began in an unborn repository, with no prior `HEAD`, tag, or commit SHA. This record was first committed as `d19beb07769e1b30972e61b3ce61610f76f218d4`; all described probe implementation remains uncommitted.
 - Related work: [epic #1](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/1), [issue #2](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/issues/2)
 - Sources: 2026-10-24 conversation checkpoint (source session/response IDs unavailable); `README.md`; `docs/compatibility.md`; pinned submodules.
 
