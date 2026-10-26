@@ -1,4 +1,4 @@
-name: Validate sources and optionally push private candidate
+name: Validate image and optionally push private candidate
 
 on:
   workflow_dispatch:
@@ -91,7 +91,7 @@ jobs:
             --actual "$RUNNER_TEMP/candidate/image-metadata.json" \
             --python-stage "$RUNNER_TEMP/candidate/python-stage-metadata.json"
           cp releases/v0.1.0/image-baseline.json "$RUNNER_TEMP/candidate/"
-          python3 scripts/collect_base_sources.py --output "$RUNNER_TEMP/candidate/base-sources"
+          cp releases/v0.1.0/source-inventory.json "$RUNNER_TEMP/candidate/dependency-source-inventory.json"
           docker save ue-pak-candidate:validated | gzip -n > "$RUNNER_TEMP/candidate/image.tar.gz"
           python3 scripts/source_bundle.py --build-source "$SOURCE" --action-source "$SOURCE" \
             --uasset-repository vendor/UAssetAPI --output "$RUNNER_TEMP/candidate/source.tar.gz"
@@ -177,7 +177,7 @@ jobs:
           path: |
             ${{ runner.temp }}/candidate/build-record.json
             ${{ runner.temp }}/candidate/source.tar.gz
-            ${{ runner.temp }}/candidate/base-sources/
+            ${{ runner.temp }}/candidate/dependency-source-inventory.json
             ${{ runner.temp }}/candidate/image-metadata.json
             ${{ runner.temp }}/candidate/python-stage-metadata.json
             ${{ runner.temp }}/candidate/image-baseline.json

@@ -1,9 +1,9 @@
-# v0.1.0 base sources
+# v0.1.0 dependency attribution and source links
 
 This inventory conservatively covers all 69 Ubuntu source versions for the 97
 installed packages and 73 Debian source versions associated with the copied
 Python-stage documentation. Debian binaries outside `/usr/local` are not copied.
-It also mirrors CPython 3.12.14, pip 25.0.1 and its vendored certifi 2024.8.30
+It also identifies CPython 3.12.14, pip 25.0.1 and its vendored certifi 2024.8.30
 (MPL-2.0). Third-party licenses remain unchanged; this is not legal certification.
 
 `source-inventory.json` contains exact versions, official URLs, sizes and SHA-256
@@ -12,6 +12,12 @@ Ubuntu and Debian descriptors, original archives, signatures and patches. Hashes
 come from fetched source descriptors and official Python/PyPI metadata. The large
 archive bodies were not downloaded when this inventory was prepared.
 
+The release workflow **does not mirror or download these dependency sources**.
+The owner selected [README attribution](../../README.md#third-party-attribution)
+and upstream source links. The inventory is a reference, not a claim that every
+URL is available or that attribution alone satisfies every license. Retain the
+upstream license/copyright notices and applicable terms.
+
 `image-baseline.json` records an older local image using the same pinned bases,
 not inspection of the new image. Its Debian copyright hashes come from the
 digest-bound upstream Python SPDX inventory, not an independent signature audit.
@@ -19,7 +25,7 @@ The workflow must inspect the rebuilt image and compare the complete copied doc
 tree against the exact Python stage. Unexpected paths, versions or hashes stop
 validation; review/regenerate coverage rather than weakening the gate.
 
-## Retrieve and build
+## Optional manual retrieval and build
 
 From the reviewed project source checkout, on a host with Python 3.11+, network
 access and at least 2 GiB free (the GitHub runner, not a disk-constrained host):
@@ -64,23 +70,22 @@ the baseline. The SDK is a build input, not a shipped SDK. NuGet MIT source comm
 are also recorded there. UAssetAPI and the original project are delivered in the
 separate reviewed `source.tar.gz` A/B archive; retain all applicable notices.
 
-## Publication gate
+## Release workflow
 
 1. Dispatch reviewed main with `publish: false` (default). This builds/tests the
-   new image and remotely downloads/hash-checks all sources, without registry login.
+   new image and records notices/source links, without source downloads or registry login.
 2. Retain and review the image/source identities, notices and inventory. Authenticated
    Actions artifacts expire in three days: **staging only, not public delivery**.
 3. Only after the operator confirms private GHCR candidate visibility, dispatch
    `publish: true` with the explicit visibility acknowledgement. An existing public
    namespace could expose a push immediately; do not guess its visibility. No
    workflow changes visibility, creates a release, or publishes v0.1.0/aliases.
-4. Parent prepares final A/B source, `base-source.tar`, inventory, image record,
+4. Parent prepares final project A/B source, upstream source-link inventory, image record,
    notices and checksums as durable assets of the authorized GitHub v0.1.0 release.
    While draft/authenticated-only, keep GHCR private. Make source assets public,
    verify anonymous downloads/hashes, then enable approved GHCR public access and
    verify the exact digest/consumer path. Link source directions next to binaries
    in the release, GHCR description and image notice.
-5. Retain/maintain the exact sources for applicable GPL/LGPL/MPL obligations.
-   System Library exclusions do not waive obligations for separately distributed
-   utilities/libraries. GPLv3 section 6(d) is not a blanket GPLv2/LGPLv2.1 exception.
-   No written-offer route or legal certification is asserted.
+5. Preserve licenses, notices and source directions. No dependency source mirror,
+   written-offer route or legal certification is asserted; applicable GPL/LGPL/MPL
+   terms remain unchanged.

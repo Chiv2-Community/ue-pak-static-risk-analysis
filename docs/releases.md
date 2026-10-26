@@ -18,10 +18,10 @@ aliases, billing changes or unrelated access changes are part of this release.
    input; it checks out `github.sha`, builds Linux amd64, runs the serial public
     component/Docker/Action/regression mutation gate, inspects the actual image,
     compares package/source versions and the complete pinned Python doc tree,
-    then remotely downloads/hash-checks the reviewed base sources. Dispatch with
+     and records upstream dependency-source links without downloading archives. Dispatch with
     `publish: false` (default): no registry login or push. Inspect the staging
-    record and sources before any publication. See the exact
-    [base-source inventory and delivery instructions](../releases/v0.1.0/README.md).
+     record and notices before any publication. See the exact
+     [dependency metadata](../releases/v0.1.0/README.md).
 3. Only after verifying private GHCR namespace visibility, dispatch with both
     `publish: true` and `private_visibility_confirmed: true`. The separate
     `packages: write` job verifies transfer hashes/image ID/revision and refuses
@@ -45,12 +45,14 @@ aliases, billing changes or unrelated access changes are part of this release.
    `/usr/bin/docker`, local socket and Linux amd64 remain required.
 6. Generate the final corresponding-source archive from exact A+B Git objects,
    not the workspace; verify hashes, exclusions and unpacked non-Git build.
-    Stage that archive, `base-source.tar`, exact source inventory, notices,
+     Stage that archive, the upstream source-link inventory, notices,
     build record and fresh checksums on the draft GitHub v0.1.0 release. A draft
     is not public source delivery: keep GHCR private. Publish the source-bearing
     release, verify anonymous asset downloads/hashes, then enable approved GHCR
     public access and verify an anonymous digest pull. Link source directions
-    next to binaries in the release and GHCR description; retain the assets.
+     next to binaries in the release and GHCR description; retain the assets.
+     Dependency source archives are not mirrored; the record must not claim their
+     download, verification or continuing availability.
     Tag v0.1.0 at B; label the image revision **A**, never B. Promote the
    already validated digest to image tag v0.1.0 without rebuilding. Verify both
    remote exact identities. Never move/reuse v0.1.0 after publication.
@@ -93,8 +95,9 @@ python3 scripts/source_bundle.py --build-source FULL_COMMIT_A --action-source FU
 Retain the original unmodified upstream notices. Inspect actual NuGet DLLs,
 CPython/.NET/base-OS notices and exact installed package versions from the **new**
 image. Retain applicable exact-version base component source records/availability;
-generic source links do not complete that check. Do not publish until source
-delivery and redistribution obligations for the selected artifacts are met.
+the owner selected README attribution and upstream source links, not dependency
+source mirroring. Preserve applicable license terms and notices. Attribution is
+not a compliance certification or a waiver of source obligations.
 No engine source, game assets, mappings, AES/native keys, cooked binaries or
 production policies may enter the source bundle or public artifacts.
 
