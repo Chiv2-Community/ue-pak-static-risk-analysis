@@ -24,7 +24,9 @@ never accept it from a submission. Exact bytes/revision bind report context and
 matches always require review, even with all three gate flags disabled. The full
 report adds [bounded call chains](call-chains.md), including public capability IDs;
 direct Action arrays/counts and their budgets do not include caller witnesses.
-No production game catalog or capability policy predicate is bundled.
+No production game catalog is bundled. Optional separately versioned
+[private capability rules](capability-policy.md) select catalog capabilities and
+bounded callers without changing invocation YAML or direct counts.
 
 **Private consumer gate remains open.** On 2026-10-25 the read-only API call
 `gh api repos/Chiv2-Community/ue-pak-static-risk-analysis/actions/permissions/access`
@@ -163,6 +165,15 @@ scanner gate failures. No supplied filename or policy is rendered in the summary
 | `diagnostics` | JSON array of fixed report/adapter codes |
 | `report-path`, `report-available` | Workspace-relative destination and valid-report availability |
 | `arrays-omitted`, `omission-reason` | Explicit omission state; check before consuming arrays |
+| `capability-analysis-status` | `not-performed`, `complete`, `incomplete`, or `unknown` |
+| `capability-flagged-count`, `capability-forbidden-count` | Retained symbolically matching witness counts, never executed/direct invocation counts |
+| `capability-possibly-flagged-count`, `capability-possibly-forbidden-count` | Retained uncertain witness counts; unlocated unknowns are not included, so check completeness/full report |
+
+Optional private `capability-rules`, `capability-policy-revision` and new
+`capability-context` inputs follow the [input table](inputs.md). Private rules,
+revision, predicates and hashes never enter outputs/summary, even verbose. Keep
+the context receipt restricted; it is not a submitter artifact. Capability gates
+and existing catalog review cannot be disabled by invocation gate inputs.
 
 The report is authoritative. Combined outputs are limited to **256 KiB counted
 as UTF-16 bytes**, conservatively below GitHub's 1 MiB/job limit. If arrays exceed

@@ -79,8 +79,9 @@ identities, symbol owners, parameter types, inheritance evidence, reviewer and
 uncertainty for each entry. Verify against authorized bytes/reflection; do not
 invent game APIs from names, parser classes, pseudocode or this starter policy.
 A bounded explicit nonsecret summary loader is available; its original fixture
-catalog supplies no exact-game proof. No capability policy predicate or
-authoritative native-code analyzer is shipped. The timer hypothesis remains
+catalog supplies no exact-game proof. Separately versioned private
+[capability predicates](capability-policy.md) reuse symbolic witnesses, not an
+authoritative native-code analyzer. The timer hypothesis remains
 build-unverified. Never feed confidential catalogs to this nonsecret profile.
 The parser receives neither summaries nor private policy. Catalog digest/revision
 bind report context; default reports expose matched opaque capability IDs, not

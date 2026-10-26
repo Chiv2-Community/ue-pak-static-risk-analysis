@@ -41,6 +41,7 @@
     "inspection": {"$ref": "facts-v1.schema.json#/$defs/inspection"},
     "call-chains": {"$ref": "#/$defs/call-chains"},
     "data-analysis": {"$ref": "#/$defs/data-analysis"},
+    "capability-analysis": {"$ref": "#/$defs/capability-analysis"},
     "possible-dispatches": {"type": "array", "maxItems": 10000, "items": {
       "type": "object", "additionalProperties": false, "required": ["evidence", "possibly-flagged", "possibly-forbidden"],
       "properties": {"evidence": {"$ref": "facts-v1.schema.json#/$defs/dispatch"},
@@ -70,6 +71,23 @@
     {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"properties": {"diagnostics": {"minItems": 1}, "flagged-invocations": {"maxItems": 0}, "forbidden-invocations": {"maxItems": 0}}}}
   ],
   "$defs": {
+    "capability-analysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "complete", "decision", "findings", "possibly-flagged", "possibly-forbidden", "diagnostics"],
+      "properties": {
+        "schema-version": {"const": 1}, "complete": {"type": "boolean"},
+        "decision": {"enum": ["no-match", "needs-review", "reject"]},
+        "possibly-flagged": {"type": "boolean"}, "possibly-forbidden": {"type": "boolean"},
+        "diagnostics": {"type": "array", "maxItems": 2, "uniqueItems": true, "items": {"enum": ["capability-evidence-incomplete", "capability-match-uncertain"]}},
+        "findings": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["witness", "flagged", "forbidden", "possibly-flagged", "possibly-forbidden"],
+          "properties": {"witness": {"type": "integer", "minimum": 0, "maximum": 255},
+            "flagged": {"type": "boolean"}, "forbidden": {"type": "boolean"},
+            "possibly-flagged": {"type": "boolean"}, "possibly-forbidden": {"type": "boolean"}}
+        }}
+      }
+    },
     "data-analysis": {
       "type": "object", "additionalProperties": false,
       "required": ["schema-version", "decision", "complete", "findings", "diagnostics"],

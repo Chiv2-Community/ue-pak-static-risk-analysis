@@ -182,6 +182,8 @@ def output_destinations(args):
     paths = [Path(args.report)]
     if args.data_context is not None:
         paths.append(Path(args.data_context))
+    if getattr(args, "capability_context", None) is not None:
+        paths.append(Path(args.capability_context))
     try:
         paths = [path.parent.resolve(strict=True) / path.name for path in paths]
     except RuntimeError:
@@ -198,6 +200,8 @@ def output_destinations(args):
     args.report = paths[0]
     if args.data_context is not None:
         args.data_context = paths[1]
+    if getattr(args, "capability_context", None) is not None:
+        args.capability_context = paths[-1]
 
 
 def options(argv):
@@ -208,7 +212,8 @@ def options(argv):
     parser.add_argument("--image", default="ue-pak-static-risk-analysis:dev")
     parser.add_argument("--timeout", type=float, default=60)
     for key in ("policy-rules", "log-level", "policy-revision", "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "mapping", "content-root", "capability-summaries",
-                "data-rules", "baseline-pak", "game-build", "data-context"):
+                "data-rules", "baseline-pak", "game-build", "data-context",
+                "capability-rules", "capability-policy-revision", "capability-context"):
         parser.add_argument("--" + key)
     parser.add_argument("--moderator-detail", action="store_true")
     for key in ("allowed-path", "allowed-class", "protected-path"):
@@ -221,6 +226,12 @@ def options(argv):
         if not result.game_build or not result.content_root or not result.data_context:
             raise Failure("invalid-configuration")
     elif result.baseline_pak or result.game_build or result.data_context:
+        raise Failure("invalid-configuration")
+    if result.capability_rules:
+        import re
+        if not result.capability_context or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", result.capability_policy_revision or ""):
+            raise Failure("invalid-configuration")
+    elif result.capability_context or result.capability_policy_revision:
         raise Failure("invalid-configuration")
     return result
 
@@ -264,6 +275,13 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix="pak-scan-") as stage:
             stage = Path(stage)
             private_dependencies = []
+            if args.capability_rules is not None:
+                capability_rules = stage / "capability-rules"
+                capability_rules_hash = snapshot(args.capability_rules, capability_rules, 256 * 1024)
+                policy_mount += mount(capability_rules, "/policy/capability-rules")
+                shared += ["--capability-rules", "/policy/capability-rules",
+                    "--capability-policy-revision", args.capability_policy_revision]
+            catalog_hash = None
             if args.data_rules is not None:
                 rules = stage / "data-rules"
                 rules_hash = snapshot(args.data_rules, rules, 256 * 1024)
@@ -272,7 +290,7 @@ def main(argv=None):
                 private_dependencies.append({"kind": "data-rules", "sha256": rules_hash})
             if args.capability_summaries is not None:
                 catalog = stage / "summaries"
-                snapshot(args.capability_summaries, catalog, 256 * 1024)
+                catalog_hash = snapshot(args.capability_summaries, catalog, 256 * 1024)
                 policy_mount += mount(catalog, "/catalog/summaries")
                 shared += ["--capability-summaries", "/catalog/summaries"]
             config = stage / "docker"
@@ -330,10 +348,19 @@ def main(argv=None):
                 ["/app/evaluator/Scanner.dll", "evaluate", "--facts", "/input/facts", *expected, *baseline_expected, *shared], policy=True)
             if not report or code not in (0, 1, 2, 3):
                 raise Failure("parser-failed")
-            if args.data_rules is not None and code in (0, 1):
-                # Separate private artifact. No policy/baseline fingerprint enters ordinary reports.
+            if (args.data_rules is not None or args.capability_rules is not None) and code in (0, 1):
                 from report_validation import load
                 checked = load(report, Path(__file__).resolve().parents[1], moderator_detail=args.moderator_detail)
+            if args.capability_rules is not None and code in (0, 1):
+                if "capability-analysis" not in checked:
+                    raise Failure("parser-failed")
+                private = {"schema-version": 1, "kind": "capability-context",
+                    "report-sha256": hashlib.sha256(report).hexdigest(),
+                    "policy-revision": args.capability_policy_revision, "catalog-sha256": catalog_hash,
+                    "dependencies": [{"kind": "capability-rules", "sha256": capability_rules_hash}]}
+                write_report(args.capability_context, (json.dumps(private, separators=(",", ":")) + "\n").encode("utf-8"))
+            if args.data_rules is not None and code in (0, 1):
+                # Separate private artifact. No policy/baseline fingerprint enters ordinary reports.
                 if "data-analysis" not in checked:
                     raise Failure("parser-failed")
                 private = {"schema-version": 1, "kind": "data-context", "report-sha256": hashlib.sha256(report).hexdigest(),

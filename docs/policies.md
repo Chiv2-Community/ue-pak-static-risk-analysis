@@ -1,5 +1,8 @@
 # Policy YAML v1
 
+This grammar stays closed. Optional [capability rules v1](capability-policy.md)
+use a separate private JSON document; capability/caller kinds are not YAML v1 kinds.
+
 The policy parser, typed model and evaluator are implemented. The
 [extraction API](extraction.md), [shared policy input](policy-input.md),
 [evaluation CLI](evaluate.md), [Docker scanner](container.md) and [Action](action.md)

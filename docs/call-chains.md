@@ -109,7 +109,9 @@ Any matched explicit capability sets `needs-review` and **always exits 1**,
 independently of existing gate opt-outs. It does not synthesize policy flags or
 inflate direct counts. Content review/reject gates remain mandatory. Disabling
 `fail-on-incomplete` does not establish completeness or bypass capability review.
-Policy AST v1 is unchanged: no capability/call-chain predicate is implemented.
+Policy AST v1 is unchanged. Optional separately versioned
+[private capability rules](capability-policy.md) select capabilities/callers without
+changing invocation findings or weakening mandatory catalog review.
 
 Action direct arrays/counts and output budgets are unchanged; use the full report
 for call chains. Moderation retains only `call-chain-analysis` completeness/review

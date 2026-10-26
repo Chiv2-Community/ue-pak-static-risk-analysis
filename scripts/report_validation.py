@@ -167,7 +167,27 @@ def load(data, root, *, moderator_detail=False):
     incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
                       or report.get("content-policy", {}).get("incomplete", False)
                       or not report.get("data-analysis", {}).get("complete", True)
-                      or not report.get("call-chains", {}).get("complete", True))
+                      or not report.get("call-chains", {}).get("complete", True)
+                      or not report.get("capability-analysis", {}).get("complete", True))
+    if "capability-analysis" in report:
+        capability = report["capability-analysis"]
+        require(capability["complete"] == (not capability["diagnostics"]))
+        witnesses = report.get("call-chains", {}).get("witnesses", [])
+        seen = set()
+        for finding in capability["findings"]:
+            index = finding["witness"]
+            require(index < len(witnesses) and index not in seen)
+            seen.add(index)
+            witness = witnesses[index]
+            require(witness["endpoint"]["capability"] is not None)
+            require(any(finding[k] for k in ("flagged", "forbidden", "possibly-flagged", "possibly-forbidden")))
+            require(witness["resolution"] != "possible" or not (finding["flagged"] or finding["forbidden"]))
+        uncertain = capability["possibly-flagged"] or capability["possibly-forbidden"] or any(
+            f["possibly-flagged"] or f["possibly-forbidden"] for f in capability["findings"])
+        require(not uncertain or not capability["complete"])
+        decision = "reject" if any(f["forbidden"] for f in capability["findings"]) else (
+            "needs-review" if capability["findings"] or uncertain else "no-match")
+        require(capability["decision"] == decision)
     if "data-analysis" in report:
         data = report["data-analysis"]
         require(data["complete"] == (not data["diagnostics"]))

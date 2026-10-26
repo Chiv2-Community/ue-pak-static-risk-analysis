@@ -98,7 +98,8 @@ def destination(input_key="INPUT_REPORT", default="ue-pak-risk-report.json"):
     for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY", "GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"):
         if os.environ.get(key):
             require(target != Path(os.environ[key]).resolve())
-    for key in ("INPUT_PAK", "INPUT_POLICY_RULES", "INPUT_MAPPING", "INPUT_CAPABILITY_SUMMARIES", "INPUT_DATA_RULES", "INPUT_BASELINE_PAK", "INPUT_DATA_CONTEXT", "INPUT_REPORT"):
+    for key in ("INPUT_PAK", "INPUT_POLICY_RULES", "INPUT_MAPPING", "INPUT_CAPABILITY_SUMMARIES", "INPUT_DATA_RULES", "INPUT_BASELINE_PAK", "INPUT_DATA_CONTEXT", "INPUT_REPORT",
+                "INPUT_CAPABILITY_RULES", "INPUT_CAPABILITY_CONTEXT"):
         if key == input_key:
             continue
         if os.environ.get(key):
@@ -112,6 +113,9 @@ def outputs(report, path, reason=None):
               "flagged-invocations": "[]", "forbidden-invocations": "[]",
               "arrays-omitted": "true", "omission-reason": reason or "report-unavailable"}
     result.update({"data-analysis-status": "unknown", "data-review-count": "unknown", "data-reject-count": "unknown"})
+    result["capability-analysis-status"] = "unknown"
+    for effect in ("flagged", "forbidden", "possibly-flagged", "possibly-forbidden"):
+        result["capability-" + effect + "-count"] = "unknown"
     for kind in ("invocations", "flagged", "forbidden", "affected-union"):
         result[kind + "-count"] = "unknown"
     if report is None:
@@ -121,6 +125,10 @@ def outputs(report, path, reason=None):
     result["report-available"] = "true"
     result["arrays-omitted"], result["omission-reason"] = "false", "none"
     data = report.get("data-analysis")
+    capability = report.get("capability-analysis")
+    result["capability-analysis-status"] = "not-performed" if capability is None else "complete" if capability["complete"] else "incomplete"
+    for effect in ("flagged", "forbidden", "possibly-flagged", "possibly-forbidden"):
+        result["capability-" + effect + "-count"] = str(sum(f[effect] for f in capability["findings"])) if capability else "0"
     result["data-analysis-status"] = "not-performed" if data is None else "complete" if data["complete"] else "incomplete"
     for action in ("review", "reject"):
         result["data-" + action + "-count"] = str(sum(f["action"] == action for f in data["findings"])) if data else "0"
@@ -141,7 +149,8 @@ def publish(result):
     summary = ("## Pak static-risk scan\n\n"
                f"Status: {result['status']}. Analysis complete: {result['analysis-complete']}.\n\n"
                f"Flagged: {result['flagged-count']}. Forbidden: {result['forbidden-count']}.\n\n"
-               f"Data analysis: {result['data-analysis-status']}. Review: {result['data-review-count']}. Reject: {result['data-reject-count']}.\n\n"
+                f"Data analysis: {result['data-analysis-status']}. Review: {result['data-review-count']}. Reject: {result['data-reject-count']}.\n\n"
+                f"Capability analysis: {result['capability-analysis-status']}. Flagged witnesses: {result['capability-flagged-count']}. Forbidden witnesses: {result['capability-forbidden-count']}.\n\n"
                f"Report available: {result['report-available']}. Arrays omitted: {result['arrays-omitted']}.\n\n"
                "Use the report-path output to collect the authoritative report with restricted access.\n"
                "This is not a safety verdict.\n")
@@ -163,7 +172,8 @@ def scan():
                              ("fail-on-any-forbidden", "true"), ("fail-on-any-flagged", "false"),
                              ("fail-on-incomplete", "true")):
             args += ["--" + key, os.environ.get("INPUT_" + key.upper().replace("-", "_"), default)]
-        for key in ("policy-rules", "content-root", "mapping", "capability-summaries", "data-rules", "baseline-pak", "game-build"):
+        for key in ("policy-rules", "content-root", "mapping", "capability-summaries", "data-rules", "baseline-pak", "game-build",
+                    "capability-rules", "capability-policy-revision"):
             value = os.environ.get("INPUT_" + key.upper().replace("-", "_"), "")
             if value:
                 args += ["--" + key, value]
@@ -173,6 +183,12 @@ def scan():
             args += ["--data-context", str(private_target)]
         else:
             require(not os.environ.get("INPUT_DATA_CONTEXT"))
+        if os.environ.get("INPUT_CAPABILITY_RULES"):
+            capability_target, _ = destination("INPUT_CAPABILITY_CONTEXT", "")
+            require(capability_target != target)
+            args += ["--capability-context", str(capability_target)]
+        else:
+            require(not os.environ.get("INPUT_CAPABILITY_CONTEXT") and not os.environ.get("INPUT_CAPABILITY_POLICY_REVISION"))
         # The shared renderer owns stderr. Do not decode/re-encode, prefix, or echo it.
         code = subprocess.run(args, env=environment(policy=True), stdin=subprocess.DEVNULL,
                               stdout=subprocess.DEVNULL, check=False).returncode

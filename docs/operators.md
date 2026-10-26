@@ -61,6 +61,25 @@ invalidates the old context/decision. Full reports expose public capability IDs,
 revision and digest, not catalog prose or private policy. Action outputs omit
 chains; retain the private full report.
 
+Optional [private capability rules](capability-policy.md) are a separate closed
+JSON file, not additions to invocation YAML. Example with operator-controlled
+paths (all output parents must already exist):
+
+```sh
+python3 scripts/scan.py scan \
+  --pak /approved/submission.pak --report /restricted/new-report.json \
+  --engine-version 4.25 --policy-rules /private/invocations.yaml \
+  --capability-summaries /approved/nonsecret-catalog.json \
+  --capability-rules /private/capabilities.json \
+  --capability-policy-revision reviewed-v1 \
+  --capability-context /private/new-capability-context.json
+```
+
+The private revision must match the document. Retain the receipt/dependencies for
+moderation; never publish it or use private rule hashes as public revisions. All
+capability findings/unknowns fail mandatory gates even when invocation gates are
+disabled. Verbose still warns/discloses invocation YAML, never capability rules.
+
 Obtain only the original pak through trusted transfer, never submission scripts
 or a submitter checkout. The policy owner controls rules, content settings, log
 level and a fresh opaque policy revision. Keep policy source provenance privately;

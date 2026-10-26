@@ -7,6 +7,23 @@
     {"$ref": "#/$defs/review"}, {"$ref": "#/$defs/feedback"}
   ],
   "$defs": {
+    "capability-summary": {
+      "type": "object", "additionalProperties": false, "required": ["complete", "decision"],
+      "properties": {"complete": {"type": "boolean"}, "decision": {"enum": ["no-match", "needs-review", "reject"]}}
+    },
+    "capability-context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema-version", "kind", "report-sha256", "policy-revision", "catalog-sha256", "dependencies"],
+      "properties": {"schema-version": {"const": 1}, "kind": {"const": "capability-context"},
+        "report-sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "policy-revision": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+        "catalog-sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "dependencies": {"type": "array", "minItems": 1, "maxItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["kind", "sha256"],
+          "properties": {"kind": {"const": "capability-rules"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+        }}
+      }
+    },
     "data-analysis-summary": {
       "type": "object", "additionalProperties": false, "required": ["complete", "decision", "review-count", "reject-count"],
       "properties": {"complete": {"type": "boolean"}, "decision": {"enum": ["no-match", "needs-review", "reject"]},
@@ -38,7 +55,8 @@
         "scanner-identity": {"type": "string", "pattern": "^(git:[a-f0-9]{40}|sha256:[a-f0-9]{64})$"},
         "game-build": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
         "report-context": {"$ref": "report-v1.schema.json#/properties/context"},
-        "data-context": {"$ref": "#/$defs/data-context"}
+        "data-context": {"$ref": "#/$defs/data-context"},
+        "capability-context": {"$ref": "#/$defs/capability-context"}
       }
     },
     "routes": {
@@ -59,7 +77,8 @@
         "routes": {"$ref": "#/$defs/routes"},
         "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
         "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"},
-        "data-analysis": {"$ref": "#/$defs/data-analysis-summary"}
+        "data-analysis": {"$ref": "#/$defs/data-analysis-summary"},
+        "capability-analysis": {"$ref": "#/$defs/capability-summary"}
       }
     },
     "review": {
@@ -86,7 +105,8 @@
         "routes": {"$ref": "#/$defs/routes"},
         "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
         "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"},
-        "data-analysis": {"$ref": "#/$defs/data-analysis-summary"}
+        "data-analysis": {"$ref": "#/$defs/data-analysis-summary"},
+        "capability-analysis": {"$ref": "#/$defs/capability-summary"}
       }
     }
   }

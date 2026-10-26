@@ -13,6 +13,7 @@ public sealed record GateOptions(bool FailOnAnyForbidden = true, bool FailOnAnyF
     public bool Fails(RiskReport report) => report.ContentPolicy?.Decision is "reject" or "needs-review"
         || report.DataAnalysis is { } data && (!data.Complete || data.Decision is "reject" or "needs-review")
         || report.CallChains?.NeedsReview == true
+        || report.CapabilityAnalysis is { } capability && (!capability.Complete || capability.Decision is "reject" or "needs-review")
         || Fails(report.Counts.Forbidden > 0, report.Counts.Flagged > 0, !report.AnalysisComplete);
 }
 
@@ -34,8 +35,15 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContentResult? ContentPolicy = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReportPossibleDispatch[]? PossibleDispatches = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallChainEvidence? CallChains = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DataAnalysis? DataAnalysis = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DataAnalysis? DataAnalysis = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityRuleAnalysis? CapabilityAnalysis = null)
 {
+    public RiskReport WithCapabilities(CapabilityRuleAnalysis? result) => result is null ? this : this with
+    {
+        CapabilityAnalysis = result,
+        AnalysisComplete = AnalysisComplete && result.Complete,
+        Status = !result.Complete && Status == "successful" ? "partial" : Status
+    };
     public RiskReport WithData(DataAnalysis? result) => result is null ? this : this with
     {
         DataAnalysis = result,

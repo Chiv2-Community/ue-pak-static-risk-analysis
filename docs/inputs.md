@@ -22,6 +22,9 @@ installation, effective defaults or native behavior. #10 remains open.
 | `--timeout` | number, seconds `(0,600]` | `60` | `90` | Per-container deadline, not whole-command deadline. |
 | `--policy-rules` | file path | none | `/private/rules.yaml` | Exactly one file or raw environment policy source. |
 | `--capability-summaries` | trusted nonsecret file path | none | `/approved/catalog.json` | Optional catalog v1, 256 KiB/256 exact targets; matched capabilities always require review. Parser never receives it. |
+| `--capability-rules` | private trusted file path | none | `/private/capabilities.json` | Closed capability-rule v1; evaluator-only snapshot. Requires revision/context below. |
+| `--capability-policy-revision` | private opaque ASCII token, 1–128 characters | none | `reviewed-v1` | Exact private rule revision; never added to public context. |
+| `--capability-context` | new private file path | none | `/private/new-capability-context.json` | Required with capability rules; mode-0600 exact report/rule/catalog binding. Never publish. |
 | `--data-rules` | private trusted file path | none | `/private/data-rules.json` | Closed data-policy v1; requires game-build, content-root and private data-context output. Never mounted in parser. |
 | `--baseline-pak` | authorized file path | none | `/private/original.pak` | Optional original pak, independently bounded/snapshotted/parsed read-only; requires data-rules. Not authenticated clean or a safety guarantee. |
 | `--game-build` | operator assertion | none | `original-fixture-v1` | Exact private data-rule build scope. Does not authenticate build metadata. |
@@ -64,6 +67,8 @@ the same defaults. Host-only image/timeout/pak/mapping/content-root are not flag
 | `--reason` | enum: `parser-failed`, `parser-output-limit`, `wall-timeout`, `cancelled`, `container-unavailable`, `input-failed`, `invalid-configuration` | required for failure-report | `parser-failed` | Internal wrapper failure report; not an alternate empty-success path. |
 | `--policy-rules` | file path | none | `/private/rules.yaml` | Exactly one file/env source for evaluate/validate. |
 | `--capability-summaries` | trusted nonsecret file path | none | `/approved/catalog.json` | Optional bounded catalog v1; validates before verbose policy disclosure. Exact digest/revision bind report context. |
+| `--capability-rules` | private trusted file path | none | `/private/capabilities.json` | Closed capability-rule v1; validates before verbose invocation policy. Never rendered. |
+| `--capability-policy-revision` | private opaque ASCII token, 1–128 characters | none | `reviewed-v1` | Required with capability rules, exact document revision. No standalone host receipt; trusted caller retains private byte binding. |
 | `--data-rules` | private trusted file path | none | `/private/data-rules.json` | Optional closed data extension; validated before any verbose invocation-policy disclosure. Never logged, even verbose. |
 | `--game-build` | operator assertion | none | `original-fixture-v1` | Required with data-rules; exact reviewed build scope. |
 | `--baseline-facts` | private facts file path | none | `/private/baseline-facts.json` | Internal isolated-parser transport; standalone facts are caller assertions, not authenticated baseline content. Requires data-rules and both baseline options below. |
@@ -97,6 +102,9 @@ allowlists, policy revision or moderator-detail input exists.
 | `pak` | runner file path | required | `/approved/mod.pak` | Original pak only; no submission checkout. |
 | `policy-rules` | file path | none | `/private/rules.yaml` | Alternative to raw step environment YAML; exactly one source. |
 | `capability-summaries` | trusted nonsecret runner file path | none | `/approved/catalog.json` | Optional bounded catalog v1, never submission-controlled; capability matches always require review. |
+| `capability-rules` | private trusted runner file path | none | `/private/capabilities.json` | Optional closed capability rules v1; never inline or submission-controlled. |
+| `capability-policy-revision` | private opaque ASCII token, 1–128 characters | none | `reviewed-v1` | Required with capability rules, exact private revision; not invocation policy revision. |
+| `capability-context` | new private workspace-relative path | none | `private/new-capability-context.json` | Required with capability rules; retain restricted moderation receipt, never publish. |
 | `data-rules` | private trusted runner file path | none | `/private/data-rules.json` | Optional data-policy v1; requires game-build, content-root and data-context. No inline policy or submission-controlled model. |
 | `baseline-pak` | authorized runner file path | none | `/private/original.pak` | Optional bounded original pak; isolated read-only parsing, not a verified clean installation. |
 | `game-build` | operator assertion | none | `original-fixture-v1` | Exact reviewed private data-model build scope; not authentication. |
@@ -116,7 +124,9 @@ commit; remote private use is blocked pending named-consumer authorization/test.
 Indirect candidates appear only in the full report's optional `possible-dispatches`,
 not direct invocation arrays/counts. [Call chains](call-chains.md) likewise remain
 separate; no YAML predicate is added. Explicit catalog matches always require
-review regardless of the three existing gate values.
+review regardless of the three existing gate values. Capability-rule findings and
+unknowns likewise use mandatory gates; invocation gate opt-outs do not disable them.
+Verbose/moderator-detail never render capability/data rules.
 
 ## Environment policy source
 

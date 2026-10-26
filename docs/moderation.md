@@ -16,6 +16,16 @@ its exact bytes with `--dependency capability-summaries=FILE`. Changed catalog
 bytes/revision or witness evidence invalidate approval. Feedback omits catalog
 identities/capabilities and caller witnesses.
 
+Optional [private capability rules](capability-policy.md) require a separate
+`capability-context` receipt in trusted scan context and exact
+`--dependency capability-rules=FILE` bytes. It privately binds rule revision/hash,
+catalog digest and exact report bytes; missing/changed context invalidates review.
+Handoff/feedback retain only capability decision/completeness, never private IDs,
+conditions or fingerprints. Capability reject routes `policy-violation`; possible
+effects route `needs-review` and `analysis-incomplete`. Catalog review remains
+independent of private rule matches. Reports with no enabled rules retain their
+existing shape.
+
 ## Ownership and provenance
 
 1. The trusted platform snapshots the original pak and **every** relevant mapping
@@ -105,8 +115,8 @@ queryable policy fingerprints.
 Invocation or content-setting changes require a new opaque policy revision.
 Future reviewed native catalogs/summaries (#7) also change interpretation context;
 bind their restricted provenance to a fresh opaque policy revision and the actual
-scanner/build record, then rescan and re-review. No catalog identity field or
-native capability evaluator is shipped by this schema. See
+scanner/build record, then rescan and re-review. Public catalog identities and
+private rule receipts bind operator assertions, not native implementations. See
 [ownership and catalog update requirements](security.md#capability-ownership-and-review-invalidation);
 do not invent exact-game APIs or preserve approvals across changed context.
 

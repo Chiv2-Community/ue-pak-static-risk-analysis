@@ -38,6 +38,10 @@ public static class Program
                 Boolean(options, "fail-on-any-flagged", false), Boolean(options, "fail-on-incomplete", true));
             // Validate public catalog input before any verbose policy output.
             var catalog = options.TryGetValue("capability-summaries", out var catalogPath) ? CapabilityCatalog.Load(catalogPath) : null;
+            var capabilityPolicy = options.TryGetValue("capability-rules", out var capabilityPath) ? CapabilityPolicy.Load(capabilityPath) : null;
+            if (capabilityPolicy is not null
+                ? options.GetValueOrDefault("capability-policy-revision") != capabilityPolicy.Document.Revision
+                : options.ContainsKey("capability-policy-revision")) throw new CapabilityConfigurationException();
             var dataPolicy = options.TryGetValue("data-rules", out var dataPath) ? DataPolicy.Load(dataPath) : null;
             var buildScope = options.GetValueOrDefault("game-build");
             if (dataPolicy is not null && buildScope != dataPolicy.Document.Context.BuildScope
@@ -63,6 +67,7 @@ public static class Program
             report = RiskReport.Create(facts, evaluation, options.ContainsKey("moderator-detail"), revision, catalog);
             report = report.WithContent(contentPolicy?.Evaluate(facts.Inspection));
             report = report.WithData(dataPolicy?.Evaluate(facts, buildScope!, baseline));
+            report = report.WithCapabilities(capabilityPolicy?.Evaluate(facts.Analysis, report.CallChains));
             exit = gates.Fails(report) ? 1 : 0;
         }
         catch (Exception error) when (error is ConfigurationException or DataConfigurationException or ContentConfigurationException or CapabilityConfigurationException or PolicyInputException or PolicyException)
@@ -132,7 +137,8 @@ public static class Program
         var allowed = new HashSet<string> { "facts", "report", "engine-version", "policy-rules", "log-level", "policy-revision",
             "fail-on-any-forbidden", "fail-on-any-flagged", "fail-on-incomplete", "moderator-detail",
             "expected-pak-sha256", "expected-mapping-sha256", "reason", "capability-summaries",
-            "data-rules", "game-build", "baseline-facts", "expected-baseline-sha256", "baseline-facts-assertion" };
+            "data-rules", "game-build", "baseline-facts", "expected-baseline-sha256", "baseline-facts-assertion",
+            "capability-rules", "capability-policy-revision" };
         for (var i = 1; i < args.Length; i++)
         {
             if (!args[i].StartsWith("--", StringComparison.Ordinal)) throw new ConfigurationException();
