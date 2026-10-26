@@ -59,6 +59,13 @@ opt-outs. Existing mandatory catalog review/content/data gates remain independen
 a nonmatching private rule never permits a catalog-positive scan to pass. Without
 rules the field is absent and existing report bytes/semantics are unchanged.
 
+The shared report loader and report schema reject capability completeness that
+contradicts missing/incomplete call chains or a null catalog digest. These states
+require `capability-evidence-incomplete`, `complete: false` and at least one
+aggregate possible effect. They do not reveal which private effects are enabled.
+Possible-witness-only uncertainty can retain complete graph/catalog evidence and
+use per-finding effects without aggregate effects. Legacy reports omit the extension.
+
 ## Inputs, privacy and moderation
 
 Evaluator: `--capability-rules FILE --capability-policy-revision TOKEN`.

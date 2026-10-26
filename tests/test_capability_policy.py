@@ -111,6 +111,18 @@ class CapabilityPolicyTests(unittest.TestCase):
                     capability_policy_oracle(report)
                     self.assertEqual(level == "verbose", b"invocation-canary" in result.stderr)
 
+    def test_real_producer_accepts_flag_only_forbid_only_and_union(self):
+        for effect in ("flag", "forbid", "both"):
+            rules = deepcopy(self.rules)
+            rules["rules"] = [r for r in rules["rules"] if effect == "both" or r["effect"] == effect]
+            with self.subTest(effect=effect):
+                result, report, _ = self.evaluate(rules=rules)
+                self.assertEqual(1, result.returncode)
+                capability = report["capability-analysis"]
+                self.assertEqual(effect != "forbid", capability["possibly-flagged"])
+                self.assertEqual(effect != "flag", capability["possibly-forbidden"])
+                self.assertEqual("needs-review" if effect == "flag" else "reject", capability["decision"])
+
     def test_malformed_rules_fail_before_verbose_invocation_disclosure(self):
         for raw in (b"{private-rule-canary", b"\xff", b"{}", b"{\"schema-version\":1,\"schema-version\":1}",
                     json.dumps(dict(self.rules, unknown="private-rule-canary")).encode(), b" " * (256 * 1024 + 1)):
@@ -189,6 +201,28 @@ class CapabilityPolicyTests(unittest.TestCase):
         rules.write_bytes(rule_bytes)
         with self.assertRaises(reports.InvalidReport):
             moderation.verify(approved, context, self.pak, dependencies, result.stdout + b"\n")
+        with self.assertRaises(reports.InvalidReport):
+            moderation.handoff(result.stdout, context, self.pak, dependencies[:-1])
+        for kind in ("missing-catalog", "absent", "incomplete"):
+            changed_report = deepcopy(report)
+            if kind == "absent":
+                changed_report.pop("call-chains")
+            elif kind == "missing-catalog":
+                changed_report["call-chains"].update({"catalog-revision": None, "catalog-sha256": None})
+                changed_report["context"].pop("capability-catalog-revision")
+                changed_report["context"]["dependencies"] = []
+            changed_report["capability-analysis"].update({
+                "complete": True, "decision": "no-match", "findings": [], "diagnostics": [],
+                "possibly-flagged": False, "possibly-forbidden": False})
+            changed_raw = json.dumps(changed_report).encode()
+            changed_context = deepcopy(context)
+            changed_context["report-context"] = changed_report["context"]
+            changed_context["capability-context"]["report-sha256"] = sha(changed_raw)
+            with self.subTest(kind=kind):
+                with self.assertRaises(reports.InvalidReport):
+                    moderation.handoff(changed_raw, changed_context, self.pak, dependencies)
+                with self.assertRaises(reports.InvalidReport):
+                    moderation.verify(approved, changed_context, self.pak, dependencies, changed_raw)
 
     def test_action_projection_has_fixed_counts_not_private_ids_or_digests(self):
         _, report, rule_bytes = self.evaluate()

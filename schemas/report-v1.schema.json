@@ -65,12 +65,37 @@
     }
   },
   "allOf": [
+    {"if": {"required": ["capability-analysis"]}, "then": {"allOf": [
+      {"if": {"properties": {"capability-analysis": {"properties": {"complete": {"const": false}}}}},
+       "then": {"properties": {"analysis-complete": {"const": false}}}},
+      {"if": {"not": {"$ref": "#/$defs/complete-capability-evidence"}},
+       "then": {"properties": {"capability-analysis": {"$ref": "#/$defs/incomplete-capability-evidence"}}}},
+      {"if": {"$ref": "#/$defs/complete-capability-evidence"}, "then": {"properties": {"capability-analysis": {
+        "properties": {"diagnostics": {"not": {"contains": {"const": "capability-evidence-incomplete"}}},
+          "possibly-flagged": {"const": false}, "possibly-forbidden": {"const": false}}
+      }}}}
+    ]}},
     {"if": {"properties": {"status": {"const": "successful"}}}, "then": {"properties": {"analysis-complete": {"const": true}, "diagnostics": {"maxItems": 0}}}},
     {"if": {"properties": {"status": {"enum": ["partial", "failed"]}}}, "then": {"properties": {"analysis-complete": {"const": false}}}},
     {"if": {"properties": {"status": {"const": "partial"}}}, "then": {"properties": {"diagnostics": {"maxItems": 0}}}},
     {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"properties": {"diagnostics": {"minItems": 1}, "flagged-invocations": {"maxItems": 0}, "forbidden-invocations": {"maxItems": 0}}}}
   ],
   "$defs": {
+    "complete-capability-evidence": {
+      "required": ["call-chains"], "properties": {"call-chains": {
+        "required": ["complete", "catalog-sha256", "diagnostics"],
+        "properties": {"complete": {"const": true}, "catalog-sha256": {"type": "string"}, "diagnostics": {"maxItems": 0}}
+      }}
+    },
+    "possible-capability-effect": {
+      "anyOf": [{"properties": {"possibly-flagged": {"const": true}}},
+                {"properties": {"possibly-forbidden": {"const": true}}}]
+    },
+    "incomplete-capability-evidence": {
+      "allOf": [{"$ref": "#/$defs/possible-capability-effect"}],
+      "properties": {"complete": {"const": false}, "decision": {"enum": ["needs-review", "reject"]},
+        "diagnostics": {"contains": {"const": "capability-evidence-incomplete"}}}
+    },
     "capability-analysis": {
       "type": "object", "additionalProperties": false,
       "required": ["schema-version", "complete", "decision", "findings", "possibly-flagged", "possibly-forbidden", "diagnostics"],
@@ -86,7 +111,16 @@
             "flagged": {"type": "boolean"}, "forbidden": {"type": "boolean"},
             "possibly-flagged": {"type": "boolean"}, "possibly-forbidden": {"type": "boolean"}}
         }}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"diagnostics": {"maxItems": 0}}}, "then": {"properties": {"complete": {"const": true}}}},
+        {"if": {"properties": {"diagnostics": {"minItems": 1}}}, "then": {"properties": {"complete": {"const": false}}}},
+        {"if": {"properties": {"decision": {"const": "no-match"}}}, "then": {"properties": {
+          "complete": {"const": true}, "findings": {"maxItems": 0}, "possibly-flagged": {"const": false}, "possibly-forbidden": {"const": false}
+        }}},
+        {"if": {"properties": {"diagnostics": {"contains": {"const": "capability-evidence-incomplete"}}}},
+         "then": {"$ref": "#/$defs/incomplete-capability-evidence"}}
+      ]
     },
     "data-analysis": {
       "type": "object", "additionalProperties": false,

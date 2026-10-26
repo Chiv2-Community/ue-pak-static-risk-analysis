@@ -118,6 +118,40 @@ public sealed class CapabilityPolicyTests
     }
 
     [Theory]
+    [InlineData("flag", true, false)]
+    [InlineData("forbid", false, true)]
+    [InlineData("both", true, true)]
+    public void AggregateUnknownEffectsFollowEnabledRulesNotWitnessMatches(string effect, bool flag, bool forbid)
+    {
+        var policy = CapabilityPolicy.Read(CapabilityPolicy.Write(Policy("unrelated").Document with
+            { Rules = Policy("unrelated").Document.Rules.Where(r => effect == "both" || r.Effect == effect).ToImmutableArray() }));
+        foreach (var kind in new[] { "catalog", "graph", "incomplete-graph", "extraction", "summary", "truncation" })
+        {
+            var analysis = Analysis();
+            if (kind == "graph") analysis = analysis with { CallGraph = null };
+            if (kind == "incomplete-graph") analysis = analysis with { CallGraph = analysis.CallGraph! with { Complete = false } };
+            if (kind == "extraction") analysis = analysis with { CoverageGaps = [CoverageGap.IncompleteExtraction] };
+            if (kind == "summary") analysis = analysis with { Invocations = analysis.Invocations.Add(Call("Root", "Other", 90, "/Script/Fixture.Other")) };
+            var evidence = CallChains.Analyze(analysis, Evaluator.Evaluate(analysis), kind == "catalog" ? null : Catalog(),
+                kind == "truncation" ? new(MaxWitnesses: 1) : null);
+            var result = policy.Evaluate(analysis, evidence);
+            Assert.False(result.Complete);
+            Assert.Equal(new[] { "capability-evidence-incomplete" }, result.Diagnostics);
+            Assert.Equal(flag, result.PossiblyFlagged);
+            Assert.Equal(forbid, result.PossiblyForbidden);
+            Assert.Empty(result.Findings);
+            Assert.Equal("needs-review", result.Decision);
+        }
+        var missing = policy.Evaluate(Analysis(), null);
+        Assert.Equal(flag, missing.PossiblyFlagged);
+        Assert.Equal(forbid, missing.PossiblyForbidden);
+        var complete = Run(Analysis(), policy);
+        Assert.True(complete.Complete);
+        Assert.Equal("no-match", complete.Decision);
+        Assert.False(complete.PossiblyFlagged || complete.PossiblyForbidden);
+    }
+
+    [Theory]
     [InlineData("schema-version", "2")]
     [InlineData("schema-version", "\"1\"")]
     [InlineData("disclosure", "\"nonsecret\"")]
