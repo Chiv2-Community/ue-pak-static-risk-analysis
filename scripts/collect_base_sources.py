@@ -111,6 +111,10 @@ def fetch(entry, output, opener):
     digest, size = hashlib.sha256(), 0
     try:
         response = opener.open(url_allowed(entry['url']), timeout=30)
+    except SourceError:
+        raise
+    except ValueError:
+        raise SourceError('redirect') from None
     except (OSError, http.client.HTTPException) as error:
         raise network_error(error) from None
     with response:

@@ -163,6 +163,7 @@ class SourceTests(unittest.TestCase):
         # Run the real CLI with only the HTTPS/filesystem boundary replaced.
         program = '''
 import errno, hashlib, http.client, io, json, sys, urllib.error
+from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 import collect_base_sources as source
@@ -207,6 +208,13 @@ def open_response(url, timeout):
         response.url = canary
     if mode == 'malformed-redirect':
         source.Redirects().redirect_request(source.urllib.request.Request(url), None, 302, canary, {}, 'https://[invalid')
+    if mode.startswith('handler-redirect-'):
+        code = int(mode.rsplit('-', 1)[1])
+        handler = source.Redirects()
+        headers = Message()
+        headers['Location'] = 'https://[credential-canary'
+        getattr(handler, 'http_error_' + str(code))(
+            source.urllib.request.Request(url), response, code, canary, headers)
     if mode == 'read-timeout':
         response.read = lambda size: (_ for _ in ()).throw(TimeoutError(canary))
     if mode == 'read-incomplete':
@@ -279,6 +287,39 @@ with patch.object(source.urllib.request.OpenerDirector, 'open', side_effect=open
                 self.assertEqual(expected, set(context))
                 self.assertFalse((self.root / 'diagnostic-output').exists())
                 self.assertEqual([], list(self.root.glob('.base-source-*')))
+
+    def test_cli_malformed_redirect_handler_aliases_are_safe_and_atomic(self):
+        for code in (301, 302, 303, 307, 308):
+            with self.subTest(code=code):
+                result = self.diagnostic_cli('handler-redirect-' + str(code))
+                self.assertEqual(1, result.returncode)
+                self.assertEqual(b'', result.stdout)
+                self.assertLess(len(result.stderr), 1024)
+                self.assertNotIn(b'credential-canary', result.stderr)
+                self.assertNotIn(b'private', result.stderr)
+                self.assertNotIn(str(self.root).encode(), result.stderr)
+                message, raw = result.stderr.decode().splitlines()
+                self.assertEqual('Source collection failed; no complete output published.', message)
+                self.assertEqual({
+                    'stage': 'fetch', 'ordinal': 2, 'total': 2,
+                    'completed_files': 1, 'completed_bytes': len(self.dsc),
+                    'category': 'redirect',
+                    'entry': {k: self.entry[k] for k in ('group', 'source', 'version', 'filename')},
+                }, json.loads(raw))
+                self.assertFalse((self.root / 'diagnostic-output').exists())
+                self.assertEqual([], list(self.root.glob('.base-source-*')))
+
+    def test_open_preserves_source_error_categories_and_details(self):
+        for category in ('schema', 'http', 'network', 'timeout', 'size', 'header',
+                         'hash', 'redirect', 'descriptor', 'output'):
+            error = source.SourceError(category, http_status=429)
+            with self.subTest(category=category), patch.object(
+                    urllib.request.OpenerDirector, 'open', side_effect=error):
+                with self.assertRaises(source.SourceError) as caught:
+                    source.fetch(self.entry, self.root / 'unused', urllib.request.build_opener())
+                self.assertIs(error, caught.exception)
+                self.assertEqual(category, caught.exception.category)
+                self.assertEqual({'http_status': 429}, caught.exception.details)
 
     def test_maximum_validated_context_is_bounded(self):
         entry = dict(self.entry, source='a' * 100, version='b' * 100, filename='c' * 200)
