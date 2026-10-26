@@ -35,7 +35,7 @@ class SourceBundleTests(unittest.TestCase):
         self.pin_patch = patch.object(bundle, "UASSET", self.pin)
         self.pin_patch.start()
         self.addCleanup(self.pin_patch.stop)
-        names = (bundle.ROOT_FILES - {"action-image.json"}) | bundle.CONTAINER_FILES | bundle.SCRIPT_FILES
+        names = (bundle.ROOT_FILES - {"action-image.json"}) | bundle.CONTAINER_FILES | bundle.SCRIPT_FILES | bundle.RELEASE_FILES
         names |= {"src/Parser/Parser.csproj", "src/Parser/Program.cs", "src/Parser/packages.lock.json"}
         for name in names:
             self.write(self.repo, name, "tracked " + name)

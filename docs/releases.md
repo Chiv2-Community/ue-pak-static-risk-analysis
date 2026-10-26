@@ -16,14 +16,19 @@ aliases, billing changes or unrelated access changes are part of this release.
 2. After independent review, green CI and full local release validation, dispatch
    `release-candidate.yml` on main at exactly A. The workflow has no source-ref
    input; it checks out `github.sha`, builds Linux amd64, runs the serial public
-   component/Docker/Action/regression mutation gate, then transfers the validated
-   image to a separate `packages: write` job. Only that job logs in, using token
-   stdin and an isolated Docker config. It publishes `sha-<full-A>`, not v0.1.0.
-   Dispatch is an operator publication action, never automatic on push/PR.
-3. Verify effective GHCR visibility and an **unauthenticated** public pull from
-   an empty Docker config. Initial packages can be private: do not claim public
-   access from a successful authenticated publisher push. The parent owns the
-   expressly authorized public-package setting and remote digest verification.
+    component/Docker/Action/regression mutation gate, inspects the actual image,
+    compares package/source versions and the complete pinned Python doc tree,
+    then remotely downloads/hash-checks the reviewed base sources. Dispatch with
+    `publish: false` (default): no registry login or push. Inspect the staging
+    record and sources before any publication. See the exact
+    [base-source inventory and delivery instructions](../releases/v0.1.0/README.md).
+3. Only after verifying private GHCR namespace visibility, dispatch with both
+    `publish: true` and `private_visibility_confirmed: true`. The separate
+    `packages: write` job verifies transfer hashes/image ID/revision and refuses
+    an existing candidate tag. It logs in using token stdin and an isolated
+    Docker config, pushing `sha-<full-A>`, not v0.1.0. An existing public namespace
+    could expose a push immediately; the acknowledgement is an operator gate,
+    not API proof of visibility. No visibility changes are automatic.
 4. Commit **B** adds root `action-image.json` with exactly four keys:
    `version` = `v0.1.0`, `platform` = `linux/amd64`, `build-source` = full A,
    and `image` = canonical approved repository `@sha256:` registry digest.
@@ -31,15 +36,22 @@ aliases, billing changes or unrelated access changes are part of this release.
    assertion is not self-authenticating provenance. Verify it against the actual
    build/run and registry record. B may change only host/Action/docs outside
    image inputs. The source-bundle helper rejects any changed Docker input.
-5. Review B, rerun CI and verify a clean public consumer: prepare pulls rather
+5. Review B and rerun CI. Verify the authenticated private candidate first.
+    After durable sources are public and approved GHCR visibility is enabled,
+    verify a clean unauthenticated consumer: prepare pulls rather
    than builds, validates RepoDigests/platform, then scans using the same digest.
    No Git checkout, .NET SDK, NuGet, Cargo, registry login, package-write permission
    or private Docker config is needed by the released consumer. Python 3.11+,
    `/usr/bin/docker`, local socket and Linux amd64 remain required.
 6. Generate the final corresponding-source archive from exact A+B Git objects,
    not the workspace; verify hashes, exclusions and unpacked non-Git build.
-   Publish that archive, build/source inventory and checksums with the GitHub
-   release. Tag v0.1.0 at B; label the image revision **A**, never B. Promote the
+    Stage that archive, `base-source.tar`, exact source inventory, notices,
+    build record and fresh checksums on the draft GitHub v0.1.0 release. A draft
+    is not public source delivery: keep GHCR private. Publish the source-bearing
+    release, verify anonymous asset downloads/hashes, then enable approved GHCR
+    public access and verify an anonymous digest pull. Link source directions
+    next to binaries in the release and GHCR description; retain the assets.
+    Tag v0.1.0 at B; label the image revision **A**, never B. Promote the
    already validated digest to image tag v0.1.0 without rebuilding. Verify both
    remote exact identities. Never move/reuse v0.1.0 after publication.
 
@@ -48,7 +60,9 @@ allowlisted `.dockerignore`. Changing B's pin cannot change A's image payload.
 Candidate workflow artifacts contain only the validated image, allowlisted source,
 checksums and bounded public build record. They do not contain test logs/reports,
 owned cooks, private policies, credentials or environment dumps. Retention is
-three days; download and retain the approved records before they expire.
+three days; download and retain the approved records before they expire. They
+are authenticated staging, never a substitute for durable public source assets.
+Without a push, `build-record.json` explicitly records registry digest `PENDING`.
 
 ## Source and licenses
 

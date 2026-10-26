@@ -1,7 +1,16 @@
-name: Manually approved public image candidate
+name: Validate sources and optionally push private candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Push candidate only after reviewed validation and private-visibility check
+        type: boolean
+        default: false
+      private_visibility_confirmed:
+        description: Operator verified GHCR namespace is private (no automatic visibility change)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,8 +23,11 @@ jobs:
   validate:
     if: github.repository == 'Chiv2-Community/ue-pak-static-risk-analysis' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
+      - name: Reject publication without explicit private visibility acknowledgement
+        if: inputs.publish && !inputs.private_visibility_confirmed
+        run: exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
@@ -48,6 +60,10 @@ jobs:
         run: |
           mkdir "$RUNNER_TEMP/candidate"
           docker image inspect ue-pak-candidate:validated --format '{{.Id}}' > "$RUNNER_TEMP/candidate/image-id.txt"
+          test "$(docker image inspect ue-pak-candidate:validated --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect ue-pak-candidate:validated --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE"
+          test "$(docker image inspect ue-pak-candidate:validated --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = GPL-3.0-only
+          test "$(docker image inspect ue-pak-candidate:validated --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" = https://github.com/Chiv2-Community/ue-pak-static-risk-analysis
           docker version --format '{{.Client.Version}}/{{.Server.Version}}' > "$RUNNER_TEMP/candidate/docker-version.txt"
           CID="$(docker create ue-pak-candidate:validated)"
           trap 'docker rm "$CID" >/dev/null' EXIT
@@ -62,11 +78,29 @@ jobs:
           root = Path(os.environ['RUNNER_TEMP']) / 'candidate'
           assert sum(p.stat().st_size for p in root.rglob('*') if p.is_file()) <= 2 * 1024 * 1024
           PY
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --entrypoint /usr/local/bin/python3 \
+            --mount "type=bind,src=$PWD/scripts/release_image_probe.py,dst=/probe.py,readonly" \
+            ue-pak-candidate:validated /probe.py > "$RUNNER_TEMP/candidate/image-metadata.json"
+          docker build --platform linux/amd64 --target python --tag ue-pak-python:source-baseline .
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --entrypoint /usr/local/bin/python3 \
+            --mount "type=bind,src=$PWD/scripts/release_image_probe.py,dst=/probe.py,readonly" \
+            ue-pak-python:source-baseline /probe.py --python-stage > "$RUNNER_TEMP/candidate/python-stage-metadata.json"
+          python3 scripts/validate_release_image.py \
+            --actual "$RUNNER_TEMP/candidate/image-metadata.json" \
+            --python-stage "$RUNNER_TEMP/candidate/python-stage-metadata.json"
+          cp releases/v0.1.0/image-baseline.json "$RUNNER_TEMP/candidate/"
+          python3 scripts/collect_base_sources.py --output "$RUNNER_TEMP/candidate/base-sources"
           docker save ue-pak-candidate:validated | gzip -n > "$RUNNER_TEMP/candidate/image.tar.gz"
           python3 scripts/source_bundle.py --build-source "$SOURCE" --action-source "$SOURCE" \
             --uasset-repository vendor/UAssetAPI --output "$RUNNER_TEMP/candidate/source.tar.gz"
-          cd "$RUNNER_TEMP/candidate"
-          sha256sum image.tar.gz source.tar.gz image-id.txt > SHA256SUMS
+      - name: Record validated identities even without publication
+        env:
+          SOURCE: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: python3 scripts/release_record.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: validated-candidate
@@ -75,6 +109,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
   publish:
+    if: inputs.publish && inputs.private_visibility_confirmed
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -99,6 +134,7 @@ jobs:
           sha256sum --check SHA256SUMS
           docker load --input image.tar.gz
           test "$(docker image inspect ue-pak-candidate:validated --format '{{.Id}}')" = "$(cat image-id.txt)"
+          test "$(docker image inspect ue-pak-candidate:validated --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
           test "$(docker image inspect ue-pak-candidate:validated --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE"
           export DOCKER_CONFIG="$RUNNER_TEMP/publication-docker"
           mkdir -m 700 "$DOCKER_CONFIG"
@@ -115,41 +151,38 @@ jobs:
           docker push "$IMAGE"
           docker image inspect "$IMAGE" --format '{{json .RepoDigests}}' > repo-digests.json
           python3 - <<'PY'
-          import hashlib, json, os, re, tarfile
+          import hashlib, json, os, re
           from pathlib import Path
           namespace = 'ghcr.io/chiv2-community/ue-pak-static-risk-analysis'
           digests = json.loads(Path('repo-digests.json').read_bytes())
           matches = [d for d in digests if re.fullmatch(re.escape(namespace) + r'@sha256:[a-f0-9]{64}', d)]
           assert len(matches) == 1
-          with tarfile.open('source.tar.gz') as archive:
-              prefix = 'ue-pak-static-risk-analysis/'
-              manifest_bytes = archive.extractfile(prefix + 'SOURCE-MANIFEST.json').read()
-              manifest = json.loads(manifest_bytes)
-              dockerfile = archive.extractfile(prefix + 'Dockerfile').read().decode()
-          notices = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in
-                     [*Path('app-licenses').rglob('*'), Path('dotnet-LICENSE.txt'),
-                      Path('dotnet-ThirdPartyNotices.txt'), Path('CPython-LICENSE.txt'), Path('os-packages.tsv')]
-                     if p.is_file()}
-          record = {'version': 'v0.1.0-candidate', 'build-source': os.environ['SOURCE'],
-                    'platform': 'linux/amd64', 'image': matches[0], 'tag': os.environ['IMAGE'],
-                    'run-id': os.environ['RUN_ID'], 'run-attempt': os.environ['RUN_ATTEMPT'],
-                    'source-sha256': hashlib.sha256(Path('source.tar.gz').read_bytes()).hexdigest(),
-                    'source-manifest-sha256': hashlib.sha256(manifest_bytes).hexdigest(),
-                    'uassetapi-source': manifest['uassetapi-source'],
-                    'base-images': re.findall(r'^FROM (\S+)', dockerfile, re.MULTILINE),
-                    'lockfiles': [f for f in manifest['files'] if f['path'].endswith('packages.lock.json')],
-                    'notice-inventory-sha256': notices,
-                    'docker-client-server-version': Path('docker-version.txt').read_text().strip(),
-                    'image-id': Path('image-id.txt').read_text().strip(),
-                    'public-unauthenticated-pull': 'pending-operator-verification'}
+          record = json.loads(Path('build-record.json').read_bytes())
+          assert record['build-source'] == os.environ['SOURCE']
+          assert record['image'] == 'PENDING'
+          record['image'], record['tag'] = matches[0], os.environ['IMAGE']
           Path('build-record.json').write_text(json.dumps(record, sort_keys=True, indent=2) + '\n')
+          paths = sorted(p for p in Path('.').rglob('*') if p.is_file() and
+                         p.as_posix() not in {'SHA256SUMS', 'image.tar.gz', 'existing-manifest-error.txt'})
+          lines = []
+          for p in paths:
+              assert not p.is_symlink()
+              with p.open('rb') as data:
+                  lines.append(hashlib.file_digest(data, 'sha256').hexdigest() + '  ' + p.as_posix() + '\n')
+          Path('SHA256SUMS').write_text(''.join(lines))
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: public-candidate-record
+          name: private-candidate-record
           path: |
             ${{ runner.temp }}/candidate/build-record.json
             ${{ runner.temp }}/candidate/source.tar.gz
+            ${{ runner.temp }}/candidate/base-sources/
+            ${{ runner.temp }}/candidate/image-metadata.json
+            ${{ runner.temp }}/candidate/python-stage-metadata.json
+            ${{ runner.temp }}/candidate/image-baseline.json
+            ${{ runner.temp }}/candidate/image-id.txt
+            ${{ runner.temp }}/candidate/repo-digests.json
             ${{ runner.temp }}/candidate/SHA256SUMS
             ${{ runner.temp }}/candidate/os-packages.tsv
             ${{ runner.temp }}/candidate/app-licenses/
