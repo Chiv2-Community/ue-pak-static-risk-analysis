@@ -67,7 +67,18 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/action-test-venv"
           "$RUNNER_TEMP/action-test-venv/bin/pip" install -r tests/requirements.txt
-          export UE_PAK_CONTAINER_TEST_IMAGE="$(docker image ls --filter 'reference=ue-pak-action:*' --no-trunc --format '{{.ID}}' | head -n 1)"
+          export UE_PAK_CONTAINER_TEST_IMAGE="$(python3 - <<'PY'
+          import subprocess, sys
+          sys.path.insert(0, 'scripts')
+          import action
+          pinned = action.published_image()
+          if pinned:
+              print(pinned)
+          else:
+              print(subprocess.check_output(['docker', 'image', 'ls', '--filter', 'reference=ue-pak-action:*',
+                    '--no-trunc', '--format', '{{.ID}}'], text=True).splitlines()[0])
+          PY
+          )"
           test -n "$UE_PAK_CONTAINER_TEST_IMAGE"
           "$RUNNER_TEMP/action-test-venv/bin/python" -m unittest discover -s tests -p test_action.py -v
       # No artifact upload. CI reports stay in this disposable job's workspace.

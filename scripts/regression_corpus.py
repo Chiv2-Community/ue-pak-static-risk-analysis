@@ -3,6 +3,7 @@
 
 import argparse
 import copy
+from functools import cached_property
 import hashlib
 import itertools
 import json
@@ -131,6 +132,12 @@ class Run:
         self.sequence = 0
         self.receipts = []
 
+    @cached_property
+    def action_script(self):
+        # Local-image parity must not invoke the released, registry-pinned adapter.
+        from test_action import development_action
+        return development_action(self.root / "development-action")
+
     def command(self, args, *, env=None, timeout=30, codes=(0,), cwd=ROOT):
         self.sequence += 1
         prefix = self.root / f"process-{self.sequence:04d}"
@@ -257,7 +264,7 @@ def integrated(run, image, pak, expected, policy):
     config = run.root / "docker-config"
     config.mkdir()
     docker = scan.Docker(config, image, 30)
-    image = docker.image  # Action accepts the resolved immutable image identity.
+    image = docker.image  # Bind CLI and development Action parity to the selected local image.
     # Actual parser facts, then the actual direct evaluator: no alternate report producer.
     status, facts = docker.run(scan.mount(pak, "/input/submission"), "/usr/local/bin/python3",
         ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
@@ -281,7 +288,7 @@ def integrated(run, image, pak, expected, policy):
         output, summary = workspace / "outputs", workspace / "summary"
         output.touch()
         summary.touch()
-        logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+        logs = run.command([sys.executable, run.action_script, "scan"], env={
             "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": image,
             "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
             "INPUT_PAK": str(pak), "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game",
@@ -403,7 +410,7 @@ def capability_policy_gate(run, path, pak, catalog, policy, image):
     output, summary = workspace / "outputs", workspace / "summary"
     output.touch()
     summary.touch()
-    logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+    logs = run.command([sys.executable, run.action_script, "scan"], env={
         "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image,
         "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
         "INPUT_PAK": str(pak), "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game",
@@ -440,7 +447,7 @@ def call_chain_container_gate(run, image, pak, catalog, policy):
     output, summary = workspace / "outputs", workspace / "summary"
     output.touch()
     summary.touch()
-    logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+    logs = run.command([sys.executable, run.action_script, "scan"], env={
         "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image,
         "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
         "INPUT_PAK": str(pak), "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game",
@@ -584,7 +591,7 @@ def package_context_gate(run, image=None):
         workspace.mkdir()
         output, summary = workspace / "outputs", workspace / "summary"
         output.touch(); summary.touch()
-        logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+        logs = run.command([sys.executable, run.action_script, "scan"], env={
             "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image, "GITHUB_WORKSPACE": str(workspace),
             "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary), "INPUT_PAK": str(pak),
             "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game"}, timeout=120, codes=(1,), cwd=workspace)
@@ -686,7 +693,7 @@ def package_context_boundary_gate(run, mode, image=None):
         workspace.mkdir()
         output, summary = workspace / "outputs", workspace / "summary"
         output.touch(); summary.touch()
-        logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+        logs = run.command([sys.executable, run.action_script, "scan"], env={
             "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image, "GITHUB_WORKSPACE": str(workspace),
             "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary), "INPUT_PAK": str(pak),
             "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game"}, timeout=120, codes=(1,), cwd=workspace)

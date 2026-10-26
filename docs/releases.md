@@ -1,150 +1,121 @@
-# Controlled release preparation
+# v0.1.0 release preparation
 
-**No release, exact tag, registry package/image, public Action, source bundle or
-access change is authorized or published by this procedure.** #18 remains open
-for owner decisions and publication evidence. This is a manual checklist, not a
-publisher or an approval service. Existing workflows build/test locally only.
+The owner authorized original project code under GPL-3.0-only, a public GitHub
+v0.1.0 release, and a public Linux amd64 image at
+`ghcr.io/chiv2-community/ue-pak-static-risk-analysis:v0.1.0`.
+Third-party licenses remain unchanged. This checkout prepares that release;
+**no image digest, publication, public pull or final tag is claimed verified**.
+Only the parent operator publishes after review and green CI. No major/latest
+aliases, billing changes or unrelated access changes are part of this release.
 
-## Stop gates before any publication
+## Two source identities, no digest cycle
 
-Obtain explicit owner approval for the exact version, source, artifact set,
-licenses/rights, destinations, audiences and publication operator. Record it in
-restricted release records. Do not infer approval from a green test or merged PR.
+1. Review/merge core commit **A**: GPL, Docker notice copies, host support,
+   packaging, tests and the manual candidate workflow. No `action-image.json`
+   is checked in yet. The source-only Action retains its development build.
+2. After independent review, green CI and full local release validation, dispatch
+   `release-candidate.yml` on main at exactly A. The workflow has no source-ref
+   input; it checks out `github.sha`, builds Linux amd64, runs the serial public
+   component/Docker/Action/regression mutation gate, then transfers the validated
+   image to a separate `packages: write` job. Only that job logs in, using token
+   stdin and an isolated Docker config. It publishes `sha-<full-A>`, not v0.1.0.
+   Dispatch is an operator publication action, never automatic on push/PR.
+3. Verify effective GHCR visibility and an **unauthenticated** public pull from
+   an empty Docker config. Initial packages can be private: do not claim public
+   access from a successful authenticated publisher push. The parent owns the
+   expressly authorized public-package setting and remote digest verification.
+4. Commit **B** adds root `action-image.json` with exactly four keys:
+   `version` = `v0.1.0`, `platform` = `linux/amd64`, `build-source` = full A,
+   and `image` = canonical approved repository `@sha256:` registry digest.
+   Do not insert a placeholder production digest. This trusted Action-commit
+   assertion is not self-authenticating provenance. Verify it against the actual
+   build/run and registry record. B may change only host/Action/docs outside
+   image inputs. The source-bundle helper rejects any changed Docker input.
+5. Review B, rerun CI and verify a clean public consumer: prepare pulls rather
+   than builds, validates RepoDigests/platform, then scans using the same digest.
+   No Git checkout, .NET SDK, NuGet, Cargo, registry login, package-write permission
+   or private Docker config is needed by the released consumer. Python 3.11+,
+   `/usr/bin/docker`, local socket and Linux amd64 remain required.
+6. Generate the final corresponding-source archive from exact A+B Git objects,
+   not the workspace; verify hashes, exclusions and unpacked non-Git build.
+   Publish that archive, build/source inventory and checksums with the GitHub
+   release. Tag v0.1.0 at B; label the image revision **A**, never B. Promote the
+   already validated digest to image tag v0.1.0 without rebuilding. Verify both
+   remote exact identities. Never move/reuse v0.1.0 after publication.
 
-| Surface | Required owner decision and verification |
-| --- | --- |
-| Repository/release/tag/source archive | Keep current visibility unless explicitly approved; enumerate source/archive rights, readers, release attachments and immutable exact tag policy |
-| GHCR/other packages | Approve namespace, initial/effective visibility, inherited repository permissions and linked-repository behavior; verify intended readers before publishing any bytes |
-| Actions access | Approve named consumer repositories/organizations, runner/log audiences and exact pinned commit; test authorized external consumer before declaring it usable (#13) |
-| Workflow artifacts | Approve reader set, retention and storage ACL; no implicit/public upload, workspace archive or cooked fixture attachment |
-| Logs/summaries/outputs | Approve all readers including admins; ordinary env is not masked; no private verbose logs or policy-bearing setup output in publish jobs |
-| Credentials/permissions | Separate human-authorized publication identity/job; least privilege, no untrusted code, no policy/keys in build inputs; no automatic `packages: write` workflow |
+`action-image.json` is outside every Docker COPY input and excluded by the
+allowlisted `.dockerignore`. Changing B's pin cannot change A's image payload.
+Candidate workflow artifacts contain only the validated image, allowlisted source,
+checksums and bounded public build record. They do not contain test logs/reports,
+owned cooks, private policies, credentials or environment dumps. Retention is
+three days; download and retain the approved records before they expire.
 
-Current private Action access is `none`; an authorized external consumer is
-missing. Publication/visibility approvals have not been provided. Private registry
-pull/authentication is not implemented/tested by the local-build Action. If later
-approved, use the registry's managed credential store or stdin-based login, not
-tokens in argv; test scoped read access and exact digest pulls in the named
-consumer separately. Do not add registry credentials to parser/evaluator jobs.
+## Source and licenses
 
-## Version and immutable references
+Root [LICENSE](../LICENSE) contains the full GPLv3 text; original code is version
+3 **only**, not "or later". See [license review](../container/licenses/README.md)
+and [source/build instructions](../container/CORRESPONDING-SOURCE.md).
+The 35,149-byte text was compared byte-for-byte with
+`https://gnu.org/licenses/gpl-3.0.txt`; SHA-256 is
+`3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986`.
 
-Choose SemVer `MAJOR.MINOR.PATCH` after compatibility review. Breaking CLI, YAML,
-facts/report or Action contracts require a new major or an explicitly versioned
-compatible extension; fixes increment patch. A release candidate is not stable
-until its exact source/artifact set passes the checklist.
+The packaging helper reads only exact committed objects from an explicit tracked
+`container/source-files.txt` inventory and the pinned UAssetAPI library revision.
+It rejects symlinks, missing required inputs, mismatched gitlinks, changed image
+inputs between A/B, and oversized files. Its deterministic tar metadata and
+SHA-256 inventory are not a claim of reproducible binary digests. It includes
+the library's exact C# sources/csproj, LICENSE, NOTICE.md and README.md, not its
+borrowed fixtures, key/resource table or native binaries. Excluded resources
+are removed by the existing scanner build target. It never uses a generic
+Git archive with an omitted submodule.
 
-- Reserve `vMAJOR.MINOR.PATCH` as an immutable source tag; never move/delete/reuse
-  it. Pin Actions to its full reviewed commit, not a moving tag.
-- Record each **actual artifact's** SHA-256, byte size and producing source/build
-  record. A Git tag does not identify arbitrary DLL bytes or a local image.
-- Pin published images by registry `repository@sha256:...` manifest digest.
-  Record platform and per-platform digest when an index is involved. A local
-  Docker image ID is a config identity, not necessarily a registry manifest digest.
-- After approval, compatible major aliases (`vMAJOR`, image `MAJOR`) advance
-  alongside minor/patch releases. They are explicitly mutable discovery handles;
-  exact-version tags/digests and prior release records never move. Consumers
-  review new exact references and update pins on patches; aliases alone are not
-  provenance or review continuity. Avoid an unqualified `latest` recommendation.
+Local preparation only (replace A/B and paths with approved actual values):
 
-Pinned references are reproducible **identities**, not a claim of bit-for-bit
-rebuilds. Timestamps, managed assemblies and OS package state may vary. Record
-actual output hashes/digests and inventory for each build even from the same source.
+```sh
+python3 scripts/source_bundle.py --build-source FULL_COMMIT_A --action-source FULL_COMMIT_B \
+  --uasset-repository vendor/UAssetAPI --output /approved/new-source.tar.gz
+```
 
-## Prepare locally (no publication)
+Retain the original unmodified upstream notices. Inspect actual NuGet DLLs,
+CPython/.NET/base-OS notices and exact installed package versions from the **new**
+image. Retain applicable exact-version base component source records/availability;
+generic source links do not complete that check. Do not publish until source
+delivery and redistribution obligations for the selected artifacts are met.
+No engine source, game assets, mappings, AES/native keys, cooked binaries or
+production policies may enter the source bundle or public artifacts.
 
-1. Use a clean reviewed checkout at the intended full commit. Record `git rev-parse
-   HEAD`, `git status --porcelain`, `git submodule status --recursive` and
-   `git diff --submodule=log`; reject dirty/missing/mismatched submodules and
-   untracked build-context inputs. Record exact source/tool hashes and approval.
-   Never attach a generic whole-checkout/vendor/source archive without rights
-   approval (#2). Do not include Git credentials, keys, policies or environment.
-2. Review `global.json`, `.gitmodules` gitlinks, `src/**/packages.lock.json`,
-   project versions and all Dockerfile base **digests**. Locked restores are
-   required. If distributing the separate probe, also inventory pinned repak,
-   Cargo.lock and selected Rust licenses; it is not in the scanner image.
-3. Review redistribution for the exact selected artifacts. Retain UAssetAPI
-   license/NOTICE, Newtonsoft.Json, YamlDotNet/ZstdSharp.Port MIT, CPython and
-   copied Debian notices, .NET notices and Ubuntu package copyrights. Extract
-   actual `/licenses/os-packages.tsv` and accompanying notices from the built
-   image for restricted review; base tags or this static list are insufficient.
-   See [inventory paths](../container/licenses/README.md). No Oodle/native repak
-   binding is shipped. Inventory is not legal certification.
-   This checkout has no top-level source LICENSE; obtain an explicit owner
-   licensing/redistribution decision before distributing project binaries or
-   source archives. Private hosting is not a substitute for that decision.
-4. Build only from that clean, known tracked source snapshot using the reviewed
-   Dockerfile/allowlisted `.dockerignore`, with no policies/secrets or alternate
-   build instructions. Retain bounded build logs, source/dependency IDs, Docker
-   version, resolved base digests, build command and resulting image ID together.
-   Set the local test tag to this newly built image; record the resolved ID, not
-   merely `:dev`. No OCI revision label can prove an arbitrary image came from
-   that source. Existing images without a trustworthy build record are
-   **unverified; block release** until rebuilt and validated from clean source.
-5. Run the complete release path **serially**, with authorized existing owned
-   evidence; do not cook or load a game to complete this checklist:
+## Serial release gate
 
-   ```sh
-   docker build -t ue-pak-release-check:local .
-   IMAGE_ID="$(docker image inspect ue-pak-release-check:local --format '{{.Id}}')"
-   /tmp/opencode/pak-test-venv/bin/python scripts/regression_corpus.py \
-     --release --components --docker-image "$IMAGE_ID" \
-     --owned-evidence /approved/owned-fixture-evidence \
-     --output /tmp/opencode/new-release-check
-   ```
+Before publication, the parent builds the changed Dockerfile from reviewed A
+and runs the complete release path with authorized existing owned evidence:
 
-   Output must be new, external and private. `--release` is a test-strength flag,
-   **not publication approval**. Require completed receipt, no unintended skips,
-   all component suites, full report parity/privacy and all removal mutations.
-   Preserve exact commands/log hashes and owned receipt/verifier identities.
-   Review every changed bytecode offset, identity, argument, coverage, finding,
-   count and expectation before accepting it; never auto-update the oracle.
-6. Prepare a **local restricted release record**, versioned as a document (no new
-   packaging tool required): candidate version; source and submodule commits;
-   lockfile/base-digest/inventory hashes; build record and exact image ID;
-   existing artifact names/sizes/hashes; complete test receipt hash; license and
-   owner-review references; remaining gates. Do not record ordinary environment,
-   private absolute paths, policy text/fingerprints, credentials or engine assets.
-   Store restricted opaque evidence IDs in place of private storage locations.
-   Mark `prepared-only`, `publication-approved: false` until an owner acts.
-   Unverified source-to-image provenance must be explicit, never relabeled as
-   verified because a candidate version/source annotation was supplied.
+```sh
+docker build -t ue-pak-release-check:local .
+IMAGE_ID="$(docker image inspect ue-pak-release-check:local --format '{{.Id}}')"
+.venv/bin/python scripts/regression_corpus.py --release --components \
+  --docker-image "$IMAGE_ID" --owned-evidence /approved/owned-fixture-evidence \
+  --output /approved/new-release-check
+```
 
-## Separate human-approved publication (not executed)
+`--release` selects test strength, not publication authority. Require all component
+suites, full report/privacy parity and all removal mutations, with no unintended
+skips. CI's public synthetic gate does not replace the separately authorized
+owned-evidence gate. Preserve owned files and receipt hashes; do not cook, restore
+unknown deleted paths, or publish owned evidence. Existing images do not validate
+the new license COPY instructions. Never infer source provenance from labels alone.
 
-Only after all stop gates pass may an authorized operator create the approved
-immutable exact source tag and publish the individually approved artifacts/image
-from the validated source/build. Verify remote exact commit, artifact hashes,
-registry digest/platforms and effective access with the named consumer. Record
-those *actual* remote identities, not local tag assumptions. Then advance only
-the compatible major aliases, review consumers' patch pin updates, and archive
-the final approval/evidence record privately. Abort on any identity/access mismatch.
+Record A/B/UAssetAPI commits, actual image ID and registry digest, platform, run
+identity, Docker version, base digests, lockfile/license/inventory hashes, archive
+bytes/hash, test receipts and actual public consumer result. Keep private evidence
+outside the public build record. The parent retains review/merge/publication control.
 
-No automatic publisher, registry login command, broad sharing change or
-`packages: write` workflow is added here. No automatic source bundles. Never
-publish game/proprietary assets, engine code/images/caches, production policies,
-AES/native keys, mappings or owned cooked outputs on the strength of this guide.
+## Remaining limits
 
-## Evidence and remaining inputs
-
-The [regression/component record](regression-corpus.md) includes the completed
-local parent release-path run: `/tmp/opencode/corpus-parent-release/execution.json`,
-142 Scanner, 111 extraction, 110 Policy, 26 PolicyInput and 137 serial Python tests.
-This proves that recorded local gate, not publication or independent provenance
-of any differently built artifact. [Owned fixture provenance](owned-fixtures.md)
-is Linux UE4.25Plus, not exact Windows/game fidelity. #3/#4/#15 delivery is closed;
-those completed components do not remove the gates below.
-
-- #2: exact game/Windows producer coverage and broader redistribution rights.
-- #7: authorized exact-build source/header/reflection and reviewed native summaries.
-- #8: partial open-world indirect evidence only; exhaustive/context-linked callback
-  and exact-build native/wrapper coverage remain open ([scope](indirect-dispatch.md)).
-- #9–10: transitive and data/default effects remain unshipped.
-- #13: owner-authorized named external private Action consumer and access test.
-- #18: owner publication/version/destination/audience approval, selected artifact
-  rights review and verified publication identities. No approval is supplied.
-
-Catalog ownership and review invalidation follow [security.md](security.md#capability-ownership-and-review-invalidation)
-and [#16 moderation](moderation.md); release upgrades require rescan/review of
-changed context. [Runtime escalation](runtime-escalation.md) remains separately
-authorized human work, never a release workflow stage.
+This remains bounded partial static analysis, not malware absence or approval.
+Linux UE4.25Plus owned cooks do not prove exact Windows/game producer fidelity
+([compatibility](compatibility.md), #2). Exact-build native implementation analysis,
+exhaustive indirect dispatch, complete call chains and effective data/default
+behavior remain incomplete (#7–10). Public GHCR publication does not establish
+the historical named private-Action access gate (#13). Runtime escalation remains
+[separately authorized human work](runtime-escalation.md). PR #37 is held and
+excluded from this v0.1.0 baseline.

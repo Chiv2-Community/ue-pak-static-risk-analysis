@@ -10,7 +10,7 @@ It runs neither the game nor Unreal Editor. Analysis is not a safety verdict.
   or mutable tag. Replace `REVIEWED_40_HEX_COMMIT` below before use.
 - Use trusted workflow code and policy. Download only the submission **pak**, not
   submission code; never check out or execute a submitter's repository.
-- Use a disposable Linux VM with non-root Python 3.11+, Git, and local Docker at
+- Use a disposable Linux amd64 VM with non-root Python 3.11+ and local Docker at
   `/usr/bin/docker` and `/var/run/docker.sock`. Docker access grants host-admin
   power. No Docker-in-Docker, socket mount, registry credentials, or publish step
   is needed. No arbitrary image input is offered.
@@ -36,8 +36,12 @@ and test a named consumer before claiming cross-repository private-Action access
 Do not make the repository public to bypass this gate. Local same-repository CI
 tests do not verify private consumer access. #13 must remain open for this gate.
 
-Images are built locally, never pulled from a private registry or published.
-Private-image authentication is therefore not required or claimed verified.
+Release preparation now supports a public digest-pinned image. The real
+`action-image.json` pin is not checked in until the parent verifies the candidate;
+this core checkout still uses the source-development fallback. No public digest
+or successful external pull is claimed here. See [two-leg release](releases.md).
+Public image pulls use an empty temporary Docker config and HOME, never runner
+registry credentials. Private registry authentication is intentionally unsupported.
 
 ## Use
 
@@ -201,9 +205,30 @@ Exit behavior is inherited: 0 gates pass; 1 gate fails; 2 invalid configuration;
 3 runtime, image, report, or transport failure. Disabling incomplete/forbidden
 gates does not make incomplete/forbidden analysis safe.
 
+## Published image preparation
+
+The released Action reads the four-key root `action-image.json` from its selected
+trusted Action commit. It accepts only version `v0.1.0`, platform `linux/amd64`, a
+full lowercase build-source commit and the approved canonical GHCR repository
+with a lowercase SHA-256 **registry manifest digest**. It explicitly pulls that
+digest for Linux amd64 and requires the exact RepoDigests entry and platform.
+It never treats a local config/image ID as a registry digest. The scan step
+accepts only the pinned result when this manifest exists.
+
+Malformed, duplicate-key, symlinked or unsupported manifests fail closed, without
+falling back to a build or arbitrary image. There is no image input or runner
+registry login. Preparation strips tokens, Docker/Git config, SSH agent, private
+policy and ordinary runner environment from Docker child processes. Only public
+network access for the image pull is required; scans retain network denial.
+The manifest is an assertion of the reviewed Action commit, not cryptographic
+authentication of source provenance. Review it against the actual build record.
+
 ## Archive-safe build
 
-GitHub's downloaded Action archive may omit submodules. Preparation always fetches
+Only source-development checkouts **without** `action-image.json` use this path.
+Tests can call `prepare_local()` explicitly. Releases must ship a verified manifest.
+
+GitHub's downloaded Action archive may omit submodules. Development preparation fetches
 the public UAssetAPI source at
 `b4e8a012939295a6fd890ddc64e57ea78b709b95` from
 `https://github.com/atenfyr/UAssetAPI.git` into an isolated temporary checkout.
@@ -215,7 +240,7 @@ Dockerfile's pinned/locked dependencies. Public network access is needed during
 preparation; scans themselves retain the wrapper's network-free containment.
 Preparation failure still reaches the adapter's failed-output path.
 
-Each invocation builds a unique local tag; the wrapper resolves its immutable
+Each development invocation builds a unique local tag; the wrapper resolves its immutable
 identity before scanning. No local images are pruned automatically. Disposable
 workers provide cleanup and stronger tenant separation than shared Docker hosts.
 

@@ -457,6 +457,8 @@ class DataPolicyTests(unittest.TestCase):
             config = root / "docker"
             config.mkdir()
             identity = scan.Docker(config, image, 60).image
+            from test_action import development_action
+            action_script = development_action(root / "development-action")
             output, summary = root / "outputs", root / "summary"
             output.touch(); summary.touch()
             env = dict(self.env, GITHUB_WORKSPACE=str(root), GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(summary),
@@ -469,7 +471,7 @@ class DataPolicyTests(unittest.TestCase):
                 with self.subTest(action_alias=context):
                     alias_output, alias_summary = root / "alias-outputs", root / "alias-summary"
                     alias_output.write_bytes(b""); alias_summary.write_bytes(b"")
-                    rejected = subprocess.run([sys.executable, str(ROOT / "scripts/action.py"), "scan"],
+                    rejected = subprocess.run([sys.executable, str(action_script), "scan"],
                         env=dict(env, INPUT_REPORT="action-alias-report", INPUT_DATA_CONTEXT=context,
                                  INPUT_LOG_LEVEL="verbose", GITHUB_OUTPUT=str(alias_output), GITHUB_STEP_SUMMARY=str(alias_summary)),
                         capture_output=True, timeout=30)
@@ -481,7 +483,7 @@ class DataPolicyTests(unittest.TestCase):
                         for secret in (b"operator-rule-canary", b"operator-flag-canary", b"private-data-canary",
                                        sha(self.paks["baseline"].read_bytes()).encode(), sha(rules.read_bytes()).encode()):
                             self.assertNotIn(secret, data)
-            actual = subprocess.run([sys.executable, str(ROOT / "scripts/action.py"), "scan"], env=env, capture_output=True, timeout=240)
+            actual = subprocess.run([sys.executable, str(action_script), "scan"], env=env, capture_output=True, timeout=240)
             self.assertEqual(1, actual.returncode)
             adapted = reports.load((root / "action-report").read_bytes(), ROOT)
             self.assertEqual(report["data-analysis"], adapted["data-analysis"])

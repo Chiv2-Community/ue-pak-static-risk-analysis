@@ -1,5 +1,5 @@
 name: UE pak static-risk scan
-description: Scan an untrusted pak using a trusted host wrapper and isolated local Docker containers. Not a safety verdict.
+description: Scan an untrusted pak in isolated Docker containers; pinned public prebuilt release image or source-only development build. Not a safety verdict.
 inputs:
   pak:
     description: Path to a pak file on the trusted Linux runner. Never check out submission code.
@@ -113,7 +113,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Prepare trusted local scanner image
+    - name: Prepare trusted scanner image
       id: prepare
       continue-on-error: true
       shell: bash

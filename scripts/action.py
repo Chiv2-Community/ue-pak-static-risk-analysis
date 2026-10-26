@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """GitHub adapter for the trusted host wrapper. Never interpret policy YAML."""
 
+import json
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,40 @@ from action_report import compact, load, require
 ROOT = Path(__file__).resolve().parents[1]
 UASSET = "b4e8a012939295a6fd890ddc64e57ea78b709b95"
 OUTPUT_BUDGET = 256 * 1024  # UTF-16 bytes, combined outputs; below the 1 MiB/job limit.
+PUBLISHED_IMAGE = r"ghcr\.io/chiv2-community/ue-pak-static-risk-analysis@sha256:[a-f0-9]{64}"
+
+
+def published_image():
+    """The selected trusted Action commit supplies this assertion, not the runner."""
+    path = ROOT / "action-image.json"
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        require(not path.is_symlink())
+        return None
+    with os.fdopen(fd, "rb") as stream:
+        require(stat.S_ISREG(os.fstat(stream.fileno()).st_mode))
+        data = stream.read(4097)
+    return image_manifest(data)["image"]
+
+
+def image_manifest(data):
+    """Closed release assertion, shared with corresponding-source packaging."""
+    require(len(data) <= 4096)
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            require(key not in result)
+            result[key] = value
+        return result
+    value = json.loads(data, object_pairs_hook=pairs)
+    require(isinstance(value, dict) and set(value) ==
+            {"version", "platform", "image", "build-source"})
+    require(value["version"] == "v0.1.0" and value["platform"] == "linux/amd64")
+    require(isinstance(value["build-source"], str) and
+            re.fullmatch(r"[a-f0-9]{40}", value["build-source"]) is not None)
+    require(isinstance(value["image"], str) and re.fullmatch(PUBLISHED_IMAGE, value["image"]) is not None)
+    return value
 
 
 def environment(policy=False):
@@ -42,6 +77,36 @@ def encode_outputs(outputs):
 
 
 def prepare():
+    image = published_image()
+    if image is None:
+        return prepare_local()
+    with tempfile.TemporaryDirectory(prefix="pak-action-pull-") as temporary:
+        stage = Path(temporary)
+        config, home = stage / "docker", stage / "home"
+        config.mkdir()
+        home.mkdir()
+        env = environment()
+        env["HOME"] = str(home)
+        docker = ["/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "--config", str(config)]
+        subprocess.run(docker + ["pull", "--platform", "linux/amd64", image], env=env,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True, timeout=300)
+        result = subprocess.run(docker + ["image", "inspect", "--format",
+                                         "{{json .RepoDigests}}", image], env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, check=True, timeout=30)
+        require(len(result.stdout) <= 16384)
+        digests = json.loads(result.stdout)
+        require(isinstance(digests, list) and image in digests)
+        result = subprocess.run(docker + ["image", "inspect", "--format",
+                                         "{{.Os}}/{{.Architecture}}", image], env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, check=True, timeout=30)
+        require(result.stdout.strip() == b"linux/amd64")
+        append(os.environ["GITHUB_OUTPUT"], f"image={image}\n".encode("ascii"))
+
+
+def prepare_local():
     """Rehydrate only the pinned public dependency, even for an Action archive."""
     with tempfile.TemporaryDirectory(prefix="pak-action-build-") as temporary:
         stage = Path(temporary)
@@ -62,7 +127,7 @@ def prepare():
         for command in commands:
             subprocess.run(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, check=True, timeout=180)
-        for name in ("Dockerfile", ".dockerignore", "global.json", "src", "container", "pak_ingest"):
+        for name in ("Dockerfile", ".dockerignore", "LICENSE", "global.json", "src", "container", "pak_ingest"):
             source_path = ROOT / name
             if source_path.is_dir():
                 shutil.copytree(source_path, context / name,
@@ -164,7 +229,11 @@ def scan():
         # Internal prepare-step output, not an Action input.
         reason = "image-preparation-failed"
         image = os.environ["UE_PAK_ACTION_IMAGE"]
-        require(re.fullmatch(r"(?:ue-pak-action:[a-f0-9]{32}|sha256:[a-f0-9]{64})", image) is not None)
+        pinned = published_image()
+        if pinned is not None:
+            require(image == pinned)
+        else:
+            require(re.fullmatch(r"(?:ue-pak-action:[a-f0-9]{32}|sha256:[a-f0-9]{64})", image) is not None)
         reason = "invalid-action-configuration"
         args = [sys.executable, str(ROOT / "scripts/scan.py"), "scan", "--pak", os.environ.get("INPUT_PAK", ""),
                 "--report", str(target), "--image", image]
@@ -218,8 +287,8 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["prepare"]:
         try:
             prepare()
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-            print("Trusted local image preparation failed; check Docker and public dependency connectivity.", file=sys.stderr)
+        except (OSError, ValueError, KeyError, RecursionError, subprocess.SubprocessError):
+            print("Trusted image preparation failed; check the image manifest, Docker and public connectivity.", file=sys.stderr)
             sys.exit(3)
     elif sys.argv[1:] == ["scan"]:
         sys.exit(scan())

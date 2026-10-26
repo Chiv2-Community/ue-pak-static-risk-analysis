@@ -1,4 +1,4 @@
-# Local builds only. No policy, engine, game files, keys, or repak native bindings.
+# No policy, engine, game files, keys, or repak native bindings.
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble@sha256:747cbade5bfd918a175ac32f8f1d931edec2c7d0d5397a3de72eaef1ac1f66d2 AS build
 WORKDIR /source
 COPY global.json ./
@@ -23,10 +23,17 @@ FROM mcr.microsoft.com/dotnet/runtime:10.0-noble@sha256:0cf09aaccf6a9f68900aed4c
 COPY --from=python /usr/local/ /usr/local/
 COPY --from=python /usr/share/doc/ /licenses/python-os/
 COPY --from=build /out/ /app/
+COPY LICENSE /app/licenses/ue-pak-static-risk-analysis-GPL-3.0-only.txt
+COPY container/CORRESPONDING-SOURCE.md /app/licenses/CORRESPONDING-SOURCE.md
 COPY pak_ingest/ /app/pak_ingest/
 COPY container/licenses/ /licenses/dependencies/
 WORKDIR /app
 RUN /usr/local/bin/python3 -c 'import hashlib,zlib,resource,subprocess,json,tempfile,selectors; assert zlib.decompress(zlib.compress(b"check")) == b"check"' \
+    && test -s /usr/local/lib/python3.12/LICENSE.txt \
+    && test -s /usr/share/dotnet/LICENSE.txt \
+    && test -s /usr/share/dotnet/ThirdPartyNotices.txt \
+    && test -d /licenses/python-os \
+    && test -d /usr/share/doc \
     && dpkg-query -W -f='${Package}\t${Version}\n' > /licenses/os-packages.tsv \
     && mkdir /scratch /input /policy \
     && chmod 1777 /scratch

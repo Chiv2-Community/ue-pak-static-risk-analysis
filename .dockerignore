@@ -1,6 +1,7 @@
 **
 !Dockerfile
 !global.json
+!LICENSE
 !src/
 !src/**
 src/**/bin/
