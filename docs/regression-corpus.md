@@ -51,6 +51,7 @@ producer output. There is no baseline-update mode.
 | Synthetic `Map.umap` | Native VM 0; extension/routing only, not an engine Level Blueprint | Same generator |
 | Synthetic `Unresolved` | Earlier call retained; virtual VM 10 remains unresolved; separate possible `DynamicDispatch` forbid | Same generator |
 | Synthetic `Unsupported` | Earlier call retained; lossy ANSI string rejects later root/offset evidence | Same generator |
+| Same-pak class context | Five separate packages; override/interface/unknown-receiver candidates, unrelated name collisions and possible upstream witnesses | `tests/PackageContextFixture.cs`; `fixtures/corpus/package-context-expectations.json` |
 | Aggregate policy | 10 calls, 6 forbidden, 1 flagged, 7 affected; all three global gaps and evaluation uncertainty | `fixtures/corpus/policy.yaml` |
 | Hostile archives | 16 seeded truncations, traversal, case collision, expansion bomb rejected; valid control accepted | Runner and existing pak builder |
 | Boundary properties | 32 seeded iterations each: YAML/AST roundtrip and invalid schema, serialized bytecode offsets/truncation, facts roundtrip/duplicate keys, invalid output locations | Generator/runner; seed `150425` |
@@ -75,6 +76,9 @@ not engine-cooked**, even when a synthetic package uses the `.umap` extension.
   finding and adjust counts; suppress `unsupported-parsing`; remove possible
   dispatch evidence. All remain
   schema-valid and must fail the independent expectation checker.
+- Two additional schema-valid mutations remove a reviewed data finding and a
+  cross-package override candidate. Five removal mutations run in total; the
+  archive candidate oracle checks identities/provenance/origins, not just counts.
 - All eight gate combinations must preserve report evidence. File/environment
   sources and error/warn/info/verbose must produce identical reports. Malformed
   policy, source conflicts/missing sources and invalid configuration fail closed.

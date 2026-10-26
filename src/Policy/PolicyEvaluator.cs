@@ -268,7 +268,7 @@ public sealed class PolicyEvaluator
                     if (candidate is null || !PolicyYaml.IsOwner(candidate.Owner) || !PolicyYaml.IsIdentifier(candidate.Function)
                         || !string.Equals(candidate.Function, dispatch.FunctionName, StringComparison.OrdinalIgnoreCase)
                         || !seen.Add((candidate.Owner, candidate.Function))
-                        || candidate.Provenance is not ("local-function" or "inherited-function" or "override" or "interface-implementation" or "imported-function")) InvalidFacts();
+                        || candidate.Provenance is not ("local-function" or "inherited-function" or "override" or "interface-implementation" or "imported-function" or "archive-function")) InvalidFacts();
             }
         }
         foreach (var fact in analysis!.Invocations)

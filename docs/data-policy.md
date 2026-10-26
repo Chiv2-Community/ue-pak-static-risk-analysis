@@ -5,6 +5,8 @@ reviewed structural matches. No name, URL or command heuristic is used. No game
 catalog is bundled. **#10 remains open:** cross-package effective defaults,
 reflection/native implementations and exact-game property-purpose metadata are
 not established.
+Same-pak dispatch hierarchy linking does not change this boundary or supply
+effective cross-package CDO/default values to data rules.
 
 ## Configuration and gates
 

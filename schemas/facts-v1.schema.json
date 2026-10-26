@@ -91,7 +91,7 @@
         "candidates": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {
           "type": "object", "additionalProperties": false, "required": ["owner", "function", "provenance"],
           "properties": {"owner": {"type": "string", "maxLength": 4096, "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$"}, "function": {"type": "string", "maxLength": 4096, "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
-            "provenance": {"enum": ["local-function", "inherited-function", "override", "interface-implementation", "imported-function"]}}
+            "provenance": {"enum": ["local-function", "inherited-function", "override", "interface-implementation", "imported-function", "archive-function"]}}
         }},
         "diagnostics": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {
           "enum": ["open-world", "receiver-unavailable", "parent-unavailable", "class-cycle", "target-name-unavailable", "target-metadata-unavailable", "target-expansion-limit", "native-build-unverified", "binding-flow-unresolved", "dependency-context-unavailable", "interface-context-unavailable", "class-metadata-unavailable", "unbound-delegate"]

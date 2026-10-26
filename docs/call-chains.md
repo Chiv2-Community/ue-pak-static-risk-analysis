@@ -4,6 +4,10 @@ Partial #9 implementation, **not closure of #7–9**. Exact-game native summarie
 authorized build verification, cross-package dependency/hierarchy completeness
 and flow-sensitive callbacks remain unproved. No game, native code or mod executes.
 
+Same-submission [archive hierarchy linking](indirect-dispatch.md#same-archive-context)
+now augments possible edges. This does not establish external dependency closure
+or promote a possible upstream witness to a definite capability.
+
 ## Inputs and trust
 
 `--capability-summaries FILE` is optional on `evaluate`, `validate` and host `scan`;

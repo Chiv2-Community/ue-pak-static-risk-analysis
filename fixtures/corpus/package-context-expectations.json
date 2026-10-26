@@ -1,0 +1,30 @@
+{
+  "serialized-sha256": {
+    "Base.uasset": "4b9b2a32b884e32421c053b28e1c9691dfdbc024f78dde8f256b2d099a91132f",
+    "Base.uexp": "65afea52c9340d4024f2fe40df6556c9740b94df66dae33fc80d9700da42008e",
+    "Caller.uasset": "37c426bdf499f205f7aab066b147e9cfeb38294ba353129efe02cd43b88045ac",
+    "Caller.uexp": "69cf6dbbf0a8e7e5a3e939f96588e1a18520e0977427268088fd152390d21b68",
+    "ChildOverride.uasset": "d06800f300673d48dbc7498347e2a05a87078d4f9ee87fc2477ed7db590e0717",
+    "ChildOverride.uexp": "c36641066c27829264ba745d297a74303d96129fe349d5e9fcf271b466c5b3d3",
+    "Collision.uasset": "5e5b0b5da4c87a7a8915f83f4675b07c169dc09fe1370d35c9cd612df9813c3a",
+    "Collision.uexp": "2917819864dfc5833c3d7b034b72be2921d30db51e64ea70a26a62ed53ce0d04",
+    "Interface.uasset": "9d94cf4e65e538e2659eb9c364314c374b81b1ca43b06f38264118fea1504afb",
+    "Interface.uexp": "3e05d37135b31718a72347ed76c68c520c1484ab0bcdfb4871a5db6529d6bdb2"
+  },
+  "invocations": 5,
+  "forbidden": 1,
+  "dispatches": [
+    {"function": "/Game/Base.Type:Run#4", "offset": 0, "candidates": [
+      {"owner": "/Game/Base.Type", "function": "Sensitive", "provenance": "local-function"},
+      {"owner": "/Game/ChildOverride.Type", "function": "Sensitive", "provenance": "override"}]},
+    {"function": "/Game/Caller.Caller:Run#5", "offset": 22, "candidates": [
+      {"owner": "/Game/Base.Type", "function": "Sensitive", "provenance": "inherited-function"},
+      {"owner": "/Game/ChildOverride.Type", "function": "Sensitive", "provenance": "override"}]},
+    {"function": "/Game/Caller.Caller:Run#5", "offset": 58, "candidates": [
+      {"owner": "/Game/ChildOverride.Type", "function": "Sensitive", "provenance": "interface-implementation"}]},
+    {"function": "/Game/Caller.Caller:Run#5", "offset": 86, "candidates": [
+      {"owner": "/Game/Base.Type", "function": "Sensitive", "provenance": "archive-function"},
+      {"owner": "/Game/ChildOverride.Type", "function": "Sensitive", "provenance": "archive-function"},
+      {"owner": "/Game/Collision.Type", "function": "Sensitive", "provenance": "archive-function"}]}
+  ]
+}
