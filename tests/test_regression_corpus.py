@@ -12,7 +12,7 @@ import regression_corpus as corpus
 
 class CorpusRunnerTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix="corpus-guards-", dir="/tmp/opencode" if Path("/tmp/opencode").is_dir() else None)
+        self.directory = tempfile.TemporaryDirectory(prefix="corpus-guards-")
         self.root = Path(self.directory.name)
 
     def tearDown(self):

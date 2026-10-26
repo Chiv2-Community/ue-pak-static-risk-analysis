@@ -262,7 +262,18 @@ class ActionTests(unittest.TestCase):
 class ReportValidationTests(unittest.TestCase):
     def test_schema_evolution_cannot_silently_weaken_validation(self):
         with self.assertRaises(ValueError):
-            action_report.check_schema({"properties": {"item": {"not": {"const": "forbidden"}}}})
+            action_report.check_schema({"properties": {"item": {"unevaluatedProperties": False}}})
+
+    def test_supported_schema_combinators_enforce_each_branch(self):
+        from report_validation import matches
+        schema = {"anyOf": [{"not": {"const": "forbidden"}},
+                            {"type": "array", "contains": {"const": "required"}}]}
+        action_report.check_schema(schema)
+        for value, valid in (("forbidden", False), ("allowed", True), (["required"], True)):
+            self.assertEqual(valid, matches(value, schema, schema, {}))
+        for value, valid in (([], False), (["other"], False), (["required"], True)):
+            child = schema["anyOf"][1]
+            self.assertEqual(valid, matches(value, child, schema, {}))
 
     def test_schema_and_duplicate_unicode_depth_count_bounds(self):
         self.assertEqual(report(), action_report.load(json.dumps(report()).encode(), ROOT))

@@ -36,14 +36,15 @@ def check_schema(schema):
     require(schema.keys() <= {"$schema", "$id", "title", "description", "$defs", "$ref", "type",
                               "const", "enum", "required", "properties", "additionalProperties",
                               "minimum", "maximum", "minLength", "maxLength", "pattern",
-                              "minItems", "maxItems", "uniqueItems", "items", "allOf", "oneOf", "if", "then"})
+                              "minItems", "maxItems", "uniqueItems", "items", "contains", "not",
+                              "allOf", "anyOf", "oneOf", "if", "then"})
     for key in ("properties", "$defs"):
         for child in schema.get(key, {}).values():
             check_schema(child)
-    for key in ("items", "if", "then"):
+    for key in ("items", "contains", "not", "if", "then"):
         if key in schema:
             check_schema(schema[key])
-    for key in ("allOf", "oneOf"):
+    for key in ("allOf", "anyOf", "oneOf"):
         for child in schema.get(key, []):
             check_schema(child)
 
@@ -82,6 +83,8 @@ def validate(value, schema, document, documents):
         if "items" in schema:
             for item in value:
                 validate(item, schema["items"], document, documents)
+        if "contains" in schema:
+            require(any(matches(item, schema["contains"], document, documents) for item in value))
     elif isinstance(value, str):
         require(schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", len(value)))
         if "pattern" in schema:
@@ -91,6 +94,10 @@ def validate(value, schema, document, documents):
         require(schema.get("minimum", value) <= value <= schema.get("maximum", value))
     for child in schema.get("allOf", []):
         validate(value, child, document, documents)
+    if "anyOf" in schema:
+        require(any(matches(value, child, document, documents) for child in schema["anyOf"]))
+    if "not" in schema:
+        require(not matches(value, schema["not"], document, documents))
     if "oneOf" in schema:
         require(sum(matches(value, child, document, documents) for child in schema["oneOf"]) == 1)
     if "if" in schema and matches(value, schema["if"], document, documents):
@@ -167,7 +174,27 @@ def load(data, root, *, moderator_detail=False):
     incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
                       or report.get("content-policy", {}).get("incomplete", False)
                       or not report.get("data-analysis", {}).get("complete", True)
-                      or not report.get("call-chains", {}).get("complete", True))
+                      or not report.get("call-chains", {}).get("complete", True)
+                      or not report.get("capability-analysis", {}).get("complete", True))
+    if "capability-analysis" in report:
+        capability = report["capability-analysis"]
+        require(capability["complete"] == (not capability["diagnostics"]))
+        witnesses = report.get("call-chains", {}).get("witnesses", [])
+        seen = set()
+        for finding in capability["findings"]:
+            index = finding["witness"]
+            require(index < len(witnesses) and index not in seen)
+            seen.add(index)
+            witness = witnesses[index]
+            require(witness["endpoint"]["capability"] is not None)
+            require(any(finding[k] for k in ("flagged", "forbidden", "possibly-flagged", "possibly-forbidden")))
+            require(witness["resolution"] != "possible" or not (finding["flagged"] or finding["forbidden"]))
+        uncertain = capability["possibly-flagged"] or capability["possibly-forbidden"] or any(
+            f["possibly-flagged"] or f["possibly-forbidden"] for f in capability["findings"])
+        require(not uncertain or not capability["complete"])
+        decision = "reject" if any(f["forbidden"] for f in capability["findings"]) else (
+            "needs-review" if capability["findings"] or uncertain else "no-match")
+        require(capability["decision"] == decision)
     if "data-analysis" in report:
         data = report["data-analysis"]
         require(data["complete"] == (not data["diagnostics"]))

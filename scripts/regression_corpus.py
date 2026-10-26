@@ -345,6 +345,77 @@ def call_chain_gate(run, image=None):
         raise ValueError("call-chain evidence substitution accepted")
     if image:
         call_chain_container_gate(run, image, pak, catalog, policy)
+    capability_policy_gate(run, path, pak, catalog, policy, image)
+
+
+def capability_policy_oracle(report):
+    analysis = report["capability-analysis"]
+    require(analysis["decision"] == "reject" and not analysis["complete"], "capability rule gate lost")
+    require(analysis["possibly-flagged"] and analysis["possibly-forbidden"], "unlocated uncertainty lost")
+    require(len(analysis["findings"]) == 4, "capability rule witness finding removed")
+    direct = [f for f in analysis["findings"] if f["flagged"] and f["forbidden"]]
+    possible = [f for f in analysis["findings"] if f["possibly-flagged"] and f["possibly-forbidden"]]
+    require(len(direct) == 3 and len(possible) == 1, "capability effect removed or upgraded")
+    require(report["counts"] == {"invocations": 6, "flagged": 0, "forbidden": 0, "affected-union": 0}, "capability inflated invocation counts")
+
+
+def capability_policy_gate(run, path, pak, catalog, policy, image):
+    rules = ROOT / "examples/capability-rules-v1.json"
+    extra = ["--capability-summaries", catalog, "--capability-rules", rules,
+             "--capability-policy-revision", "illustrative-only-v1"]
+    report = run.evaluate(path, policy=policy, extra=extra)
+    capability_policy_oracle(report)
+    for name in ("removed-capability-finding", "removed-capability-effect"):
+        mutant = copy.deepcopy(report)
+        if name == "removed-capability-finding":
+            mutant["capability-analysis"]["findings"].pop(0)
+        else:
+            mutant["capability-analysis"]["findings"][0]["forbidden"] = False
+        report_validation.load(json.dumps(mutant).encode(), ROOT)
+        try:
+            capability_policy_oracle(mutant)
+        except ValueError:
+            continue
+        raise ValueError("oracle accepted " + name)
+    if not image:
+        return
+    import scan
+    config = run.root / "capability-docker-config"
+    config.mkdir()
+    docker = scan.Docker(config, image, 30)
+    status, facts = docker.run(scan.mount(pak, "/input/submission"), "/usr/local/bin/python3",
+        ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+    require(status == 0 and facts, "capability parser failed")
+    parsed = run.root / "capability-container-facts.json"
+    parsed.write_bytes(facts)
+    direct = run.evaluate(parsed, policy=policy, extra=extra)
+    capability_policy_oracle(direct)
+    destination, receipt = run.root / "capability-report.json", run.root / "capability-private-context.json"
+    run.command([sys.executable, ROOT / "scripts/scan.py", "scan", "--pak", pak, "--report", destination,
+        "--engine-version", "4.25", "--image", docker.image, "--content-root", "Content=/Game",
+        *extra, "--capability-context", receipt], env={"UE_PAK_POLICY_RULES": policy}, timeout=120, codes=(1,))
+    require(report_validation.load(destination.read_bytes(), ROOT) == direct, "capability wrapper parity")
+    private = json.loads(receipt.read_bytes())
+    require(private["report-sha256"] == digest(destination.read_bytes()), "capability private report binding")
+    require(private["dependencies"] == [{"kind": "capability-rules", "sha256": digest(rules.read_bytes())}], "capability private rule binding")
+    workspace = run.root / "capability-action"
+    workspace.mkdir()
+    output, summary = workspace / "outputs", workspace / "summary"
+    output.touch()
+    summary.touch()
+    logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+        "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image,
+        "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
+        "INPUT_PAK": str(pak), "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game",
+        "INPUT_CAPABILITY_SUMMARIES": str(catalog), "INPUT_CAPABILITY_RULES": str(rules),
+        "INPUT_CAPABILITY_POLICY_REVISION": "illustrative-only-v1", "INPUT_CAPABILITY_CONTEXT": "private-context.json"
+    }, timeout=120, codes=(1,), cwd=workspace)
+    raw = (workspace / "report.json").read_bytes()
+    require(report_validation.load(raw, ROOT) == direct, "capability Action parity")
+    public = raw + output.read_bytes() + summary.read_bytes() + b"".join(logs)
+    for canary in (b"illustrative-review", b"illustrative-reject", b"illustrative-only-v1", digest(rules.read_bytes()).encode()):
+        require(canary not in public, "private capability policy exposed")
+    require(json.loads((workspace / "private-context.json").read_bytes()) == private, "capability Action private receipt parity")
 
 
 def call_chain_container_gate(run, image, pak, catalog, policy):
@@ -698,7 +769,7 @@ def main():
         if args.components:
             components(run, args.docker_image, args.owned_evidence)
         completed = True
-        print("PASS: integrated synthetic corpus; five removal mutations rejected; Docker=" + str(bool(args.docker_image))
+        print("PASS: integrated synthetic corpus; seven removal mutations rejected; Docker=" + str(bool(args.docker_image))
               + "; external owned cook=" + str(bool(args.owned_evidence)))
         return 0
     finally:

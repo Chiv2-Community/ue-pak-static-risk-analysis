@@ -1,0 +1,9 @@
+{
+  "schema-version": 1,
+  "disclosure": "private",
+  "revision": "illustrative-only-v1",
+  "rules": [
+    {"id": "illustrative-review", "capability": "fixture-opaque-boundary", "effect": "flag", "caller": null},
+    {"id": "illustrative-reject", "capability": "fixture-opaque-boundary", "effect": "forbid", "caller": null}
+  ]
+}
