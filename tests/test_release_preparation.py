@@ -112,7 +112,17 @@ class PublishedImageTests(unittest.TestCase):
         import yaml
         workflow = yaml.safe_load((ROOT / ".github/workflows/release-candidate.yml").read_text())
         triggers = workflow.get("on", workflow.get(True))  # PyYAML YAML 1.1 boolean key.
-        self.assertEqual({"workflow_dispatch": None}, triggers)
+        inputs = triggers['workflow_dispatch']['inputs']
+        self.assertIs(False, inputs['publish']['default'])
+        self.assertIs(False, inputs['private_visibility_confirmed']['default'])
+        self.assertEqual('inputs.publish && inputs.private_visibility_confirmed', workflow['jobs']['publish']['if'])
+        self.assertNotIn('packages', workflow['permissions'])
+        validation = '\n'.join(s.get('run', '') for s in workflow['jobs']['validate']['steps'])
+        self.assertNotIn('docker login', validation)
+        self.assertNotIn('docker push', validation)
+        self.assertIn('scripts/collect_base_sources.py', validation)
+        self.assertIn('scripts/validate_release_image.py', validation)
+        self.assertIn('scripts/release_record.py', validation)
         self.assertEqual({"contents": "read"}, workflow["permissions"])
         self.assertNotIn("permissions", workflow["jobs"]["validate"])
         self.assertEqual("write", workflow["jobs"]["publish"]["permissions"]["packages"])

@@ -21,7 +21,10 @@ CONTAINER_FILES = {"container/ExcludeUnused.targets", "container/CORRESPONDING-S
 SCRIPT_FILES = {"scripts/" + name + ".py" for name in
                 ("action", "action_report", "report_validation", "scan", "moderation",
                  "probe_pak", "regression_corpus", "owned_fixture_usmap", "cook_owned_fixtures",
-                 "escalation_canary", "source_bundle")}
+                  "escalation_canary", "source_bundle", "collect_base_sources", "release_image_probe",
+                  "validate_release_image", "release_record")}
+RELEASE_FILES = {"releases/v0.1.0/" + name for name in
+                 ("README.md", "source-inventory.json", "image-baseline.json")}
 FIXTURE_FILES = {"fixtures/corpus/expectations.json", "fixtures/corpus/package-context-expectations.json",
                  "fixtures/corpus/policy.yaml"}
 EXAMPLE_FILES = {"examples/" + p for p in ("capability-rules-v1.json", "capability-summaries-v1.json",
@@ -60,7 +63,7 @@ def tree(repository, commit):
 
 def allowed(path):
     p = PurePosixPath(path)
-    if path in ROOT_FILES | CONTAINER_FILES | SCRIPT_FILES | FIXTURE_FILES | EXAMPLE_FILES | {".github/workflows/release-candidate.yml"}:
+    if path in ROOT_FILES | CONTAINER_FILES | SCRIPT_FILES | RELEASE_FILES | FIXTURE_FILES | EXAMPLE_FILES | {".github/workflows/release-candidate.yml"}:
         return True
     if any(part in {"bin", "obj", ".git", "__pycache__"} for part in p.parts):
         return False
@@ -104,7 +107,7 @@ def collect(repository, build_source, action_source, dependency):
     files = {p: read_blob(repository, action[p]) for p in inventory if p in action}
     if "action-image.json" in files:
         require(image_manifest(files["action-image.json"])["build-source"] == build_source)
-    require((ROOT_FILES - {"action-image.json"}) | CONTAINER_FILES | SCRIPT_FILES <= files.keys())
+    require((ROOT_FILES - {"action-image.json"}) | CONTAINER_FILES | SCRIPT_FILES | RELEASE_FILES <= files.keys())
     vendor = tree(dependency, UASSET)
     selected = {p: entry for p, entry in vendor.items() if
                 p in {"LICENSE", "NOTICE.md", "README.md"} or

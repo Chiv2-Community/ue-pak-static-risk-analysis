@@ -62,6 +62,9 @@ schemas/facts-v1.schema.json
 schemas/moderation-v1.schema.json
 schemas/policy-v1.schema.json
 schemas/report-v1.schema.json
+releases/v0.1.0/README.md
+releases/v0.1.0/image-baseline.json
+releases/v0.1.0/source-inventory.json
 scripts/action.py
 scripts/action_report.py
 scripts/cook_owned_fixtures.py
@@ -73,6 +76,10 @@ scripts/regression_corpus.py
 scripts/report_validation.py
 scripts/scan.py
 scripts/source_bundle.py
+scripts/collect_base_sources.py
+scripts/release_image_probe.py
+scripts/validate_release_image.py
+scripts/release_record.py
 src/CompatibilityProbe/ArchiveDispatchContext.cs
 src/CompatibilityProbe/AssetDataExtractor.cs
 src/CompatibilityProbe/CompatibilityProbe.csproj
@@ -171,3 +178,5 @@ tests/test_report_schema.py
 tests/test_scan.py
 tests/test_scan_destinations.py
 tests/test_source_bundle.py
+tests/test_base_sources.py
+tests/test_release_image.py
