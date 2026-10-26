@@ -245,6 +245,7 @@ public sealed class PolicyEvaluator
         }
         var origins = new HashSet<InvocationLocation>();
         var candidates = 0;
+        var bindingOrigins = 0;
         if (analysis.Dispatches is { } dispatches)
         {
             if (dispatches.Length > MaxInvocations) InvalidFacts();
@@ -266,9 +267,17 @@ public sealed class PolicyEvaluator
                 var seen = new HashSet<(string, string)>();
                 foreach (var candidate in dispatch!.Candidates)
                     if (candidate is null || !PolicyYaml.IsOwner(candidate.Owner) || !PolicyYaml.IsIdentifier(candidate.Function)
-                        || !string.Equals(candidate.Function, dispatch.FunctionName, StringComparison.OrdinalIgnoreCase)
+                        || dispatch.Kind != "multicast" && !string.Equals(candidate.Function, dispatch.FunctionName, StringComparison.OrdinalIgnoreCase)
                         || !seen.Add((candidate.Owner, candidate.Function))
-                        || candidate.Provenance is not ("local-function" or "inherited-function" or "override" or "interface-implementation" or "imported-function" or "archive-function")) InvalidFacts();
+                         || candidate.Provenance is not ("local-function" or "inherited-function" or "override" or "interface-implementation" or "imported-function" or "archive-function")) InvalidFacts();
+                if (dispatch.PossibleBindingOrigins is { } bindings)
+                {
+                    if (dispatch.Kind != "multicast" || bindings.Length is < 1 or > MaxDispatchCandidates
+                        || (bindingOrigins += bindings.Length) > MaxInvocations || bindings.Distinct().Count() != bindings.Length) InvalidFacts();
+                    foreach (var binding in bindings)
+                        if (binding is null || binding.Asset != dispatch.Origin.Asset || binding.Function != dispatch.Origin.Function
+                            || binding.Offset < 0 || binding.Offset >= dispatch.Origin.Offset) InvalidFacts();
+                }
             }
         }
         foreach (var fact in analysis!.Invocations)

@@ -1,8 +1,8 @@
 # Possible indirect dispatch
 
 Partial #8 implementation. **Do not close #8:** exact-game native/wrapper semantics,
-external dependency closure and delegate binding-lifetime/control-flow analysis
-remain unavailable. No game/mod executes during analysis.
+external dependency closure and complete delegate binding-lifetime/control-flow
+analysis remain unavailable. No game/mod executes during analysis.
 
 ## Evidence and policy
 
@@ -48,6 +48,58 @@ remain unavailable. No game/mod executes during analysis.
   consult the full report for indirect evidence. Strict report validation and
   moderation use the same schema. Exact report-byte hashing binds this evidence
   without copying it into a second moderation model.
+
+## Same-function delegate storage links
+
+`DelegateStorageLinks` adds a bounded lexical **may-history**, not an interpreter,
+reachability proof or lifetime analysis:
+
+- `EX_BindDelegate` and `EX_LetDelegate` retain bindings in exact verified local or
+  instance storage. `EX_AddMulticastDelegate` and `EX_LetMulticastDelegate` copy
+  known possible binding origins to exact multicast storage. `EX_InstanceDelegate`
+  supplies a value, **not an invocation**. A multicast signature is never its target.
+- Identity requires a single-component stored `FFieldPath`, its exact resolved
+  owner, one unambiguous serialized delegate-property declaration and array size
+  one. Locals must belong to the containing function and cannot be parameters.
+  Instance fields require a local class and implicit self, explicit self or an
+  exact local object constant. Different object indices never merge by field name.
+  Nested/unknown contexts, out/ref aliases, arrays, legacy property pointers,
+  inherited fields and persistent-frame storage are unsupported, not guessed.
+- The history only accumulates earlier lexical binding evidence. Reassigning,
+  binding NAME_None, remove and clear **never erase** prior evidence or known risk.
+  Remove alone does not introduce a binding. Branches can overapproximate mutually
+  exclusive paths; loop backedges, reentrancy, initial state, external writes,
+  object lifetime and cross-function state remain unknown. No path-sensitive kill,
+  guaranteed ordering or exhaustive target claim is made. Earlier calls cannot
+  acquire a later lexical binding through this slice; that loop context stays a gap.
+- Actual multicast origins may carry additive optional
+  `possible-binding-origins` in dispatch-v1 facts/reports. These are separate actual
+  binding instruction locations, not invented callback occurrences/counts. Candidate
+  functions retain their exact original declaration spelling/provenance. Callback
+  arguments remain unavailable; binder operands and signatures do not supply them.
+  Every linked origin retains `binding-flow-unresolved`, `open-world` and incomplete
+  coverage, including apparently linear singleton cases.
+- Flow work shares the resolver's package operation budget. Linked candidates
+  consume the same package candidate budget as local and archive lookup. Binding
+  relations cap at 256 per multicast and 10,000 per package/archive transport;
+  lower `MaxTargets` also applies. Truncation retains original binding evidence,
+  mandatory invocations and inventory, with `target-expansion-limit`. Transport
+  prefix fallback and later-package extraction are unchanged.
+
+Source scope: authorized UE4.25Plus commit
+`2d1aaeede6780b14c3ef97272e8a68c3429d8231`, `ScriptCore.cpp:2707–2743`
+(single/multicast assignment), `2979–3040` (call/add/remove/clear), `3189–3215`
+(instance/bind). Pinned UAssetAPI `EX_LetBase`, delegate expressions and
+`KismetPropertyPointer` Read/Write/Visit define operand layout and VM offsets.
+Original `tests/DelegateFlowFixture.cs` serializes this UE4.25 producer model; no
+engine/game binary is committed. Generic producer coverage does not wait for
+recovery of the game's modified engine. Unsupported layouts retain diagnostics;
+native/custom wrappers still need separately reviewed applicability evidence.
+
+The corpus checks direct VM 0, bindings 10/138/209 and multicast VM
+52/81/119/180/241 through public Read, Parser, evaluator, wrapper and actual Action.
+A sixth schema-valid mutation removes a binding relation while preserving direct
+counts and candidate effects; the semantic oracle rejects it. #8 remains open.
 
 ## Same-archive context
 

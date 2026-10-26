@@ -41,6 +41,8 @@ recorded symbols, not an authenticated hierarchy or native capability catalog.
 Partial [open-world indirect evidence](indirect-dispatch.md) ships for #8, not
 exhaustive resolution or callback execution proof. Source-scoped engine timer
 hypotheses explicitly retain unverified game-build applicability.
+Exact same-function delegate storage links retain possible binding origins, not
+callback execution or path/lifetime guarantees; clear/remove never erase prior risk.
 Same-pak class links add only bounded possible candidates; submitted parent classes
 are not trusted baseline implementations. No external dependency discovery/input
 or effective cross-package defaults are supplied by this linking slice.
@@ -65,6 +67,8 @@ Linux owned UE4.25Plus cooks establish specific parser coverage, **not** exact
 Windows/game producer fidelity or redistribution rights (#2). Exact game build
 source/header/reflection and reviewed native summaries have not been supplied
 (#7). Historical target-game observations do not close those gates.
+Generic UE4.25/UE4.25Plus mod-producer coverage can advance independently of exact
+patched-game recovery; custom native/wrapper applicability still needs evidence.
 
 ## Capability ownership and review invalidation
 

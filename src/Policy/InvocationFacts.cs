@@ -35,7 +35,8 @@ public sealed record DispatchCandidate(string Owner, string Function, string Pro
 // Origins are actual instructions, including bindings; candidates are not invocation occurrences.
 public sealed record IndirectDispatch(int SchemaVersion, InvocationLocation Origin, string Opcode, string Kind,
     string? FunctionName, string Receiver, string Resolution, ImmutableArray<DispatchCandidate> Candidates,
-    ImmutableArray<string> Diagnostics, string Source);
+    ImmutableArray<string> Diagnostics, string Source,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InvocationLocation[]? PossibleBindingOrigins = null);
 public sealed record InvocationAnalysis(ImmutableArray<InvocationFact> Invocations, ImmutableArray<CoverageGap> CoverageGaps,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IndirectDispatch[]? Dispatches = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallGraphContext? CallGraph = null);

@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../PackageContextFixture.cs" Link="PackageContextFixture.cs" />
+    <Compile Include="../DelegateFlowFixture.cs" Link="DelegateFlowFixture.cs" />
     <ProjectReference Include="../../src/CompatibilityProbe/CompatibilityProbe.csproj" />
     <ProjectReference Include="../../src/Scanner/Scanner.csproj" />
   </ItemGroup>

@@ -16,6 +16,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipIf(Draft202012Validator is None, "optional jsonschema unavailable")
 class ReportSchemaTests(unittest.TestCase):
+    def test_callback_relations_use_closed_optional_multicast_only_shape(self):
+        schema = json.loads((ROOT / "schemas/facts-v1.schema.json").read_text())
+        facts = json.loads((ROOT / "examples/facts-v1.json").read_text())
+        call = dispatch()
+        call.update(kind="multicast", opcode="EX_CallMulticastDelegate", **{"function-name": None})
+        origin = dict(call["origin"], offset=0)
+        call["origin"]["offset"] = 30
+        call["possible-binding-origins"] = [origin]
+        facts["analysis"]["dispatches"] = [call]
+        validator = Draft202012Validator(schema)
+        validator.validate(facts)
+        for value in (None, [], [None], [origin, origin], [origin] * 257):
+            changed = copy.deepcopy(facts)
+            changed["analysis"]["dispatches"][0]["possible-binding-origins"] = value
+            self.assertFalse(validator.is_valid(changed))
+        call.update(kind="delegate-binding", opcode="EX_BindDelegate")
+        self.assertFalse(validator.is_valid(facts))
+
     def test_dispatch_schema_has_closed_version_and_opcode_kind_pairs(self):
         schema = json.loads((ROOT / "schemas/facts-v1.schema.json").read_text())
         original = json.loads((ROOT / "examples/facts-v1.json").read_text())

@@ -148,6 +148,7 @@ def load(data, root, *, moderator_detail=False):
     require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
     dispatch_origins = set()
     candidate_count = 0
+    binding_origin_count = 0
     for dispatch in report.get("possible-dispatches", []):
         evidence = dispatch["evidence"]
         origin = tuple(evidence["origin"][key] for key in ("asset", "function", "offset"))
@@ -159,8 +160,14 @@ def load(data, root, *, moderator_detail=False):
         if evidence["kind"] == "timer":
             require("native-build-unverified" in evidence["diagnostics"])
         require(len({(c["owner"], c["function"]) for c in evidence["candidates"]}) == len(evidence["candidates"]))
-        require(all(evidence["function-name"] is not None and c["function"].lower() == evidence["function-name"].lower()
-                    for c in evidence["candidates"]))
+        if evidence["kind"] != "multicast":
+            require(all(evidence["function-name"] is not None and c["function"].lower() == evidence["function-name"].lower()
+                        for c in evidence["candidates"]))
+        bindings = evidence.get("possible-binding-origins", [])
+        binding_origin_count += len(bindings)
+        require(binding_origin_count <= 10000)
+        require(all(b["asset"] == evidence["origin"]["asset"] and b["function"] == evidence["origin"]["function"]
+                    and b["offset"] < evidence["origin"]["offset"] for b in bindings))
         candidate_count += len(evidence["candidates"])
         require(candidate_count <= 10000)
         require(bool(evidence["candidates"]) or not (dispatch["possibly-flagged"] or dispatch["possibly-forbidden"]))

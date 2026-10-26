@@ -42,6 +42,66 @@ public sealed class ScannerTests : IDisposable
         ["binding-flow-unresolved", "open-world", "receiver-unavailable"], "kismet-serialized-v1");
 
     [Fact]
+    public void CallbackRelationsRoundTripWithUnavailableArgumentsAndSeparatePossibleEffects()
+    {
+        var binding = Indirect();
+        var call = binding with { Origin = binding.Origin with { Offset = 30 }, Kind = "multicast", Opcode = "EX_CallMulticastDelegate",
+            FunctionName = null, PossibleBindingOrigins = [binding.Origin] };
+        var facts = Facts(new([Fact()], [], [binding, call]));
+        var bytes = FactsCodec.Write(facts);
+        Assert.Equal(bytes, FactsCodec.Write(FactsCodec.Read(bytes)));
+        var result = Run(Encoding.UTF8.GetString(bytes));
+        var report = JsonNode.Parse(result.Report!)!;
+        Assert.Equal(1, report["counts"]!["invocations"]!.GetValue<int>());
+        Assert.Equal(1, report["counts"]!["forbidden"]!.GetValue<int>());
+        Assert.All(report["possible-dispatches"]!.AsArray(), d => Assert.True(d!["possibly-forbidden"]!.GetValue<bool>()));
+        Assert.Equal(17, report["possible-dispatches"]![1]!["evidence"]!["possible-binding-origins"]![0]!["offset"]!.GetValue<int>());
+        Assert.DoesNotContain(Canary, result.Report + result.Log);
+        var argumentPolicy = PolicyYaml.Parse("""
+            schema-version: 1
+            rules:
+              - id: argument-unknown
+                description: Original callback operand test
+                effect: forbid
+                match:
+                  kind: argument
+                  name: Value
+                  predicate:
+                    kind: equals
+                    value: {kind: integer, value: 123}
+            """);
+        var evaluated = new PolicyEvaluator(argumentPolicy).Evaluate(facts.Analysis);
+        Assert.All(evaluated.PossibleDispatches, d => Assert.NotEmpty(d.Rules));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("[null]")]
+    [InlineData("[{\"asset\":\"other\",\"function\":\"Bind\",\"offset\":1}]")]
+    [InlineData("[{\"asset\":\"/Game/Callback\",\"function\":\"Bind\",\"offset\":30}]")]
+    public void CallbackRelationsRejectInvalidWireEvidence(string json)
+    {
+        var call = Indirect() with { Kind = "multicast", Opcode = "EX_CallMulticastDelegate", FunctionName = null };
+        var node = JsonNode.Parse(FactsCodec.Write(Facts(new([], [], [call]))))!;
+        node["analysis"]!["dispatches"]![0]!["possible-binding-origins"] = JsonNode.Parse(json);
+        Assert.Throws<FactsException>(() => FactsCodec.Read(Encoding.UTF8.GetBytes(node.ToJsonString())));
+    }
+
+    [Fact]
+    public void CallbackRelationsHavePerOriginAndAggregateBudgets()
+    {
+        var binding = Indirect();
+        var call = binding with { Origin = binding.Origin with { Offset = 1000 }, Kind = "multicast", Opcode = "EX_CallMulticastDelegate",
+            FunctionName = null, Candidates = [], PossibleBindingOrigins = Enumerable.Range(0, 257).Select(i => binding.Origin with { Offset = i }).ToArray() };
+        Assert.Throws<FactsException>(() => FactsCodec.Write(Facts(new([], [], [call]))));
+        call = call with { PossibleBindingOrigins = call.PossibleBindingOrigins!.Take(256).ToArray() };
+        Assert.Throws<FactsException>(() => FactsCodec.Write(Facts(new([], [], Enumerable.Range(0, 40)
+            .Select(i => call with { Origin = call.Origin with { Offset = 1000 + i } }).ToArray()))));
+        Assert.Throws<FactsException>(() => FactsCodec.Write(Facts(new([], [], [binding with { PossibleBindingOrigins = [binding.Origin] }]))));
+    }
+
+    [Fact]
     public void PossibleCallbackForbidIsVisibleUncertainAndNotCountedAsDirectInvocation()
     {
         var facts = Facts(new([], [], [Indirect()]));
