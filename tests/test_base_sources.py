@@ -155,7 +155,144 @@ class SourceTests(unittest.TestCase):
                                 capture_output=True, timeout=10)
         self.assertEqual(1, result.returncode)
         self.assertEqual(b'', result.stdout)
-        self.assertEqual(b'Source collection failed; no complete output published.\n', result.stderr)
+        message, context = result.stderr.decode().splitlines()
+        self.assertEqual('Source collection failed; no complete output published.', message)
+        self.assertEqual('output', json.loads(context)['category'])
+
+    def diagnostic_cli(self, mode):
+        # Run the real CLI with only the HTTPS/filesystem boundary replaced.
+        program = '''
+import errno, hashlib, http.client, io, json, sys, urllib.error
+from pathlib import Path
+from unittest.mock import patch
+import collect_base_sources as source
+from test_base_sources import Response
+root, mode = Path(sys.argv[1]), sys.argv[2]
+source.RELEASE = root
+canary = 'https://user:credential-canary@private.invalid/private-path'
+entries = json.loads((root / 'inventory.json').read_text())
+body = b'upstream source\\n'
+dsc = ('Source: example\\nVersion: 1:1.0-1\\nChecksums-Sha256:\\n ' +
+       entries[0]['sha256'] + ' ' + str(len(body)) + ' ' + entries[0]['filename'] + '\\n').encode()
+if mode == 'descriptor':
+    dsc = canary.encode()
+    entries[1].update(size=len(dsc), sha256=hashlib.sha256(dsc).hexdigest())
+if mode in {'schema', 'schema-late'}:
+    entries[0 if mode == 'schema' else 1]['filename'] = canary
+(root / 'source-inventory.json').write_text(json.dumps(entries))
+def open_response(url, timeout):
+    # Let the first sorted file finish, then fail the second.
+    if url.endswith('.dsc'):
+        return Response(dsc, url)
+    if mode.startswith('http'):
+        raise urllib.error.HTTPError(canary, int(mode[4:]), canary, {'Secret': canary}, io.BytesIO(canary.encode()))
+    if mode == 'network':
+        raise urllib.error.URLError(OSError(errno.ECONNRESET, canary))
+    if mode == 'network-text':
+        raise urllib.error.URLError(canary)
+    if mode == 'timeout':
+        raise urllib.error.URLError(TimeoutError(errno.ETIMEDOUT, canary))
+    response = Response(body, url)
+    if mode == 'short':
+        response = Response(body[:-1], url)
+    if mode == 'long':
+        response = Response(body + b'x', url)
+    if mode == 'hash':
+        response = Response(b'x' * len(body), url)
+    if mode == 'header':
+        response.headers['Content-Length'] = canary
+    if mode == 'encoding':
+        response.headers['Content-Encoding'] = canary
+    if mode == 'redirect':
+        response.url = canary
+    if mode == 'malformed-redirect':
+        source.Redirects().redirect_request(source.urllib.request.Request(url), None, 302, canary, {}, 'https://[invalid')
+    if mode == 'read-timeout':
+        response.read = lambda size: (_ for _ in ()).throw(TimeoutError(canary))
+    if mode == 'read-incomplete':
+        response.read = lambda size: (_ for _ in ()).throw(http.client.IncompleteRead(canary.encode()))
+    if mode == 'status':
+        response.status = 206
+    return response
+sys.argv = ['collect_base_sources.py', '--output', str(root / 'diagnostic-output')]
+with patch.object(source.urllib.request.OpenerDirector, 'open', side_effect=open_response):
+    if mode == 'output':
+        with patch.object(Path, 'rename', side_effect=OSError(errno.ENOSPC, canary)):
+            source.main()
+    else:
+        source.main()
+'''
+        scripts = str(Path(source.__file__).parent)
+        tests = str(Path(__file__).resolve().parent)
+        return subprocess.run([sys.executable, '-c',
+                               'import sys; sys.path[:0] = ' + repr([scripts, tests]) + '\n' + program,
+                               str(self.root), mode], capture_output=True, timeout=10)
+
+    def test_cli_diagnostics_are_bounded_public_and_atomic(self):
+        cases = {'http404': 'http', 'http429': 'http', 'network': 'network',
+                 'network-text': 'network', 'timeout': 'timeout', 'read-timeout': 'timeout',
+                 'read-incomplete': 'network',
+                 'short': 'size', 'long': 'size', 'hash': 'hash', 'header': 'header',
+                 'encoding': 'header', 'redirect': 'redirect', 'malformed-redirect': 'redirect',
+                 'status': 'http', 'descriptor': 'descriptor', 'output': 'output',
+                 'schema': 'schema', 'schema-late': 'schema'}
+        for mode, category in cases.items():
+            with self.subTest(mode=mode):
+                result = self.diagnostic_cli(mode)
+                self.assertEqual(1, result.returncode)
+                self.assertEqual(b'', result.stdout)
+                self.assertLess(len(result.stderr), 1024)
+                self.assertNotIn(b'credential-canary', result.stderr)
+                self.assertNotIn(b'private', result.stderr)
+                self.assertNotIn(str(self.root).encode(), result.stderr)
+                message, raw = result.stderr.decode().splitlines()
+                self.assertEqual('Source collection failed; no complete output published.', message)
+                context = json.loads(raw)
+                self.assertEqual(category, context['category'])
+                expected = {'stage', 'ordinal', 'total', 'completed_files', 'completed_bytes', 'category'}
+                if mode in {'schema', 'schema-late'}:
+                    self.assertEqual('prevalidation', context['stage'])
+                    self.assertEqual((0, 0, 0, 0), tuple(context[k] for k in
+                                     ('ordinal', 'total', 'completed_files', 'completed_bytes')))
+                else:
+                    self.assertEqual(2, context['total'])
+                    complete = mode in {'descriptor', 'output'}
+                    self.assertEqual(2 if complete else 1, context['completed_files'])
+                    descriptor_size = (len('https://user:credential-canary@private.invalid/private-path')
+                                       if mode == 'descriptor' else len(self.dsc))
+                    self.assertEqual(descriptor_size + (len(self.body) if complete else 0), context['completed_bytes'])
+                    self.assertEqual('descriptors' if mode == 'descriptor' else
+                                     'bundle' if mode == 'output' else 'fetch', context['stage'])
+                    if mode != 'output':
+                        expected.add('entry')
+                        entry = self.descriptor if mode == 'descriptor' else self.entry
+                        self.assertEqual({k: entry[k] for k in ('group', 'source', 'version', 'filename')},
+                                         context['entry'])
+                        self.assertEqual(1 if mode == 'descriptor' else 2, context['ordinal'])
+                if mode.startswith('http') or mode == 'status':
+                    expected.add('http_status')
+                    self.assertEqual(int(mode[4:]) if mode.startswith('http') else 206, context['http_status'])
+                if mode in {'network', 'timeout'}:
+                    import errno
+                    expected.add('errno')
+                    self.assertEqual(errno.ECONNRESET if mode == 'network' else errno.ETIMEDOUT, context['errno'])
+                self.assertEqual(expected, set(context))
+                self.assertFalse((self.root / 'diagnostic-output').exists())
+                self.assertEqual([], list(self.root.glob('.base-source-*')))
+
+    def test_maximum_validated_context_is_bounded(self):
+        entry = dict(self.entry, source='a' * 100, version='b' * 100, filename='c' * 200)
+        self.manifest.write_text(json.dumps([entry]))
+        with patch.object(urllib.request.OpenerDirector, 'open', side_effect=TimeoutError('credential-canary')):
+            with self.assertRaises(source.SourceError) as caught:
+                source.collect(self.manifest, self.readme, self.root / 'maximum')
+        context = caught.exception.context
+        self.assertEqual('timeout', context['category'])
+        self.assertEqual({k: entry[k] for k in ('group', 'source', 'version', 'filename')}, context['entry'])
+        self.assertLess(len(json.dumps(context, ensure_ascii=True)), 900)
+        self.assertNotIn('credential-canary', json.dumps(context))
+        self.assertFalse((self.root / 'maximum').exists())
+        self.assertEqual([], list(self.root.glob('.base-source-*')))
 
     def test_committed_inventory_exact_audited_coverage(self):
         entries = source.inventory((source.RELEASE / 'source-inventory.json').read_bytes())

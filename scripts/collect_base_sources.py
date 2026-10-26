@@ -2,7 +2,9 @@
 """Fetch the reviewed public source inventory; never extract or execute sources."""
 
 import argparse
+import errno
 import hashlib
+import http.client
 import json
 from pathlib import Path
 import re
@@ -10,6 +12,7 @@ import tarfile
 import tempfile
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 
 LIMIT = 800 * 1024 * 1024
@@ -17,9 +20,34 @@ FILE_LIMIT = 128 * 1024 * 1024
 RELEASE = Path(__file__).resolve().parents[1] / 'releases/v0.1.0'
 
 
-def require(value):
+class SourceError(ValueError):
+    def __init__(self, category, **details):
+        super().__init__('source collection input or response rejected')
+        self.category = category
+        self.details = details
+
+
+def require(value, category='schema'):
     if not value:
-        raise ValueError('source collection input or response rejected')
+        raise SourceError(category)
+
+
+def network_error(error):
+    if isinstance(error, urllib.error.HTTPError):
+        details = {'http_status': error.code} if type(error.code) is int and 100 <= error.code <= 599 else {}
+        return SourceError('http', **details)
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    category = 'timeout' if isinstance(reason, TimeoutError) else 'network'
+    number = reason.errno if isinstance(reason, OSError) else None
+    details = {'errno': number} if type(number) is int and number in errno.errorcode else {}
+    return SourceError(category, **details)
+
+
+def redirect_allowed(url):
+    try:
+        return url_allowed(url)
+    except ValueError:
+        raise SourceError('redirect') from None
 
 
 def url_allowed(url):
@@ -42,7 +70,7 @@ def url_allowed(url):
 
 class Redirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return super().redirect_request(req, fp, code, msg, headers, url_allowed(newurl))
+        return super().redirect_request(req, fp, code, msg, headers, redirect_allowed(newurl))
 
 
 def unique(pairs):
@@ -81,26 +109,36 @@ def inventory(raw):
 def fetch(entry, output, opener):
     deadline = time.monotonic() + 300
     digest, size = hashlib.sha256(), 0
-    with opener.open(url_allowed(entry['url']), timeout=30) as response:
-        require(response.status == 200)
-        url_allowed(response.geturl())
+    try:
+        response = opener.open(url_allowed(entry['url']), timeout=30)
+    except (OSError, http.client.HTTPException) as error:
+        raise network_error(error) from None
+    with response:
+        if response.status != 200:
+            details = {'http_status': response.status} if type(response.status) is int and 100 <= response.status <= 599 else {}
+            raise SourceError('http', **details)
+        redirect_allowed(response.geturl())
         length = response.headers.get('Content-Length')
-        require(length is None or length == str(entry['size']))
-        require(response.headers.get('Content-Encoding', 'identity') == 'identity')
+        require(length is None or length == str(entry['size']), 'header')
+        require(response.headers.get('Content-Encoding', 'identity') == 'identity', 'header')
         with output.open('xb') as target:
             while True:
-                require(time.monotonic() < deadline)
-                chunk = response.read(min(65536, entry['size'] - size + 1))
+                require(time.monotonic() < deadline, 'timeout')
+                try:
+                    chunk = response.read(min(65536, entry['size'] - size + 1))
+                except (OSError, http.client.HTTPException) as error:
+                    raise network_error(error) from None
                 if not chunk:
                     break
                 size += len(chunk)
-                require(size <= entry['size'])
+                require(size <= entry['size'], 'size')
                 digest.update(chunk)
                 target.write(chunk)
-    require(size == entry['size'] and digest.hexdigest() == entry['sha256'])
+    require(size == entry['size'], 'size')
+    require(digest.hexdigest() == entry['sha256'], 'hash')
 
 
-def descriptors(entries, payload):
+def descriptors(entries, payload, context=None):
     groups = {}
     for e in entries:
         groups.setdefault((e['group'], e['source'], e['version']), []).append(e)
@@ -108,6 +146,10 @@ def descriptors(entries, payload):
         if group == 'python':
             continue
         dsc = [e for e in files if e['filename'].endswith('.dsc')]
+        if context is not None:
+            current = (dsc or files)[0]
+            context['entry'] = {key: current[key] for key in ('group', 'source', 'version', 'filename')}
+            context['ordinal'] = entries.index(current) + 1
         require(len(dsc) == 1 and dsc[0]['size'] <= 65536)
         raw = (payload / group / source / version / dsc[0]['filename']).read_text()
         require(re.search(r'^Source: ' + re.escape(source) + r'$', raw, re.M))
@@ -123,27 +165,55 @@ def descriptors(entries, payload):
 
 
 def collect(manifest, readme, output):
+    context = {'stage': 'prevalidation', 'ordinal': 0, 'total': 0,
+               'completed_files': 0, 'completed_bytes': 0}
+    try:
+        _collect(manifest, readme, output, context)
+    except (OSError, ValueError, RecursionError) as error:
+        category = {'prevalidation': 'schema', 'fetch': 'output',
+                    'descriptors': 'descriptor', 'bundle': 'output'}[context['stage']]
+        if isinstance(error, SourceError):
+            if context['stage'] != 'descriptors':
+                category = error.category
+            context.update(error.details)
+        context['category'] = category
+        failure = SourceError(category)
+        failure.context = context
+        raise failure from None
+
+
+def _collect(manifest, readme, output, context):
     # A newly created output directory is the transaction boundary. Never touch
     # existing files, including dangling links. Failures leave no complete bundle.
     require(not manifest.is_symlink() and manifest.stat().st_size <= 1024 * 1024)
     require(not readme.is_symlink() and readme.stat().st_size <= 1024 * 1024)
-    require(output.parent.absolute() == output.parent.resolve(strict=True))
     raw = manifest.read_bytes()
     entries = inventory(raw)
-    require(not output.exists() and not output.is_symlink())
+    context['total'] = len(entries)
+    context['stage'] = 'bundle'
+    require(output.parent.absolute() == output.parent.resolve(strict=True), 'output')
+    require(not output.exists() and not output.is_symlink(), 'output')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), Redirects())
     with tempfile.TemporaryDirectory(prefix='.base-source-', dir=output.parent) as temporary:
         root = Path(temporary)
         payload = root / 'payload'
         payload.mkdir()
         checksums = []
-        for e in entries:
+        for ordinal, e in enumerate(entries, 1):
+            context.update(stage='fetch', ordinal=ordinal,
+                           entry={key: e[key] for key in ('group', 'source', 'version', 'filename')})
             path = '/'.join(e[k] for k in ('group', 'source', 'version', 'filename'))
             local = payload / path
             local.parent.mkdir(parents=True, exist_ok=True)
             fetch(e, local, opener)
+            context['completed_files'] += 1
+            context['completed_bytes'] += e['size']
             checksums.append(e['sha256'] + '  ' + path + '\n')
-        descriptors(entries, payload)
+        context['stage'] = 'descriptors'
+        context.pop('entry', None)
+        descriptors(entries, payload, context)
+        context['stage'] = 'bundle'
+        context.pop('entry', None)
         (payload / 'source-inventory.json').write_bytes(raw)
         (payload / 'README.md').write_bytes(readme.read_bytes())
         (payload / 'SHA256SUMS').write_text(''.join(checksums))
@@ -163,7 +233,7 @@ def collect(manifest, readme, output):
             with p.open('rb') as data:
                 lines.append(hashlib.file_digest(data, 'sha256').hexdigest() + '  ' + p.name + '\n')
         (result / 'SHA256SUMS').write_text(''.join(lines))
-        require(not output.exists() and not output.is_symlink())
+        require(not output.exists() and not output.is_symlink(), 'output')
         result.rename(output)
 
 
@@ -173,8 +243,9 @@ def main():
     args = parser.parse_args()
     try:
         collect(RELEASE / 'source-inventory.json', RELEASE / 'README.md', args.output)
-    except (OSError, ValueError, TimeoutError, RecursionError):
-        parser.exit(1, 'Source collection failed; no complete output published.\n')
+    except SourceError as error:
+        parser.exit(1, 'Source collection failed; no complete output published.\n' +
+                    json.dumps(error.context, sort_keys=True, separators=(',', ':'), ensure_ascii=True) + '\n')
 
 
 if __name__ == '__main__':
