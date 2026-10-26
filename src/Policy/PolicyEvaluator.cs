@@ -243,7 +243,7 @@ public sealed class PolicyEvaluator
                     || !keys.Add((function.Asset, function.LocationFunction))
                     || (characters += CallGraphContext.Characters(function)) > CallGraphContext.MaxCharacters) InvalidFacts();
         }
-        var origins = new HashSet<InvocationLocation>();
+        var origins = new Dictionary<InvocationLocation, IndirectDispatch>();
         var candidates = 0;
         var bindingOrigins = 0;
         if (analysis.Dispatches is { } dispatches)
@@ -253,7 +253,7 @@ public sealed class PolicyEvaluator
             {
                 if (dispatch is null || dispatch.SchemaVersion != 1 || dispatch.Origin is null
                     || !Text(dispatch.Origin.Asset) || !Text(dispatch.Origin.Function) || dispatch.Origin.Offset < 0
-                    || !origins.Add(dispatch.Origin) || !ValidDispatchOpcode(dispatch.Opcode, dispatch.Kind)
+                    || !origins.TryAdd(dispatch.Origin, dispatch) || !ValidDispatchOpcode(dispatch.Opcode, dispatch.Kind)
                     || dispatch.FunctionName is not null && !PolicyYaml.IsIdentifier(dispatch.FunctionName)
                     || dispatch.Receiver is not ("self" or "object" or "interface" or "unknown")
                     || dispatch.Resolution != "possible" || dispatch.Candidates.IsDefault
@@ -279,6 +279,11 @@ public sealed class PolicyEvaluator
                             || binding.Offset < 0 || binding.Offset >= dispatch.Origin.Offset) InvalidFacts();
                 }
             }
+            // Locations identify retained binding evidence, not arbitrary earlier instructions.
+            // This checks transport consistency, not storage ownership or execution.
+            foreach (var dispatch in dispatches)
+                foreach (var binding in dispatch.PossibleBindingOrigins ?? [])
+                    if (!origins.TryGetValue(binding, out var source) || source.Kind != "delegate-binding") InvalidFacts();
         }
         foreach (var fact in analysis!.Invocations)
         {

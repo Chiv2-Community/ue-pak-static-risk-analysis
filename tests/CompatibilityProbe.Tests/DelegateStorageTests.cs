@@ -136,6 +136,18 @@ public sealed class DelegateStorageTests
         Assert.IsType<InvocationTarget.Resolved>(report.Invocations[0].Target);
     }
 
+    [Theory]
+    [InlineData("history")]
+    [InlineData("instance")]
+    [InlineData("copy")]
+    public void EveryProductionDispatchPrefixRetainsReferencedBindingEvidence(string mode)
+    {
+        var report = Read(mode);
+        var dispatches = report.Analysis.Dispatches!;
+        for (var count = 1; count <= dispatches.Length; count++)
+            PolicyEvaluator.Validate(report.Analysis with { Dispatches = dispatches.Take(count).ToArray() });
+    }
+
     [Fact]
     public void LocalHistoryNeverEscapesItsContainingFunction()
     {

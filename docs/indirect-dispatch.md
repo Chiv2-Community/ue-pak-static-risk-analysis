@@ -79,6 +79,12 @@ reachability proof or lifetime analysis:
   arguments remain unavailable; binder operands and signatures do not supply them.
   Every linked origin retains `binding-flow-unresolved`, `open-world` and incomplete
   coverage, including apparently linear singleton cases.
+- Facts and shared report validation require structurally unique locations in the
+  same asset/function, earlier than the multicast, referencing retained
+  `delegate-binding` evidence (`EX_BindDelegate` or `EX_InstanceDelegate`). Direct
+  calls, other dispatch kinds and missing origins cannot supply binding provenance.
+  A bounded two-pass index permits any wire ordering. This checks consistency, not
+  authenticity, storage ownership or execution; producer storage checks remain separate.
 - Flow work shares the resolver's package operation budget. Linked candidates
   consume the same package candidate budget as local and archive lookup. Binding
   relations cap at 256 per multicast and 10,000 per package/archive transport;
@@ -98,7 +104,7 @@ native/custom wrappers still need separately reviewed applicability evidence.
 
 The corpus checks direct VM 0, bindings 10/138/209 and multicast VM
 52/81/119/180/241 through public Read, Parser, evaluator, wrapper and actual Action.
-A sixth schema-valid mutation removes a binding relation while preserving direct
+A sixth schema- and relationship-valid mutation removes a binding relation while preserving direct
 counts and candidate effects; the semantic oracle rejects it. #8 remains open.
 
 ## Same-archive context

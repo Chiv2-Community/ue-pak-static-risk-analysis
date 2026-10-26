@@ -3,8 +3,9 @@
 import copy
 import json
 from pathlib import Path
+import sys
 import unittest
-from indirect_fixture import dispatch
+from indirect_fixture import dispatch, callback_dispatches, invalid_callback_dispatches
 
 try:
     from jsonschema import Draft202012Validator
@@ -12,6 +13,8 @@ except ImportError:
     Draft202012Validator = None
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+import report_validation
 
 
 @unittest.skipIf(Draft202012Validator is None, "optional jsonschema unavailable")
@@ -27,12 +30,24 @@ class ReportSchemaTests(unittest.TestCase):
         facts["analysis"]["dispatches"] = [call]
         validator = Draft202012Validator(schema)
         validator.validate(facts)
-        for value in (None, [], [None], [origin, origin], [origin] * 257):
+        for value in (None, [], [None], [origin, origin], [origin, dict(reversed(list(origin.items())))], [origin] * 257):
             changed = copy.deepcopy(facts)
             changed["analysis"]["dispatches"][0]["possible-binding-origins"] = value
             self.assertFalse(validator.is_valid(changed))
         call.update(kind="delegate-binding", opcode="EX_BindDelegate")
         self.assertFalse(validator.is_valid(facts))
+
+    def test_shared_report_loader_checks_structural_relations_after_schema_validation(self):
+        report = json.loads((ROOT / "examples/reports/partial-v1.json").read_bytes())
+        report["coverage"]["gaps"] = ["unresolved-dispatch"]
+        for opcode in ("EX_BindDelegate", "EX_InstanceDelegate"):
+            report["possible-dispatches"] = list(reversed(callback_dispatches(opcode)))
+            self.assertEqual(report, report_validation.load(json.dumps(report).encode(), ROOT))
+        for name, items in invalid_callback_dispatches():
+            with self.subTest(case=name):
+                report["possible-dispatches"] = items
+                with self.assertRaises(report_validation.InvalidReport):
+                    report_validation.load(json.dumps(report).encode(), ROOT)
 
     def test_dispatch_schema_has_closed_version_and_opcode_kind_pairs(self):
         schema = json.loads((ROOT / "schemas/facts-v1.schema.json").read_text())
