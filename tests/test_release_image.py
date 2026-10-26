@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import ModuleType
 import unittest
 from unittest.mock import patch
 
@@ -26,7 +27,7 @@ class ImageGateTests(unittest.TestCase):
         self.sources = source.inventory((source.RELEASE / 'source-inventory.json').read_bytes())
         self.actual = {key: copy.deepcopy(self.baseline[key]) for key in
                        ('python-version', 'dotnet-versions', 'dlls', 'pip-vendor', 'ubuntu-packages')}
-        self.actual.update({'pip-version': '25.0.1', 'certifi-version': '2024.8.30',
+        self.actual.update({'pip-version': '25.0.1', 'certifi-version': '2024.08.30',
                             'pip-notices': {'LICENSE.txt': {'sha256': 'a' * 64}},
                             'pip-vendor-notices': {'certifi/LICENSE': {'sha256': 'b' * 64}},
                             'runtime-notices': copy.deepcopy(self.baseline['runtime-notice-sha256']),
@@ -46,12 +47,29 @@ class ImageGateTests(unittest.TestCase):
     def test_exact_metadata_and_source_coverage_accepts(self):
         self.validate()
 
+    def probe_python_fixture(self):
+        # Match the pinned pip module, not the normalized vendor package version.
+        pip = ModuleType('pip')
+        pip.__version__ = '25.0.1'
+        certifi = ModuleType('pip._vendor.certifi')
+        certifi.__version__ = '2024.08.30'
+        with patch.dict(sys.modules, {'pip': pip, 'pip._vendor.certifi': certifi}), \
+                patch.object(probe.sys, 'version_info', tuple(map(int, self.baseline['python-version'].split('.')))), \
+                patch.object(probe.Path, 'read_text', return_value=self.baseline['pip-vendor']), \
+                patch.object(probe, 'tree', side_effect=[self.actual['pip-notices'],
+                    self.actual['pip-vendor-notices'], self.actual['python-docs']]):
+            return probe.probe(python_stage=True)
+
     def test_source_covered_debian_gcc_alias_accepts_through_production_cli(self):
+        self.python = self.probe_python_fixture()
+        self.assertEqual('2024.08.30', self.python['certifi-version'])
+        self.assertIn(('python', 'certifi', '2024.8.30'),
+                      {(e['group'], e['source'], e['version']) for e in self.sources})
+        self.actual.update(copy.deepcopy(self.python))
         for metadata in (self.actual, self.python):
             metadata['python-docs']['libgcc-s1'] = {'link': 'gcc-12-base'}
         self.assertEqual(self.baseline['python-spdx-copyright-sha256']['gcc-12-base/copyright'],
                          validator.doc_hash(self.actual['python-docs'], 'libgcc-s1/copyright'))
-        self.validate()
         with tempfile.TemporaryDirectory(dir=TEMP, prefix='image-alias-cli-') as temporary:
             # Exercise the unmodified CLI without requiring a submodule checkout.
             root = Path(temporary)
@@ -82,11 +100,79 @@ class ImageGateTests(unittest.TestCase):
                        '--actual', str(actual), '--python-stage', str(python)]
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(0, result.returncode, result.stderr)
+            original = copy.deepcopy(self.actual)
+            for version in ('2024.8.30', '2023.08.30', '2024.09.30'):
+                with self.subTest(version=version):
+                    self.actual['certifi-version'] = version
+                    actual.write_text(json.dumps(self.actual))
+                    result = subprocess.run(command, capture_output=True, text=True)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("image certifi-version mismatch: expected '2024.08.30'", result.stderr)
+                    self.assertIn('actual ' + repr(version), result.stderr)
+            self.actual = original
+            for group, name, _ in notices:
+                with self.subTest(notice=name):
+                    digest = self.actual[group][name]['sha256']
+                    self.actual[group][name]['sha256'] = 'f' * 64
+                    actual.write_text(json.dumps(self.actual))
+                    result = subprocess.run(command, capture_output=True, text=True)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn('metadata/source coverage mismatch', result.stderr)
+                    self.actual[group][name]['sha256'] = digest
             self.actual['python-docs']['libgcc-s1']['link'] = 'apt'
             actual.write_text(json.dumps(self.actual))
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(0, result.returncode)
             self.assertIn('metadata/source coverage mismatch', result.stderr)
+
+    def test_module_stage_and_reviewed_versions_remain_exact(self):
+        for key, wrong in [('pip-version', '25.0.2'),
+                           ('certifi-version', '2024.8.30'),
+                           ('certifi-version', '2023.08.30'),
+                           ('certifi-version', '2024.09.30')]:
+            for label, metadata in [('image', self.actual), ('python-stage', self.python)]:
+                with self.subTest(key=key, wrong=wrong, label=label):
+                    original = metadata[key]
+                    metadata[key] = wrong
+                    with self.assertRaisesRegex(ValueError, label + ' ' + key + ' mismatch: expected'):
+                        self.validate()
+                    metadata[key] = original
+        for key, wrong in [('pip-version', '25.0.2'), ('certifi-module-version', '2024.8.30')]:
+            original = self.baseline[key]
+            self.baseline[key] = wrong
+            with self.assertRaises(ValueError):
+                self.validate()
+            self.baseline[key] = original
+
+    def test_normalized_python_source_versions_remain_required(self):
+        original = self.sources
+        for name, wrong in [('certifi', '2024.08.30'), ('certifi', '2023.8.30'),
+                            ('certifi', '2024.9.30'), ('pip', '25.0.2')]:
+            with self.subTest(name=name, version=wrong):
+                self.sources = copy.deepcopy(original)
+                for entry in self.sources:
+                    if entry['group'] == 'python' and entry['source'] == name:
+                        entry['version'] = wrong
+                with self.assertRaises(ValueError):
+                    self.validate()
+        for name in ('certifi', 'pip'):
+            self.sources = [e for e in original if e['source'] != name]
+            with self.assertRaises(ValueError):
+                self.validate()
+
+    def test_vendor_and_runtime_notice_hashes_remain_exact(self):
+        for metadata in (self.actual, self.python, self.baseline):
+            original = metadata['pip-vendor']
+            metadata['pip-vendor'] = original.replace('certifi==2024.8.30', 'certifi==2024.08.30')
+            with self.assertRaises(ValueError):
+                self.validate()
+            metadata['pip-vendor'] = original
+        for path in self.actual['runtime-notices']:
+            original = self.actual['runtime-notices'][path]
+            self.actual['runtime-notices'][path] = 'f' * 64
+            with self.assertRaises(ValueError):
+                self.validate()
+            self.actual['runtime-notices'][path] = original
 
     def test_doc_alias_does_not_replace_spdx_hash_or_source_version_coverage(self):
         for metadata in (self.actual, self.python):

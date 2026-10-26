@@ -4,6 +4,7 @@
     "python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254",
     "mcr.microsoft.com/dotnet/runtime:10.0-noble@sha256:0cf09aaccf6a9f68900aed4c73fb28fe25bb59ec85de4dea08ba02240a8635f3"
   ],
+  "certifi-module-version": "2024.08.30",
   "debian-doc-sources": [
     {
       "binary_packages": [
@@ -1195,6 +1196,7 @@
   ],
   "old-image": "sha256:3c048d4547d3d08409ae5fb79cef3723219533759ed0e011d9816148a35ceaa2",
   "pip-vendor": "CacheControl==0.14.1\ndistlib==0.3.9\ndistro==1.9.0\nmsgpack==1.1.0\npackaging==24.2\nplatformdirs==4.3.6\npyproject-hooks==1.2.0\nrequests==2.32.3\n    certifi==2024.8.30\n    idna==3.10\n    urllib3==1.26.20\nrich==13.9.4\n    pygments==2.18.0\n    typing_extensions==4.12.2\nresolvelib==1.0.1\nsetuptools==70.3.0\ntomli==2.2.1\ntruststore==0.10.0\n",
+  "pip-version": "25.0.1",
   "python-recipe": "https://github.com/docker-library/python/blob/688a0b86bb44289df16a363e9f41d90514c1a5f9/3.12/slim-bookworm/Dockerfile",
   "python-spdx-copyright-sha256": {
     "adduser/copyright": "b143053a4862ab354831487b5f8bd31dc9ffdc589d15de9d9c764332a0209796",

@@ -59,7 +59,12 @@ def validate(actual, python_stage, baseline, sources):
         require(actual[key] == baseline[key])
     require(sorted(actual['ubuntu-packages'], key=lambda p: p['Package']) ==
             sorted(baseline['ubuntu-packages'], key=lambda p: p['Package']))
-    require(actual['pip-version'] == '25.0.1' and actual['certifi-version'] == '2024.8.30')
+    # certifi's module spelling differs from its vendor/source package version.
+    for key, expected in [('pip-version', baseline['pip-version']),
+                          ('certifi-version', baseline['certifi-module-version'])]:
+        for label, metadata in [('image', actual), ('python-stage', python_stage)]:
+            if metadata[key] != expected:
+                raise ValueError(f'{label} {key} mismatch: expected {expected!r}, actual {metadata[key]!r}')
     require(actual['runtime-notices'] == baseline['runtime-notice-sha256'])
     for key in python_keys:
         require(actual[key] == python_stage[key])
@@ -76,6 +81,8 @@ def validate(actual, python_stage, baseline, sources):
         require(top in covered or 'link' in docs.get(top, {}))
         require(doc_path(docs, p).split('/')[0] in covered)
     groups = {(e['group'], e['source'], e['version']) for e in sources}
+    require(('python', 'pip', baseline['pip-version']) in groups)
+    require(('python', 'certifi', '2024.8.30') in groups)
     for p in actual['ubuntu-packages']:
         source = p['Source'] or p['Package']
         match = re.fullmatch(r'([^ ]+)(?: \(([^)]+)\))?', source)
