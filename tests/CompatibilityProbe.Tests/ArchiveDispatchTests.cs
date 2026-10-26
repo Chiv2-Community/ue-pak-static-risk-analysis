@@ -156,6 +156,91 @@ public sealed class ArchiveDispatchTests
     }
 
     [Fact]
+    public void CaseVariantImportCannotShadowExactDeclarationIdentity()
+    {
+        using var packages = new Packages(PackageContextFixture.CaseImport);
+        var before = InvocationExtractor.Read(packages.Inputs["Caller"]);
+        var after = packages.Inspect("Caller", packages.Context());
+        Assert.Equal(before.Analysis.Invocations.ToArray(), after.Analysis.Invocations.ToArray());
+        var dispatch = after.Analysis.Dispatches![0];
+        Assert.Equal(22u, dispatch.Origin.Offset);
+        Assert.Contains(dispatch.Candidates, c => c.Owner == "/game/base.tYpE" && c.Function == "SENSITIVE" && c.Provenance == "imported-function");
+        Assert.Contains(dispatch.Candidates, c => c.Owner == "/Game/Base.Type" && c.Function == "Sensitive" && c.Provenance == "inherited-function");
+        PolicyEvaluator.Validate(after.Analysis);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 3)]
+    public void ExactCaseVariantsSharePerOriginTargetLimit(int limit, int expected)
+    {
+        using var packages = new Packages(PackageContextFixture.CaseImport);
+        var report = packages.Inspect("Caller", packages.Context(), new(MaxTargets: limit));
+        var dispatch = report.Analysis.Dispatches![0];
+        Assert.Equal(expected, dispatch.Candidates.Length);
+        Assert.Contains(dispatch.Candidates, c => c.Provenance == "imported-function");
+        if (limit > 1) Assert.Contains(dispatch.Candidates, c => c.Owner == "/Game/Base.Type" && c.Function == "Sensitive");
+        if (limit < 3) Assert.Contains("target-expansion-limit", dispatch.Diagnostics);
+        PolicyEvaluator.Validate(report.Analysis);
+    }
+
+    [Theory]
+    [InlineData(3333, 9999)]
+    [InlineData(3334, 10000)]
+    public void ExactCaseVariantsShareAggregateBudgetAcrossOriginsAndPackages(int count, int expected)
+    {
+        using var packages = new Packages(assets =>
+        {
+            PackageContextFixture.CaseImport(assets);
+            var caller = assets["Caller"];
+            var run = (FunctionExport)caller.Exports[4];
+            var expression = run.ScriptBytecode![0];
+            run.ScriptBytecode = Enumerable.Range(0, count).Select(_ => expression).ToArray();
+            run.ScriptBytecodeSize = run.ScriptBytecode.Sum(e => (int)e.GetSize(caller));
+        });
+        var context = packages.Context();
+        var before = InvocationExtractor.Read(packages.Inputs["Caller"]);
+        var after = packages.Inspect("Caller", context);
+        Assert.Equal(before.Analysis.Invocations.ToArray(), after.Analysis.Invocations.ToArray());
+        var dispatches = after.Analysis.Dispatches!;
+        Assert.Equal(expected, dispatches.Sum(d => d.Candidates.Length));
+        Assert.Equal(3, dispatches[0].Candidates.Length);
+        if (count > 3333) Assert.Contains("target-expansion-limit", dispatches[^1].Diagnostics);
+        PolicyEvaluator.Validate(after.Analysis);
+        var later = packages.Inspect("Base", context);
+        Assert.Single(later.Invocations);
+        PolicyEvaluator.Validate(later.Analysis);
+    }
+
+    [Theory]
+    [InlineData(false, 0, 0)]
+    [InlineData(false, 5001, 5001)]
+    [InlineData(true, 5000, 10000)]
+    [InlineData(true, 5001, 10000)]
+    public void ComposedPackageBudgetRetainsMandatoryCallsAndLaterPackages(bool local, int count, int expected)
+    {
+        using var packages = new Packages(assets => PackageContextFixture.Boundary(assets, count, local));
+        var context = packages.Context();
+        var before = InvocationExtractor.Read(packages.Inputs["Base"]);
+        var after = packages.Inspect("Base", context);
+        Assert.Equal(before.Analysis.Invocations.ToArray(), after.Analysis.Invocations.ToArray());
+        Assert.Equal(count + 1, after.Invocations.Length);
+        Assert.Equal(expected, (after.Analysis.Dispatches ?? []).Sum(d => d.Candidates.Length));
+        Assert.All(after.Analysis.Dispatches ?? [], d => Assert.Contains("open-world", d.Diagnostics));
+        if (local && count > 5000)
+        {
+            Assert.Contains(after.Analysis.Dispatches!, d => d.Diagnostics.Contains("target-expansion-limit"));
+            Assert.Contains(CoverageGap.IncompleteExtraction, after.Analysis.CoverageGaps);
+            Assert.Contains(CoverageGap.UnresolvedDispatch, after.Analysis.CoverageGaps);
+        }
+        PolicyEvaluator.Validate(after.Analysis);
+        var later = packages.Inspect("ChildOverride", context);
+        Assert.Single(later.Invocations);
+        PolicyEvaluator.Validate(later.Analysis);
+    }
+
+    [Fact]
     public void DuplicateFunctionIdentityIsUnknownNotAnUnambiguousArchiveDefinition()
     {
         using var packages = new Packages(assets =>

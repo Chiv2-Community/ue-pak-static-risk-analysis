@@ -9,13 +9,14 @@ namespace PakRisk.Extraction;
 
 public sealed record ArchiveDispatchLimits(int MaxClasses = 4096, int MaxFunctions = 4096,
     int MaxEdges = 10000, int MaxOperations = 100000, int MaxDepth = 256,
-    int MaxCharacters = 262144, int MaxCandidates = 10000, int MaxOrigins = 10000)
+    int MaxCharacters = 262144, int MaxCandidates = PolicyEvaluator.MaxInvocations, int MaxOrigins = PolicyEvaluator.MaxInvocations)
 {
     internal void Validate()
     {
         if (MaxClasses is < 1 or > 4096 || MaxFunctions is < 1 or > 4096 || MaxEdges is < 1 or > 10000
             || MaxOperations is < 1 or > 100000 || MaxDepth is < 1 or > 256
-            || MaxCharacters is < 1 or > 262144 || MaxCandidates is < 1 or > 10000 || MaxOrigins is < 1 or > 10000)
+            || MaxCharacters is < 1 or > 262144 || MaxCandidates is < 1 or > PolicyEvaluator.MaxInvocations
+            || MaxOrigins is < 1 or > PolicyEvaluator.MaxInvocations)
             throw new ArgumentOutOfRangeException(nameof(ArchiveDispatchLimits));
     }
 }
@@ -148,7 +149,8 @@ public sealed class ArchiveDispatchContext
         return (names, diagnostics);
     }
 
-    internal IndirectDispatch Augment(IndirectDispatch dispatch, UAsset asset, PackageInput input, int receiver, int maxTargets)
+    internal IndirectDispatch Augment(IndirectDispatch dispatch, UAsset asset, PackageInput input, int receiver, int maxTargets,
+        int remainingCandidates)
     {
         if (!sealedIndex) throw new InvalidOperationException("Archive index is not sealed.");
         var diagnostics = dispatch.Diagnostics.ToHashSet(StringComparer.Ordinal);
@@ -163,7 +165,9 @@ public sealed class ArchiveDispatchContext
         var chain = Chain(receiverName);
         diagnostics.UnionWith(chain.Diagnostics);
         var retained = dispatch.Candidates.ToList();
-        var seen = retained.Select(c => c.Owner + ":" + c.Function).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // FName lookup is case-insensitive, but policy and graph identities are exact.
+        // Preserve import evidence and the actual unambiguous archive declaration.
+        var seen = retained.Select(c => c.Owner + ":" + c.Function).ToHashSet(StringComparer.Ordinal);
         if (byName.TryGetValue(dispatch.FunctionName, out var entries))
             foreach (var function in entries)
             {
@@ -177,12 +181,12 @@ public sealed class ArchiveDispatchContext
                 if (!classes.TryGetValue(function.Owner, out var owner) || owner is null)
                 { diagnostics.Add("target-metadata-unavailable"); continue; }
                 if (seen.Contains(function.Owner + ":" + function.Name)) continue;
-                if (retained.Count >= maxTargets || candidates >= limits.MaxCandidates)
+                if (retained.Count >= maxTargets || candidates >= limits.MaxCandidates || remainingCandidates == 0)
                 { diagnostics.Add("target-expansion-limit"); break; }
                 var provenance = inherited ? "inherited-function" : derived
                     ? receiverName is not null && classes.TryGetValue(receiverName, out var type) && type is { Interface: true }
                         ? "interface-implementation" : "override" : "archive-function";
-                retained.Add(new(function.Owner, function.Name, provenance)); candidates++;
+                retained.Add(new(function.Owner, function.Name, provenance)); candidates++; remainingCandidates--;
                 seen.Add(function.Owner + ":" + function.Name);
             }
         return dispatch with { Candidates = retained.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),

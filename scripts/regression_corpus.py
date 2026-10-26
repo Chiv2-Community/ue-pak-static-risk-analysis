@@ -523,6 +523,108 @@ def package_context_gate(run, image=None):
     return pak, path, policy, report
 
 
+def package_context_boundary_gate(run, mode, image=None):
+    """Serialized review regressions through ingestion, Parser and exact policy."""
+    from pak_ingest import ingest
+    generated = run.root / mode
+    run.command(["dotnet", GENERATOR, mode, generated])
+    pak = run.root / (mode + ".pak")
+    pak.write_bytes(build([("Content/" + p.name, p.read_bytes(), False) for p in sorted(generated.iterdir())]))
+    path = run.root / (mode + "-facts.json")
+    def inspect(root, report):
+        (Path(root) / "inspection.json").write_text(json.dumps(report))
+        raw, _ = run.command(["dotnet", ROOT / "src/Parser/bin/Release/net10.0/Parser.dll", root,
+            "-", "Content", "/Game", pak])
+        path.write_bytes(raw)
+    require(ingest(pak, inspector=inspect)["ingestion_status"] == "validated", "boundary ingestion failed")
+    facts = json.loads(path.read_bytes())
+    def reversed_inspect(root, inspection):
+        inspection["records"].reverse()
+        (Path(root) / "inspection.json").write_text(json.dumps(inspection))
+        raw, _ = run.command(["dotnet", ROOT / "src/Parser/bin/Release/net10.0/Parser.dll", root,
+            "-", "Content", "/Game", pak])
+        require(json.loads(raw) == facts, "boundary record order changed facts")
+    require(ingest(pak, inspector=reversed_inspect)["ingestion_status"] == "validated", "reordered boundary ingestion failed")
+    members = {m["path"]: m for m in facts["inspection"]["members"]}
+    require(members["Content/Base.uasset"]["inspection-status"] in ("parsed", "partial"), "mandatory Base facts lost")
+    require(members["Content/ChildOverride.uasset"]["inspection-status"] in ("parsed", "partial"), "later package lost")
+    policy = (ROOT / "fixtures/corpus/policy.yaml").read_text() + """
+  - id: exact-base-declaration
+    description: Original declaration identity
+    effect: forbid
+    match:
+      kind: invocation
+      target:
+        kind: exact
+        owner: /Game/Base.Type
+        function: Sensitive
+"""
+    report = run.evaluate(path, policy=policy)
+    if mode == "package-context-budget":
+        require(len(facts["analysis"]["invocations"]) == 5006, "combined budget erased mandatory calls")
+        dispatches = facts["analysis"]["dispatches"]
+        # The existing optional transport bound retains a prefix, independently
+        # of the package candidate bound tested through Read/Inspect/Validate.
+        require(0 < len(dispatches) < 5004, "bounded dispatch prefix lost")
+        require(sum(len(d["candidates"]) for d in dispatches) == 2 * len(dispatches) <= 10000,
+                "combined wire candidate budget exceeded")
+        require({"incomplete-extraction", "unresolved-dispatch"} <= set(facts["analysis"]["coverage-gaps"]),
+                "missing optional limit diagnostics")
+        require(not facts["analysis"]["call-graph"]["complete"], "bounded graph fallback claimed completeness")
+        require(len(members) == 10 and all(m["inspection-status"] in ("parsed", "partial", "paired_export_data")
+                for m in members.values()), "mandatory package inventory lost")
+        base_calls = [c for c in facts["analysis"]["invocations"] if c["location"]["function"] == "/Game/Base.Type:Run#4"]
+        require(len(base_calls) == 5002 and base_calls[0]["target"] ==
+                {"kind": "resolved", "owner": "/Game/Base.Type", "function": "Sensitive"}, "Base calls/direct target lost")
+        require(members["Content/Base.uasset"]["inspection-status"] == "partial", "limited package not partial")
+        require(any(f["target"] == {"owner": "/Game/Base.Type", "function": "Sensitive"}
+                    for f in report["forbidden-invocations"]), "mandatory exact forbid lost")
+        stripped = copy.deepcopy(facts)
+        stripped["analysis"].pop("dispatches")
+        stripped_path = run.root / (mode + "-direct.json")
+        stripped_path.write_text(json.dumps(stripped))
+        direct = run.evaluate(stripped_path, policy=policy)
+        for key in ("counts", "forbidden-invocations", "flagged-invocations"):
+            require(direct[key] == report[key], "optional budget changed direct evidence: " + key)
+    else:
+        dispatch = next(d for d in report["possible-dispatches"]
+                        if d["evidence"]["origin"]["function"] == "/Game/Caller.Caller:Run#5"
+                        and d["evidence"]["origin"]["offset"] == 22)
+        candidates = dispatch["evidence"]["candidates"]
+        require({"owner": "/Game/Base.Type", "function": "Sensitive", "provenance": "inherited-function"}
+                in candidates, "case import shadowed declaration")
+        require({"owner": "/game/base.tYpE", "function": "SENSITIVE", "provenance": "imported-function"}
+                in candidates, "original import evidence lost")
+        require(dispatch["possibly-forbidden"], "exact canonical possible forbid lost")
+        require(any(w["callers"] and w["callers"][0]["origin"]["function"] == "/Game/Caller.Caller:Run#5"
+                    for w in report["call-chains"]["witnesses"]), "case import erased cross-package chain")
+    if image:
+        import scan
+        config = run.root / (mode + "-docker-config")
+        config.mkdir()
+        docker = scan.Docker(config, image, 60)
+        status, raw = docker.run(scan.mount(pak, "/input/submission"), "/usr/local/bin/python3",
+            ["-m", "pak_ingest.container_parser", "-", "Content", "/Game"], parser=True)
+        require(status == 0 and json.loads(raw) == facts, "boundary container facts parity")
+        destination = run.root / (mode + "-wrapper-report.json")
+        run.command([sys.executable, ROOT / "scripts/scan.py", "scan", "--pak", pak, "--report", destination,
+            "--engine-version", "4.25", "--image", docker.image, "--content-root", "Content=/Game"],
+            env={"UE_PAK_POLICY_RULES": policy}, timeout=120, codes=(1,))
+        require(report_validation.load(destination.read_bytes(), ROOT) == report, "boundary wrapper report parity")
+        workspace = run.root / (mode + "-action")
+        workspace.mkdir()
+        output, summary = workspace / "outputs", workspace / "summary"
+        output.touch(); summary.touch()
+        logs = run.command([sys.executable, ROOT / "scripts/action.py", "scan"], env={
+            "UE_PAK_POLICY_RULES": policy, "UE_PAK_ACTION_IMAGE": docker.image, "GITHUB_WORKSPACE": str(workspace),
+            "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary), "INPUT_PAK": str(pak),
+            "INPUT_REPORT": "report.json", "INPUT_CONTENT_ROOT": "Content=/Game"}, timeout=120, codes=(1,), cwd=workspace)
+        raw = (workspace / "report.json").read_bytes()
+        require(report_validation.load(raw, ROOT) == report, "boundary Action report parity")
+        privacy(logs, raw + output.read_bytes() + summary.read_bytes())
+    return facts, report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="new private directory outside checkout")
@@ -585,6 +687,8 @@ def main():
         call_chain_gate(run, args.docker_image)
         data_policy_gate(run, policy)
         package_context_gate(run, args.docker_image)
+        for mode in ("package-context-budget", "package-context-case"):
+            package_context_boundary_gate(run, mode, args.docker_image)
         if args.docker_image:
             integrated(run, args.docker_image, pak, expected, policy)
         if args.owned_evidence:

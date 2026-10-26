@@ -173,7 +173,13 @@ internal sealed class IndirectDispatchResolver
             PolicyYaml.IsIdentifier(name) ? name : null,
             receiverKind, "possible", candidates.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),
             diagnostics.Order(StringComparer.Ordinal).ToImmutableArray(), source);
-        return archiveContext?.Augment(dispatch, asset, input, receiverClass, limits.MaxTargets) ?? dispatch;
+        if (archiveContext is null) return dispatch;
+        // Local and archive candidates share the validator's per-package budget.
+        // Charge the retained delta, including distinct exact declaration spellings.
+        var augmented = archiveContext.Augment(dispatch, asset, input, receiverClass, limits.MaxTargets,
+            PolicyEvaluator.MaxInvocations - emitted);
+        emitted += augmented.Candidates.Length - dispatch.Candidates.Length;
+        return augmented;
     }
 
     private (string Kind, int Class) Receiver(KismetExpression expression, int self) => expression switch

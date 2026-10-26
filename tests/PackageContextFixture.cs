@@ -83,9 +83,28 @@ internal static class PackageContextFixture
         return new() { ["Base"] = parent, ["ChildOverride"] = child, ["Interface"] = face, ["Caller"] = caller, ["Collision"] = unrelated };
     }
 
-    internal static void Write(string root)
+    internal static void Boundary(Dictionary<string, UAsset> assets, int calls = 5001, bool local = true)
+    {
+        var asset = assets["Base"];
+        if (!local) asset.Exports[2].ObjectName = new(asset, "Other");
+        var run = (FunctionExport)asset.Exports[3];
+        run.ScriptBytecode = new KismetExpression[] { new EX_FinalFunction { StackNode = new(3), Parameters = [] } }
+            .Concat(Enumerable.Range(0, calls).Select(_ => Virtual(asset))).ToArray();
+        run.ScriptBytecodeSize = run.ScriptBytecode.Sum(e => (int)e.GetSize(asset));
+    }
+
+    internal static void CaseImport(Dictionary<string, UAsset> assets)
+    {
+        var caller = assets["Caller"];
+        caller.Imports.Add(new Import("/Script/CoreUObject", "Function", new(-6), "SENSITIVE", false, caller));
+    }
+
+    internal static void Write(string root, string mode = "package-context")
     {
         Directory.CreateDirectory(root);
-        foreach (var (name, asset) in Create()) asset.Write(Path.Combine(root, name + ".uasset"));
+        var assets = Create();
+        if (mode == "package-context-budget") Boundary(assets);
+        if (mode == "package-context-case") CaseImport(assets);
+        foreach (var (name, asset) in assets) asset.Write(Path.Combine(root, name + ".uasset"));
     }
 }

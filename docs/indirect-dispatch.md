@@ -65,6 +65,10 @@ Hash/schema checks do not authenticate parser semantics or submitted base classe
   insensitively; original declaration spelling is retained. A same-name class in
   another package is not the same class. Imported class links must name an actual
   class import; missing/invalid indices are not guessed from `ToString` fallbacks.
+  Candidate deduplication uses exact owner/function identities, matching policy,
+  call-chain and wire consumers. A differently cased import cannot suppress an
+  unambiguous archive declaration; both spellings retain their provenance and
+  each consumes candidate budget. Ambiguous declarations remain unknown.
 - Validated observed inheritance yields `inherited-function`, `override` or
   `interface-implementation` provenance. An unknown receiver/partial ancestry can
   also retain `archive-function` candidates without claiming a relationship.
@@ -85,8 +89,10 @@ Hard archive-index bounds (lowerable in the trusted library API): 4,096 classes,
 4,096 function definitions, 10,000 hierarchy edges, 100,000 shared index/query
 operations, 256 ancestry depth, 262,144 retained UTF-16 text units, 10,000 added
 candidates and 10,000 augmented origins. Each package indexes at most 4,096 exports.
-Existing per-dispatch and parser-global origin/candidate/transport budgets still
-apply; a limit never stops mandatory call extraction, inventory or later packages.
+Local candidates and archive additions share the 10,000-candidate package budget
+and per-dispatch target limit. Archive additions also consume the shared archive
+budget. Existing parser-global origin/candidate/transport budgets still apply;
+a limit never stops mandatory call extraction, inventory or later packages.
 The parser sorts records by virtual path before both passes, independently of
 archive enumeration. Bounds are post-parse; upstream decoding still requires the
 existing process/cgroup isolation.
@@ -103,6 +109,10 @@ witnesses across ingestion/Parser/evaluator/wrapper/Action. Its fifth removal
 mutation removes a cross-package override candidate without changing counts;
 schema validation accepts the mutation but the semantic oracle rejects it.
 No generated asset is committed and no owned cooked evidence is changed.
+Boundary regressions also serialize 5,001 virtual calls after a direct sensitive
+call, plus an unused case-variant import. They check composed candidate limits,
+unchanged mandatory calls and inventory, transport-prefix fallback, exact policy
+matches and possible cross-package chains through the actual parser and Docker.
 
 ## Narrow engine-source timer hypothesis
 

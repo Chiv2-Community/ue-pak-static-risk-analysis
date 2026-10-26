@@ -49,6 +49,12 @@ class PackageContextTests(unittest.TestCase):
         self.assertEqual([], self.facts["dependencies"])
         self.assertEqual(corpus.digest(self.pak.read_bytes()), self.report["context"]["pak-sha256"])
 
+    def test_combined_candidate_limit_keeps_large_package_direct_forbid_and_later_packages(self):
+        corpus.package_context_boundary_gate(self.runner, "package-context-budget")
+
+    def test_unused_case_variant_import_keeps_exact_declaration_policy_and_chain(self):
+        corpus.package_context_boundary_gate(self.runner, "package-context-case")
+
     def test_reordered_manifest_preserves_all_facts(self):
         self.assertEqual(self.facts, self.parse(self.pak, reverse=True))
 
