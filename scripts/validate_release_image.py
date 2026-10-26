@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import posixpath
 import re
 
 from collect_base_sources import RELEASE, inventory
@@ -16,21 +15,38 @@ def require(value):
         raise ValueError('rebuilt image metadata/source coverage mismatch; review the baseline before publication')
 
 
-def doc_hash(docs, path):
+def doc_path(docs, path):
     # Resolve metadata-only relative aliases; never follow a host/container link.
-    for _ in range(20):
-        parts = path.split('/')
-        for i in range(1, len(parts) + 1):
-            prefix = '/'.join(parts[:i])
+    directories = {'/'.join(parts[:i]) for p in docs for parts in [p.split('/')]
+                   for i in range(1, len(parts))}
+    pending = path.split('/')
+    resolved = []
+    links = 0
+    while pending:
+        part = pending.pop(0)
+        if part in ('', '.'):
+            continue
+        if part == '..':
+            require(resolved)
+            resolved.pop()
+        else:
+            resolved.append(part)
+            prefix = '/'.join(resolved)
+            require(prefix in docs or prefix in directories)
             entry = docs.get(prefix, {})
             if 'link' in entry:
-                require(not entry['link'].startswith('/'))
-                path = posixpath.normpath(posixpath.join(posixpath.dirname(prefix), entry['link'], *parts[i:]))
-                require(path != '..' and not path.startswith('../'))
-                break
-        else:
-            return docs.get(path, {}).get('sha256')
-    raise ValueError('documentation alias loop rejected')
+                links += 1
+                require(links <= 20 and entry['link'] and not entry['link'].startswith('/'))
+                resolved.pop()
+                # Expand the target before processing children or '..'.
+                pending = entry['link'].split('/') + pending
+            elif pending:
+                require(prefix in directories and 'sha256' not in entry)
+    return '/'.join(resolved)
+
+
+def doc_hash(docs, path):
+    return docs.get(doc_path(docs, path), {}).get('sha256')
 
 
 def validate(actual, python_stage, baseline, sources):
@@ -51,10 +67,14 @@ def validate(actual, python_stage, baseline, sources):
     for path, digest in baseline['python-spdx-copyright-sha256'].items():
         require(doc_hash(docs, path) == digest)
     # SPDX lists copyright files, not the whole doc tree. The full tree above
-    # must equal the exact pinned Python stage; stop on unassociated directories.
+    # must equal the exact pinned Python stage; aliases must resolve to covered
+    # entries, and unassociated regular directories still stop publication.
     covered = {p.split('/')[0] for e in baseline['debian-doc-sources'] for p in
                [path.removeprefix('usr/share/doc/') for path in e['doc_paths']]}
-    require(all(p.split('/')[0] in covered for p in docs))
+    for p in docs:
+        top = p.split('/')[0]
+        require(top in covered or 'link' in docs.get(top, {}))
+        require(doc_path(docs, p).split('/')[0] in covered)
     groups = {(e['group'], e['source'], e['version']) for e in sources}
     for p in actual['ubuntu-packages']:
         source = p['Source'] or p['Package']
