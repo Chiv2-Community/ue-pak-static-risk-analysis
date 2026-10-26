@@ -43,6 +43,30 @@ The GPL does not grant rights to Unreal Engine, game assets, mappings, keys or
 private policies. None is included in the release source bundle.
 See [corresponding source and build instructions](container/CORRESPONDING-SOURCE.md).
 
+### Third-party attribution
+
+Thanks to the authors and contributors of these projects:
+
+| Component | Use | License / notices |
+| --- | --- | --- |
+| [UAssetAPI](https://github.com/atenfyr/UAssetAPI) | Cooked assets and Blueprint bytecode | MIT; retained upstream LICENSE and NOTICE include adopted MIT/BSD/Apache code |
+| [Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json) | Asset-parser JSON | MIT |
+| [YamlDotNet](https://github.com/aaubry/YamlDotNet) | Policy YAML | MIT |
+| [ZstdSharp.Port](https://github.com/oleg-st/ZstdSharp) | UAssetAPI dependency | MIT; upstream zstd notices retained |
+| [.NET](https://github.com/dotnet/runtime) | Parser/evaluator runtime | MIT and retained third-party notices |
+| [CPython](https://github.com/python/cpython) | Pak reader and host tools | PSF and included third-party licenses |
+| [pip](https://github.com/pypa/pip) | Included by the Python base image | MIT and vendored dependency notices, including certifi (MPL-2.0) |
+| [certifi](https://github.com/certifi/python-certifi) | Vendored by pip in the Python base image | MPL-2.0 |
+| [Ubuntu](https://ubuntu.com/) and [Debian](https://www.debian.org/) | Container OS and copied Python-stage documentation | Individual package licenses and copyright notices |
+| [repak](https://github.com/trumank/repak) | Optional development/differential tool; not shipped in the scanner image | MIT OR Apache-2.0 |
+
+Exact revisions, package versions and source links are recorded in the
+[runtime inventory](container/licenses/README.md),
+[release metadata](releases/v0.1.0/README.md) and lockfiles. Required upstream
+license/copyright notices remain in the image; see those inventories for paths.
+Dependency source archives are not mirrored by the release workflow. These
+credits do not replace the components' license terms or certify compliance.
+
 ## Build and test
 
 Requires Linux, .NET SDK 10, Python 3.11+, and Git. See the

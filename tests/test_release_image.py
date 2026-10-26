@@ -303,9 +303,7 @@ class ImageGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=TEMP, prefix='release-record-') as temporary:
             root = Path(temporary) / 'candidate'
             root.mkdir()
-            (root / 'base-sources').mkdir()
-            for name in ('base-sources/base-source.tar', 'base-sources/source-inventory.json',
-                         'image.tar.gz', 'image-baseline.json'):
+            for name in ('dependency-source-inventory.json', 'image.tar.gz', 'image-baseline.json'):
                 (root / name).write_bytes(b'fixture')
             (root / 'image-id.txt').write_text('sha256:' + 'a' * 64 + '\n')
             (root / 'docker-version.txt').write_text('1/1\n')
@@ -322,7 +320,11 @@ class ImageGateTests(unittest.TestCase):
                 release_record.main()
             record = json.loads((root / 'build-record.json').read_bytes())
             self.assertEqual('PENDING', record['image'])
-            self.assertIn('base-sources/base-source.tar', record['artifact-sha256'])
+            self.assertIn('dependency-source-inventory.json', record['artifact-sha256'])
+            self.assertNotIn('base-sources/base-source.tar', record['artifact-sha256'])
+            self.assertEqual('upstream links only; not mirrored or availability-certified',
+                             record['dependency-source-delivery'])
+            self.assertFalse((root / 'base-sources').exists())
             sums = (root / 'SHA256SUMS').read_text().splitlines()
             self.assertEqual(len([p for p in root.rglob('*') if p.is_file()]) - 1, len(sums))
             for line in sums:

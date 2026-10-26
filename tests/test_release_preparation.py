@@ -120,13 +120,15 @@ class PublishedImageTests(unittest.TestCase):
         validation = '\n'.join(s.get('run', '') for s in workflow['jobs']['validate']['steps'])
         self.assertNotIn('docker login', validation)
         self.assertNotIn('docker push', validation)
-        self.assertIn('scripts/collect_base_sources.py', validation)
+        self.assertNotIn('scripts/collect_base_sources.py', validation)
+        self.assertIn('dependency-source-inventory.json', validation)
         self.assertIn('scripts/validate_release_image.py', validation)
         self.assertIn('scripts/release_record.py', validation)
         self.assertEqual({"contents": "read"}, workflow["permissions"])
         self.assertNotIn("permissions", workflow["jobs"]["validate"])
         self.assertEqual("write", workflow["jobs"]["publish"]["permissions"]["packages"])
         source = (ROOT / ".github/workflows/release-candidate.yml").read_text()
+        self.assertNotIn('base-sources/', source)
         self.assertNotIn("gh release", source)
         self.assertNotIn("git push", source)
         self.assertIn("--password-stdin", source)
@@ -138,6 +140,14 @@ class PublishedImageTests(unittest.TestCase):
         for name in ("COPY LICENSE", "COPY container/CORRESPONDING-SOURCE.md", "ThirdPartyNotices.txt", "python3.12/LICENSE.txt"):
             self.assertIn(name, dockerfile)
         self.assertNotIn("action-image.json", dockerfile)
+
+    def test_readme_attribution_and_no_dependency_mirroring_claim(self):
+        readme = (ROOT / 'README.md').read_text()
+        for name in ('UAssetAPI', 'Newtonsoft.Json', 'YamlDotNet', 'ZstdSharp.Port',
+                     'CPython', 'pip', 'certifi', 'Ubuntu', 'Debian', 'repak'):
+            self.assertIn('[' + name + ']', readme)
+        self.assertIn('Dependency source archives are not mirrored', readme)
+        self.assertIn("do not replace the components' license terms", readme)
 
 
 if __name__ == "__main__":

@@ -46,8 +46,9 @@ def main():
               'ubuntu-packages': actual['ubuntu-packages'],
               'docker-client-server-version': (root / 'docker-version.txt').read_text().strip(),
               'artifact-sha256': {name: digest(root / name) for name in
-                  ['source.tar.gz', 'base-sources/base-source.tar', 'base-sources/source-inventory.json',
-                   'image-metadata.json', 'python-stage-metadata.json', 'image-baseline.json']},
+                  ['source.tar.gz', 'dependency-source-inventory.json',
+                    'image-metadata.json', 'python-stage-metadata.json', 'image-baseline.json']},
+              'dependency-source-delivery': 'upstream links only; not mirrored or availability-certified',
               'source-delivery': 'authenticated three-day staging only; durable public assets pending',
               'public-unauthenticated-pull': 'pending-operator-verification'}
     (root / 'build-record.json').write_text(json.dumps(record, sort_keys=True, indent=2) + '\n')
