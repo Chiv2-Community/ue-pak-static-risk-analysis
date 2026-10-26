@@ -138,6 +138,21 @@ Default info omits policy from scanner-controlled logs. Environment is not
 automatically masked; host/container/runner administrators and GitHub step setup
 may expose it. Never claim that scanner filtering alone provides confidentiality.
 
+## Corresponding-source bundle
+
+`python3 scripts/source_bundle.py` reads committed Git objects only; no Docker,
+publication, workspace archive or generic submodule-omitting Git archive.
+
+| Option | Type | Default | Example | Notes |
+| --- | --- | --- | --- | --- |
+| `--repository` | trusted Git repository path | script parent repository | `/approved/source` | Exact objects, not dirty workspace bytes. |
+| `--build-source` | full lowercase 40-hex commit | required | `FULL_COMMIT_A` | Actual image build source. |
+| `--action-source` | full lowercase 40-hex commit | required | `FULL_COMMIT_B` | Final Action source; image inputs must equal A. |
+| `--uasset-repository` | trusted Git repository path | required | `vendor/UAssetAPI` | Must contain exact pinned library commit; read-only. |
+| `--output` | new archive path | required | `/approved/new-source.tar.gz` | Exclusive create; deterministic metadata and per-file hashes. |
+
+See [release gates](releases.md) and [source/build instructions](../container/CORRESPONDING-SOURCE.md).
+
 ## Regression runner
 
 `python3 scripts/regression_corpus.py`:
@@ -229,4 +244,7 @@ existing runner `GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` files and the internal
 `UE_PAK_ACTION_IMAGE` preparation result. Do not let submitters select that image
 or use test environment overrides as supported Action inputs. Preparation has
 no policy/credential environment; scan forwards only the shared raw-policy
-variable to trusted evaluators. See [archive-safe preparation](action.md#archive-safe-build).
+variable to trusted evaluators. Released Actions use a checked-in public digest pin;
+source-only development uses the [archive-safe build](action.md#archive-safe-build).
+No runner image override or registry credentials are accepted. The pending
+four-key `action-image.json` and actual source identities follow [release gates](releases.md).

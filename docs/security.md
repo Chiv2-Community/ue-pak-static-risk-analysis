@@ -22,6 +22,13 @@ into the parser. Keep trusted workflow/source/policy out of submitter control.
 
 ## Compatibility and unsupported analysis
 
+Release image preparation trusts the reviewed Action commit's `action-image.json`,
+not submission inputs or runner registry settings. Public digest pulls use an
+isolated empty Docker config/HOME and stripped environment; RepoDigests and Linux
+amd64 are checked. A malformed manifest fails closed. Source-only development
+builds remain available when the manifest is absent. Neither a source label nor
+the manifest alone authenticates build provenance; verify the release record.
+
 The hardened scanner accepts **ordinary sequential V9** legacy pak indices,
 222-byte footers, ASCII paths, no encryption, and uncompressed entry index 0 or
 explicit Zlib blocks. Frozen indices, other versions, encryption/keys, Oodle and

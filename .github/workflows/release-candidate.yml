@@ -1,0 +1,161 @@
+name: Manually approved public image candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.repository == 'Chiv2-Community/ue-pak-static-risk-analysis' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build exact dispatched source; labels are assertions, not proof
+        env:
+          SOURCE: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          test -z "$(git status --porcelain)"
+          docker build --platform linux/amd64 --tag ue-pak-candidate:validated \
+            --label org.opencontainers.image.source=https://github.com/Chiv2-Community/ue-pak-static-risk-analysis \
+            --label "org.opencontainers.image.revision=$SOURCE" \
+            --label org.opencontainers.image.licenses=GPL-3.0-only \
+            --label "org.opencontainers.image.version=v0.1.0-candidate-$SOURCE" .
+      - name: Serial public synthetic component, Docker, Action and mutation gate
+        run: |
+          python3 -m venv "$RUNNER_TEMP/release-venv"
+          "$RUNNER_TEMP/release-venv/bin/pip" install -r tests/requirements.txt
+          "$RUNNER_TEMP/release-venv/bin/python" scripts/regression_corpus.py \
+            --components --docker-image ue-pak-candidate:validated \
+            --output "$RUNNER_TEMP/candidate-tests"
+      - name: Prepare only allowlisted image and source transfer
+        env:
+          SOURCE: ${{ github.sha }}
+        run: |
+          mkdir "$RUNNER_TEMP/candidate"
+          docker image inspect ue-pak-candidate:validated --format '{{.Id}}' > "$RUNNER_TEMP/candidate/image-id.txt"
+          docker version --format '{{.Client.Version}}/{{.Server.Version}}' > "$RUNNER_TEMP/candidate/docker-version.txt"
+          CID="$(docker create ue-pak-candidate:validated)"
+          trap 'docker rm "$CID" >/dev/null' EXIT
+          docker cp "$CID:/licenses/os-packages.tsv" "$RUNNER_TEMP/candidate/os-packages.tsv"
+          docker cp "$CID:/app/licenses" "$RUNNER_TEMP/candidate/app-licenses"
+          docker cp "$CID:/usr/share/dotnet/LICENSE.txt" "$RUNNER_TEMP/candidate/dotnet-LICENSE.txt"
+          docker cp "$CID:/usr/share/dotnet/ThirdPartyNotices.txt" "$RUNNER_TEMP/candidate/dotnet-ThirdPartyNotices.txt"
+          docker cp "$CID:/usr/local/lib/python3.12/LICENSE.txt" "$RUNNER_TEMP/candidate/CPython-LICENSE.txt"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'candidate'
+          assert sum(p.stat().st_size for p in root.rglob('*') if p.is_file()) <= 2 * 1024 * 1024
+          PY
+          docker save ue-pak-candidate:validated | gzip -n > "$RUNNER_TEMP/candidate/image.tar.gz"
+          python3 scripts/source_bundle.py --build-source "$SOURCE" --action-source "$SOURCE" \
+            --uasset-repository vendor/UAssetAPI --output "$RUNNER_TEMP/candidate/source.tar.gz"
+          cd "$RUNNER_TEMP/candidate"
+          sha256sum image.tar.gz source.tar.gz image-id.txt > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: validated-candidate
+          path: ${{ runner.temp }}/candidate/
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 0
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: validated-candidate
+          path: ${{ runner.temp }}/candidate
+      - name: Push validated candidate only; no final version, alias, tag or release
+        env:
+          SOURCE: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/candidate"
+          sha256sum --check SHA256SUMS
+          docker load --input image.tar.gz
+          test "$(docker image inspect ue-pak-candidate:validated --format '{{.Id}}')" = "$(cat image-id.txt)"
+          test "$(docker image inspect ue-pak-candidate:validated --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE"
+          export DOCKER_CONFIG="$RUNNER_TEMP/publication-docker"
+          mkdir -m 700 "$DOCKER_CONFIG"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -f "$DOCKER_CONFIG/config.json"' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+          unset GHCR_TOKEN
+          export IMAGE="ghcr.io/chiv2-community/ue-pak-static-risk-analysis:sha-$SOURCE"
+          if docker manifest inspect "$IMAGE" >/dev/null 2> existing-manifest-error.txt; then
+            echo 'Candidate tag already exists; refuse to overwrite.' >&2
+            exit 1
+          fi
+          grep -Eq 'manifest unknown|no such manifest' existing-manifest-error.txt
+          docker tag ue-pak-candidate:validated "$IMAGE"
+          docker push "$IMAGE"
+          docker image inspect "$IMAGE" --format '{{json .RepoDigests}}' > repo-digests.json
+          python3 - <<'PY'
+          import hashlib, json, os, re, tarfile
+          from pathlib import Path
+          namespace = 'ghcr.io/chiv2-community/ue-pak-static-risk-analysis'
+          digests = json.loads(Path('repo-digests.json').read_bytes())
+          matches = [d for d in digests if re.fullmatch(re.escape(namespace) + r'@sha256:[a-f0-9]{64}', d)]
+          assert len(matches) == 1
+          with tarfile.open('source.tar.gz') as archive:
+              prefix = 'ue-pak-static-risk-analysis/'
+              manifest_bytes = archive.extractfile(prefix + 'SOURCE-MANIFEST.json').read()
+              manifest = json.loads(manifest_bytes)
+              dockerfile = archive.extractfile(prefix + 'Dockerfile').read().decode()
+          notices = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in
+                     [*Path('app-licenses').rglob('*'), Path('dotnet-LICENSE.txt'),
+                      Path('dotnet-ThirdPartyNotices.txt'), Path('CPython-LICENSE.txt'), Path('os-packages.tsv')]
+                     if p.is_file()}
+          record = {'version': 'v0.1.0-candidate', 'build-source': os.environ['SOURCE'],
+                    'platform': 'linux/amd64', 'image': matches[0], 'tag': os.environ['IMAGE'],
+                    'run-id': os.environ['RUN_ID'], 'run-attempt': os.environ['RUN_ATTEMPT'],
+                    'source-sha256': hashlib.sha256(Path('source.tar.gz').read_bytes()).hexdigest(),
+                    'source-manifest-sha256': hashlib.sha256(manifest_bytes).hexdigest(),
+                    'uassetapi-source': manifest['uassetapi-source'],
+                    'base-images': re.findall(r'^FROM (\S+)', dockerfile, re.MULTILINE),
+                    'lockfiles': [f for f in manifest['files'] if f['path'].endswith('packages.lock.json')],
+                    'notice-inventory-sha256': notices,
+                    'docker-client-server-version': Path('docker-version.txt').read_text().strip(),
+                    'image-id': Path('image-id.txt').read_text().strip(),
+                    'public-unauthenticated-pull': 'pending-operator-verification'}
+          Path('build-record.json').write_text(json.dumps(record, sort_keys=True, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: public-candidate-record
+          path: |
+            ${{ runner.temp }}/candidate/build-record.json
+            ${{ runner.temp }}/candidate/source.tar.gz
+            ${{ runner.temp }}/candidate/SHA256SUMS
+            ${{ runner.temp }}/candidate/os-packages.tsv
+            ${{ runner.temp }}/candidate/app-licenses/
+            ${{ runner.temp }}/candidate/dotnet-LICENSE.txt
+            ${{ runner.temp }}/candidate/dotnet-ThirdPartyNotices.txt
+            ${{ runner.temp }}/candidate/CPython-LICENSE.txt
+            ${{ runner.temp }}/candidate/docker-version.txt
+          retention-days: 3
+          if-no-files-found: error

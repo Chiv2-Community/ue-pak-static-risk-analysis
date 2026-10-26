@@ -34,6 +34,14 @@ rules:
 """
 
 
+def development_action(destination):
+    """Isolate the explicit source-development test seam, even in pinned releases."""
+    shutil.copytree(ROOT / "scripts", destination / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(ROOT / "schemas", destination / "schemas")
+    shutil.copytree(ROOT / "pak_ingest", destination / "pak_ingest", ignore=shutil.ignore_patterns("__pycache__"))
+    return destination / "scripts/action.py"
+
+
 def finding(index=0, metadata="/Game/Owned"):
     return {"id": f"{index:064x}", "location": {"asset": metadata, "function": "Run", "offset": index},
             "target": {"owner": "/Script/Owned.Actor", "function": "Call"},
@@ -68,12 +76,14 @@ class ActionTests(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
-    def invoke(self, value=None, code=1, *, missing=False, extra=None):
+    def invoke(self, value=None, code=1, *, missing=False, extra=None, pin=None):
         source = self.root / "action"
         (source / "scripts").mkdir(parents=True, exist_ok=True)
         for name in ("action.py", "action_report.py", "report_validation.py"):
             shutil.copyfile(ROOT / "scripts" / name, source / "scripts" / name)
         shutil.copytree(ROOT / "schemas", source / "schemas", dirs_exist_ok=True)
+        if pin is not None:
+            (source / "action-image.json").write_text(json.dumps(pin))
         data = json.dumps(report() if value is None else value)
         stub = ("import os,sys\nfrom pathlib import Path\n"
                 "assert 'GITHUB_TOKEN' not in os.environ\n"
@@ -162,6 +172,21 @@ class ActionTests(unittest.TestCase):
         self.assertEqual("false", outputs["report-available"])
         self.assertIn("Status: failed", summary)
 
+    def test_published_scan_accepts_exact_registry_pin_and_keeps_outputs(self):
+        image = "ghcr.io/chiv2-community/ue-pak-static-risk-analysis@sha256:" + "b" * 64
+        pin = {"image": image, "platform": "linux/amd64", "version": "v0.1.0", "build-source": "a" * 40}
+        result, outputs, _ = self.invoke(pin=pin, extra={"UE_PAK_ACTION_IMAGE": image})
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("true", outputs["report-available"])
+
+    def test_published_scan_rejects_internal_override_with_failed_outputs(self):
+        pin = {"image": "ghcr.io/chiv2-community/ue-pak-static-risk-analysis@sha256:" + "b" * 64,
+               "platform": "linux/amd64", "version": "v0.1.0", "build-source": "a" * 40}
+        result, outputs, _ = self.invoke(pin=pin)
+        self.assertEqual(3, result.returncode)
+        self.assertEqual(["image-preparation-failed"], json.loads(outputs["diagnostics"]))
+        self.assertFalse((self.workspace / "report.json").exists())
+
     def test_wrapper_exit_and_report_status_must_agree(self):
         result, outputs, _ = self.invoke(code=3)
         self.assertEqual(3, result.returncode)
@@ -237,7 +262,7 @@ class ActionTests(unittest.TestCase):
                 self.assertFalse((context / "scripts").exists())
                 self.assertFalse((context / "tests").exists())
         with patch.dict(os.environ, dict(self.env, UE_PAK_POLICY_RULES=POLICY, GITHUB_TOKEN="secret"), clear=True), patch.object(action.subprocess, "run", side_effect=run):
-            action.prepare()
+            action.prepare_local()
         self.assertTrue(any(action.UASSET in call and "fetch" in call for call in calls))
         self.assertRegex(self.output.read_text(), r"^image=ue-pak-action:[a-f0-9]{32}\n$")
 
@@ -301,6 +326,7 @@ class ActionDockerTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix="action-docker-")
         self.root = Path(self.directory.name)
         self.image = subprocess.check_output(["docker", "image", "inspect", "--format", "{{.Id}}", IMAGE], text=True).strip()
+        self.action_script = development_action(self.root / "source-action")
 
     def tearDown(self):
         self.directory.cleanup()
@@ -323,7 +349,7 @@ class ActionDockerTests(unittest.TestCase):
         elif policy is not None:
             env["UE_PAK_POLICY_RULES"] = policy
         env.update(extra or {})
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/action.py"), "scan"], env=env,
+        result = subprocess.run([sys.executable, str(self.action_script), "scan"], env=env,
                                 cwd=workspace, capture_output=True, timeout=90)
         outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
         report_path = workspace / "report.json"

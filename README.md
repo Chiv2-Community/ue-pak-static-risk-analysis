@@ -22,12 +22,26 @@ Compatibility and legal-fidelity limits remain tracked in [issue #2](https://git
 
 Start with the [operator guide](docs/operators.md), [CLI/Action input tables](docs/inputs.md),
 [security boundaries](docs/security.md) and [controlled release checklist](docs/releases.md).
-No release/publication or expanded access is approved. [Partial indirect evidence](docs/indirect-dispatch.md)
+Release v0.1.0 preparation is authorized; publication and the real prebuilt image
+pin are pending operator verification. [Partial indirect evidence](docs/indirect-dispatch.md)
 does not close #8; [bounded call-chain evidence](docs/call-chains.md) is partial #9,
 not exact-game native catalog proof. Optional [private serialized-data rules](docs/data-policy.md)
 are partial #10, not effective-default or exact-game behavior proof. Native implementation
 analysis is not shipped; exact
 Windows/game fidelity and broader redistribution rights remain open.
+
+## License
+
+Original project code is Copyright (C) 2026 UE pak static-risk-analysis
+contributors, licensed under **GPL-3.0-only**: GNU GPL version 3, **not "or later"**.
+See [LICENSE](LICENSE). There is no warranty.
+
+Third-party code retains its own licenses and notices; it is not automatically
+relicensed under GPL. See UAssetAPI's retained LICENSE/NOTICE and the
+[runtime inventory and compatibility review](container/licenses/README.md).
+The GPL does not grant rights to Unreal Engine, game assets, mappings, keys or
+private policies. None is included in the release source bundle.
+See [corresponding source and build instructions](container/CORRESPONDING-SOURCE.md).
 
 ## Build and test
 

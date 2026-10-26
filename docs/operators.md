@@ -8,8 +8,9 @@ component documents, not this guide.
 
 ## Trusted Linux setup
 
-Use a disposable Linux VM, a non-root account, Python 3.11+, Git, and a working
+Use a disposable Linux amd64 VM, a non-root account, Python 3.11+, and a working
 local Docker installation at `/usr/bin/docker` with `/var/run/docker.sock`.
+Git is needed for source development, not a pinned prebuilt release consumer.
 Docker access is host-admin access. The host wrapper needs no .NET installation;
 local evaluator/tests require .NET SDK 10 (`global.json` selects stable 10.0.100
 with latest-feature roll-forward). Rust/Cargo and a C compiler are needed only
@@ -166,10 +167,11 @@ No private-policy example requires verbose. Restrict and expire diagnostic logs.
 ## Ubuntu Action and report collection
 
 Use the [Action guide](action.md) for complete file/env Ubuntu workflows and the
-[exact input table](inputs.md#action-inputs). The Action builds from trusted source
-and pinned public UAssetAPI, including an archive-safe submodule fallback. It
-does not pull a private scanner image or need registry credentials. Public Git
-and build dependency networking are required during preparation, not parsing.
+[exact input table](inputs.md#action-inputs). A released Action pulls its checked-in
+public immutable image digest using an empty Docker config, without credentials,
+Git, .NET SDK, NuGet or Cargo. Core preparation has no real manifest yet and
+retains the source-development build from pinned public UAssetAPI. Malformed
+published manifests never fall back to building. See [release gates](releases.md).
 
 Pin the remote Action to a reviewed full 40-character commit **only after** an
 owner approves and tests named private consumers. Current external access is
