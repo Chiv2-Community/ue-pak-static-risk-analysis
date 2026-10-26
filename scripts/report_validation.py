@@ -18,9 +18,12 @@ def compact(value):
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
 
 
+def location_key(location):
+    return (location["asset"], location["function"], location["offset"])
+
+
 def invocation_key(location, target):
-    return (location["asset"], location["function"], location["offset"],
-            None if target is None else (target["owner"], target["function"]))
+    return (*location_key(location), None if target is None else (target["owner"], target["function"]))
 
 
 def pairs(items):
@@ -146,24 +149,36 @@ def load(data, root, *, moderator_detail=False):
             require(item["id"] not in by_id or by_id[item["id"]] == shared)
             by_id[item["id"]] = shared
     require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
-    dispatch_origins = set()
+    dispatch_origins = {}
     candidate_count = 0
+    binding_origin_count = 0
     for dispatch in report.get("possible-dispatches", []):
         evidence = dispatch["evidence"]
-        origin = tuple(evidence["origin"][key] for key in ("asset", "function", "offset"))
+        origin = location_key(evidence["origin"])
         require(origin not in dispatch_origins)
-        dispatch_origins.add(origin)
+        dispatch_origins[origin] = evidence["kind"]
         require("open-world" in evidence["diagnostics"])
         require("unresolved-dispatch" in report["coverage"]["gaps"])
         require(evidence["source"] == ("ue425plus-2d1aae-kismet-timer" if evidence["kind"] == "timer" else "kismet-serialized-v1"))
         if evidence["kind"] == "timer":
             require("native-build-unverified" in evidence["diagnostics"])
         require(len({(c["owner"], c["function"]) for c in evidence["candidates"]}) == len(evidence["candidates"]))
-        require(all(evidence["function-name"] is not None and c["function"].lower() == evidence["function-name"].lower()
-                    for c in evidence["candidates"]))
+        if evidence["kind"] != "multicast":
+            require(all(evidence["function-name"] is not None and c["function"].lower() == evidence["function-name"].lower()
+                        for c in evidence["candidates"]))
+        bindings = evidence.get("possible-binding-origins", [])
+        binding_origin_count += len(bindings)
+        require(binding_origin_count <= 10000)
+        require(len({location_key(b) for b in bindings}) == len(bindings))
+        require(all(b["asset"] == evidence["origin"]["asset"] and b["function"] == evidence["origin"]["function"]
+                    and b["offset"] < evidence["origin"]["offset"] for b in bindings))
         candidate_count += len(evidence["candidates"])
         require(candidate_count <= 10000)
         require(bool(evidence["candidates"]) or not (dispatch["possibly-flagged"] or dispatch["possibly-forbidden"]))
+    # Retained evidence must contain each referenced binding; this is not a flow proof.
+    for dispatch in report.get("possible-dispatches", []):
+        require(all(dispatch_origins.get(location_key(b)) == "delegate-binding"
+                    for b in dispatch["evidence"].get("possible-binding-origins", [])))
     incomplete = bool(report["coverage"]["gaps"] or report["coverage"]["evaluation-incomplete"]
                       or report.get("content-policy", {}).get("incomplete", False)
                       or not report.get("data-analysis", {}).get("complete", True)

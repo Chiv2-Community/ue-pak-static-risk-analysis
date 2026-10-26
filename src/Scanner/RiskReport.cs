@@ -93,7 +93,8 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
                  .OrderBy(d => d.Origin.Asset, StringComparer.Ordinal).ThenBy(d => d.Origin.Function, StringComparer.Ordinal).ThenBy(d => d.Origin.Offset)
                  .Select(d => new ReportPossibleDispatch(d with
                      { Candidates = d.Candidates.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),
-                       Diagnostics = d.Diagnostics.Order(StringComparer.Ordinal).ToImmutableArray() },
+                        Diagnostics = d.Diagnostics.Order(StringComparer.Ordinal).ToImmutableArray(),
+                        PossibleBindingOrigins = d.PossibleBindingOrigins?.OrderBy(b => b.Offset).ToArray() },
                      PossibleEffect(d, RuleEffect.Flag), PossibleEffect(d, RuleEffect.Forbid))).ToArray() : null);
         return report.WithCallChains(facts.Analysis.CallGraph is not null || catalog is not null
             ? Scanner.CallChains.Analyze(facts.Analysis, evaluation, catalog) : null);

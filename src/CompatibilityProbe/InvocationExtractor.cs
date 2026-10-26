@@ -98,6 +98,7 @@ public static class InvocationExtractor
             var native = function.FunctionFlags.HasFlag(EFunctionFlags.FUNC_Native);
             if (native) local.Add(new("native-function-boundary", index));
             var visited = 0;
+            var delegateLinks = indirect is null ? null : new DelegateStorageLinks(asset, index, indirect);
             uint offset = 0;
             if (function.ScriptBytecode is null) local.Add(new("unparsed-bytecode", index));
             else if (function.ScriptBytecode.Length > limits.MaxArray) local.Add(new("expression-array-limit", index));
@@ -121,7 +122,11 @@ public static class InvocationExtractor
                                 if (dispatch is not null)
                                 {
                                     if (dispatches.Count >= PolicyEvaluator.MaxInvocations) local.Add(new("indirect-dispatch-limit", index, position));
-                                    else dispatches.Add(dispatch);
+                                    else
+                                    {
+                                        delegateLinks?.Observe(node, dispatches.Count, occurrence.Receivers);
+                                        dispatches.Add(dispatch);
+                                    }
                                     local.Add(new("indirect-dispatch-incomplete", index, position));
                                 }
                             }
@@ -142,6 +147,8 @@ public static class InvocationExtractor
                 }
                 if (offset != function.ScriptBytecodeSize) local.Add(new("bytecode-size-mismatch", index));
             }
+            try { delegateLinks?.Link(dispatches); }
+            catch (Exception error) when (error is not OutOfMemoryException) { local.Add(new("indirect-analysis-failed", index)); }
             functions.Add(new(identity, local.Count == 0, native, visited, local.ToImmutableArray()));
         }
         return Report(input, calls, functions, diagnostics, asset.Exports.Count, Math.Min(asset.Exports.Count, limits.MaxExports), dispatches);

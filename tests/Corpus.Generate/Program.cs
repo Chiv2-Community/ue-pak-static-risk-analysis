@@ -14,7 +14,13 @@ using System.Security.Cryptography;
 using System.Text.Json;
 
 // Original synthetic serialization, not engine-cooked or game-derived content.
-if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget" or "package-context" or "package-context-budget" or "package-context-case")) return 2;
+if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget" or "package-context" or "package-context-budget" or "package-context-case" or "delegate-flow" or "delegate-flow-budget")) return 2;
+if (args[0] is "delegate-flow" or "delegate-flow-budget")
+{
+    if (Directory.Exists(args[1])) return 2;
+    DelegateFlowFixture.Write(args[1], args[0] == "delegate-flow-budget");
+    return 0;
+}
 if (args[0] is "package-context" or "package-context-budget" or "package-context-case")
 {
     if (Directory.Exists(args[1])) return 2;

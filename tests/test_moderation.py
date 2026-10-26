@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from indirect_fixture import dispatch
+from indirect_fixture import dispatch, callback_dispatches, invalid_callback_dispatches
 
 try:
     from jsonschema import Draft202012Validator
@@ -36,6 +36,19 @@ def sha(data):
 
 
 class ModerationTests(unittest.TestCase):
+    def test_callback_relations_require_unique_retained_binding_evidence_at_handoff(self):
+        report = self.report(incomplete=True)
+        report["coverage"]["gaps"] = ["unresolved-dispatch"]
+        for opcode in ("EX_BindDelegate", "EX_InstanceDelegate"):
+            report["possible-dispatches"] = callback_dispatches(opcode)
+            self.assertEqual(["analysis-incomplete"], mod.handoff(
+                encoded(report), self.context, self.pak, self.dependencies)["routes"])
+        for name, items in invalid_callback_dispatches():
+            with self.subTest(case=name):
+                report["possible-dispatches"] = items
+                with self.assertRaises(reports.InvalidReport):
+                    mod.handoff(encoded(report), self.context, self.pak, self.dependencies)
+
     def test_reordered_duplicate_dispatch_origin_rejected_at_handoff(self):
         report = self.report(incomplete=True)
         report["coverage"]["gaps"] = ["unresolved-dispatch"]

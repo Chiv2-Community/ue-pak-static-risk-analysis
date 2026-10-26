@@ -8,7 +8,7 @@ using UAssetAPI.Kismet.Bytecode.Expressions;
 
 namespace PakRisk.Extraction;
 
-// Open-world, package-local evidence. No control-flow or binding-lifetime assertion.
+// Open-world evidence. Callback storage links do not establish execution or lifetime.
 internal sealed class IndirectDispatchResolver
 {
     private readonly UAsset asset;
@@ -20,6 +20,42 @@ internal sealed class IndirectDispatchResolver
     private int work;
     private int emitted;
     private bool indexLimited;
+    private int linkedOrigins;
+
+    internal bool FlowWork() => ++work <= limits.MaxOccurrences;
+    internal int FlowArrayLimit => limits.MaxArray;
+
+    internal IndirectDispatch LinkBindings(IndirectDispatch dispatch, IEnumerable<IndirectDispatch> bindings)
+    {
+        var candidates = dispatch.Candidates.ToBuilder();
+        var seen = candidates.Select(c => (c.Owner, c.Function)).ToHashSet();
+        var origins = new List<InvocationLocation>();
+        var limited = false;
+        foreach (var binding in bindings)
+        {
+            if (!FlowWork() || origins.Count >= limits.MaxTargets || linkedOrigins >= PolicyEvaluator.MaxInvocations)
+            { limited = true; break; }
+            origins.Add(binding.Origin);
+            linkedOrigins++;
+            foreach (var candidate in binding.Candidates)
+            {
+                if (!FlowWork()) { limited = true; break; }
+                if (seen.Contains((candidate.Owner, candidate.Function))) continue;
+                if (candidates.Count >= limits.MaxTargets || emitted >= PolicyEvaluator.MaxInvocations)
+                { limited = true; break; }
+                seen.Add((candidate.Owner, candidate.Function));
+                candidates.Add(candidate);
+                emitted++;
+            }
+            if (limited) break;
+        }
+        return dispatch with
+        {
+            Candidates = candidates.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),
+            PossibleBindingOrigins = origins.Count == 0 ? null : origins.ToArray(),
+            Diagnostics = limited ? dispatch.Diagnostics.Append("target-expansion-limit").Distinct().Order(StringComparer.Ordinal).ToImmutableArray() : dispatch.Diagnostics
+        };
+    }
 
     internal IndirectDispatchResolver(UAsset asset, PackageInput input, ExtractionLimits limits, ArchiveDispatchContext? archiveContext = null)
     {

@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from ingestion_fixture import build
-from indirect_fixture import dispatch
+from indirect_fixture import dispatch, callback_dispatches, invalid_callback_dispatches
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -189,6 +189,23 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(3, result.returncode, result.stderr)
         self.assertEqual(["invalid-report"], json.loads(outputs["diagnostics"]))
         self.assertEqual("false", outputs["report-available"])
+
+    def test_callback_relations_require_unique_retained_binding_evidence_before_publication(self):
+        value = report()
+        value.update(status="partial", **{"analysis-complete": False})
+        value["coverage"]["gaps"] = ["unresolved-dispatch"]
+        value["possible-dispatches"] = callback_dispatches("EX_InstanceDelegate")
+        result, outputs, _ = self.invoke(value)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("true", outputs["report-available"])
+        for name, items in invalid_callback_dispatches():
+            with self.subTest(case=name):
+                (self.workspace / "report.json").unlink(missing_ok=True)
+                value["possible-dispatches"] = items
+                result, outputs, _ = self.invoke(value)
+                self.assertEqual(3, result.returncode, result.stderr)
+                self.assertEqual(["invalid-report"], json.loads(outputs["diagnostics"]))
+                self.assertEqual("false", outputs["report-available"])
 
     def test_report_paths_do_not_overwrite_or_escape(self):
         for path in ("../escape", str(self.output), "report\nFORGED=1", "new/absent/report", "report.json"):

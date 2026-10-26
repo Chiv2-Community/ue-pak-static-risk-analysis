@@ -52,6 +52,7 @@ producer output. There is no baseline-update mode.
 | Synthetic `Unresolved` | Earlier call retained; virtual VM 10 remains unresolved; separate possible `DynamicDispatch` forbid | Same generator |
 | Synthetic `Unsupported` | Earlier call retained; lossy ANSI string rejects later root/offset evidence | Same generator |
 | Same-pak class context | Five separate packages; override/interface/unknown-receiver candidates, unrelated name collisions and possible upstream witnesses | `tests/PackageContextFixture.cs`; `fixtures/corpus/package-context-expectations.json` |
+| Delegate storage | Exact local/instance identities, assignment/add/copy, unbound names, retained clear/remove/reassignment history, possible multicast relations; direct VM 0 and multicast VM 52/81/119/180/241 | `tests/DelegateFlowFixture.cs`; runner oracle |
 | Aggregate policy | 10 calls, 6 forbidden, 1 flagged, 7 affected; all three global gaps and evaluation uncertainty | `fixtures/corpus/policy.yaml` |
 | Hostile archives | 16 seeded truncations, traversal, case collision, expansion bomb rejected; valid control accepted | Runner and existing pak builder |
 | Boundary properties | 32 seeded iterations each: YAML/AST roundtrip and invalid schema, serialized bytecode offsets/truncation, facts roundtrip/duplicate keys, invalid output locations | Generator/runner; seed `150425` |
@@ -77,7 +78,8 @@ not engine-cooked**, even when a synthetic package uses the `.umap` extension.
   dispatch evidence. All remain
   schema-valid and must fail the independent expectation checker.
 - Two additional schema-valid mutations remove a reviewed data finding and a
-  cross-package override candidate. Five removal mutations run in total; the
+  cross-package override candidate. A sixth removes a multicast binding relation
+  without changing direct counts or possible effects. Six mutations run in total; the
   archive candidate oracle checks identities/provenance/origins, not just counts.
 - All eight gate combinations must preserve report evidence. File/environment
   sources and error/warn/info/verbose must produce identical reports. Malformed

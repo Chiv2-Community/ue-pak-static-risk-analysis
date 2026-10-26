@@ -243,8 +243,9 @@ public sealed class PolicyEvaluator
                     || !keys.Add((function.Asset, function.LocationFunction))
                     || (characters += CallGraphContext.Characters(function)) > CallGraphContext.MaxCharacters) InvalidFacts();
         }
-        var origins = new HashSet<InvocationLocation>();
+        var origins = new Dictionary<InvocationLocation, IndirectDispatch>();
         var candidates = 0;
+        var bindingOrigins = 0;
         if (analysis.Dispatches is { } dispatches)
         {
             if (dispatches.Length > MaxInvocations) InvalidFacts();
@@ -252,7 +253,7 @@ public sealed class PolicyEvaluator
             {
                 if (dispatch is null || dispatch.SchemaVersion != 1 || dispatch.Origin is null
                     || !Text(dispatch.Origin.Asset) || !Text(dispatch.Origin.Function) || dispatch.Origin.Offset < 0
-                    || !origins.Add(dispatch.Origin) || !ValidDispatchOpcode(dispatch.Opcode, dispatch.Kind)
+                    || !origins.TryAdd(dispatch.Origin, dispatch) || !ValidDispatchOpcode(dispatch.Opcode, dispatch.Kind)
                     || dispatch.FunctionName is not null && !PolicyYaml.IsIdentifier(dispatch.FunctionName)
                     || dispatch.Receiver is not ("self" or "object" or "interface" or "unknown")
                     || dispatch.Resolution != "possible" || dispatch.Candidates.IsDefault
@@ -266,10 +267,23 @@ public sealed class PolicyEvaluator
                 var seen = new HashSet<(string, string)>();
                 foreach (var candidate in dispatch!.Candidates)
                     if (candidate is null || !PolicyYaml.IsOwner(candidate.Owner) || !PolicyYaml.IsIdentifier(candidate.Function)
-                        || !string.Equals(candidate.Function, dispatch.FunctionName, StringComparison.OrdinalIgnoreCase)
+                        || dispatch.Kind != "multicast" && !string.Equals(candidate.Function, dispatch.FunctionName, StringComparison.OrdinalIgnoreCase)
                         || !seen.Add((candidate.Owner, candidate.Function))
-                        || candidate.Provenance is not ("local-function" or "inherited-function" or "override" or "interface-implementation" or "imported-function" or "archive-function")) InvalidFacts();
+                         || candidate.Provenance is not ("local-function" or "inherited-function" or "override" or "interface-implementation" or "imported-function" or "archive-function")) InvalidFacts();
+                if (dispatch.PossibleBindingOrigins is { } bindings)
+                {
+                    if (dispatch.Kind != "multicast" || bindings.Length is < 1 or > MaxDispatchCandidates
+                        || (bindingOrigins += bindings.Length) > MaxInvocations || bindings.Distinct().Count() != bindings.Length) InvalidFacts();
+                    foreach (var binding in bindings)
+                        if (binding is null || binding.Asset != dispatch.Origin.Asset || binding.Function != dispatch.Origin.Function
+                            || binding.Offset < 0 || binding.Offset >= dispatch.Origin.Offset) InvalidFacts();
+                }
             }
+            // Locations identify retained binding evidence, not arbitrary earlier instructions.
+            // This checks transport consistency, not storage ownership or execution.
+            foreach (var dispatch in dispatches)
+                foreach (var binding in dispatch.PossibleBindingOrigins ?? [])
+                    if (!origins.TryGetValue(binding, out var source) || source.Kind != "delegate-binding") InvalidFacts();
         }
         foreach (var fact in analysis!.Invocations)
         {

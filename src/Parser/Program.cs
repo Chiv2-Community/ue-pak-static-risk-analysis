@@ -22,6 +22,7 @@ try
     var report = manifest.RootElement;
     var calls = ImmutableArray.CreateBuilder<InvocationFact>();
     var dispatches = new List<IndirectDispatch>();
+    var bindingOriginCount = 0;
     var graphFunctions = new List<CallGraphFunction>();
     var graphCharacters = 0;
     var graphComplete = true;
@@ -141,6 +142,7 @@ try
                 else dataComplete = false;
             }
             catch (Exception error) when (error is not OutOfMemoryException) { dataComplete = false; }
+            PolicyEvaluator.Validate(extraction.Analysis);
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
             var graph = extraction.Analysis.CallGraph!;
@@ -167,6 +169,20 @@ try
                         Diagnostics = dispatch.Diagnostics.Append("target-expansion-limit").Distinct().Order(StringComparer.Ordinal).ToImmutableArray()
                     };
                     gaps.UnionWith([CoverageGap.UnresolvedDispatch, CoverageGap.IncompleteExtraction]);
+                }
+                if (retained.PossibleBindingOrigins is { } origins)
+                {
+                    var available = PolicyEvaluator.MaxInvocations - bindingOriginCount;
+                    if (origins.Length > available)
+                    {
+                        retained = retained with
+                        {
+                            PossibleBindingOrigins = available == 0 ? null : origins.Take(available).ToArray(),
+                            Diagnostics = retained.Diagnostics.Append("target-expansion-limit").Distinct().Order(StringComparer.Ordinal).ToImmutableArray()
+                        };
+                        gaps.UnionWith([CoverageGap.UnresolvedDispatch, CoverageGap.IncompleteExtraction]);
+                    }
+                    bindingOriginCount += retained.PossibleBindingOrigins?.Length ?? 0;
                 }
                 dispatches.Add(retained);
                 candidateCount += retained.Candidates.Length;

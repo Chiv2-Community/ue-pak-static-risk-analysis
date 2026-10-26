@@ -37,6 +37,28 @@ rules:
 """
 
 
+def _ownership_members(test, result, report, expected):
+    """Assert prerequisites without disclosing report contents or process output."""
+    document = report if isinstance(report, dict) else {}
+    inspection = document.get("inspection")
+    members = inspection.get("members") if isinstance(inspection, dict) else None
+    status = next((s for s in ("successful", "partial", "failed") if document.get("status") == s), "unknown")
+    diagnostics = document.get("diagnostics")
+    reasons = [s for s in ("invalid-configuration", "analysis-failed", "parser-failed", "parser-output-limit",
+                          "wall-timeout", "cancelled", "container-unavailable", "input-failed")
+               if isinstance(diagnostics, list) and s in diagnostics]
+    summary = (f"exit={result.returncode} report={int(isinstance(report, dict))} status={status} "
+               f"reason={','.join(reasons) or 'unknown'} inspection={int(isinstance(inspection, dict))} "
+               f"members={len(members) if isinstance(members, list) else -1}")
+    test.assertEqual(expected, result.returncode, summary)
+    test.assertTrue(isinstance(report, dict), summary)
+    test.assertTrue(isinstance(inspection, dict), summary)
+    test.assertTrue(isinstance(members, list), summary)
+    test.assertEqual(2, len(members), summary)
+    test.assertTrue(all(isinstance(member, dict) for member in members), summary)
+    return members
+
+
 @unittest.skipUnless(IMAGE, "set UE_PAK_CONTAINER_TEST_IMAGE to a prebuilt local image")
 class ContainerTests(unittest.TestCase):
     def setUp(self):
@@ -439,20 +461,20 @@ except scan.Failure: sys.exit(3)
                              ("Content/Ownership.uexp", (fixtures / (case["name"] + ".uexp")).read_bytes(), False)])
             identity = case["identity"]
             allowed = identity or "/Script/OwnedFixtures.FixtureData"
-            for settings in ([], ["--allowed-path", "Content"], ["--protected-path", "Other"], ["--allowed-class", allowed]):
-                with self.subTest(case=case["name"], settings=settings):
+            for mode, settings in enumerate(([], ["--allowed-path", "Content"], ["--protected-path", "Other"], ["--allowed-class", allowed])):
+                with self.subTest(case=case["name"], mode=mode):
+                    # Unconfigured invocation-only behavior remains unchanged.
+                    # Bounds failures already carry invocation-extraction gaps, even unconfigured.
+                    incomplete = (bool(settings) and identity is None) or case["name"] in ("owner-out-of-range", "class-out-of-range")
                     result, report = self.invoke(payload, extra=root + settings)
-                    member = report["inspection"]["members"][0]
+                    members = _ownership_members(self, result, report, int(incomplete))
+                    member = members[0]
                     self.assertEqual(identity is not None, member["parsed-classes-complete"])
                     self.assertEqual([] if identity is None else [identity], [c["identity"] for c in member["parsed-classes"]])
                     if identity is not None:
                         self.assertEqual("export-class-index-export" if case["name"] == "valid-local" else "export-class-index-import",
                                          member["parsed-classes"][0]["provenance"])
-                    self.assertEqual("paired_export_data", report["inspection"]["members"][1]["inspection-status"])
-                    # Unconfigured invocation-only behavior remains unchanged.
-                    # Bounds failures already carry invocation-extraction gaps, even unconfigured.
-                    incomplete = (bool(settings) and identity is None) or case["name"] in ("owner-out-of-range", "class-out-of-range")
-                    self.assertEqual(int(incomplete), result.returncode, result.stderr)
+                    self.assertEqual("paired_export_data", members[1]["inspection-status"])
                     self.assertEqual(not incomplete, report["analysis-complete"])
                     self.assertEqual(0, report["counts"]["invocations"])
                     if settings:

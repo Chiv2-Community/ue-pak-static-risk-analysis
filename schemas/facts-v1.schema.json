@@ -88,6 +88,7 @@
         "receiver": {"enum": ["self", "object", "interface", "unknown"]},
         "resolution": {"const": "possible"},
         "source": {"enum": ["kismet-serialized-v1", "ue425plus-2d1aae-kismet-timer"]},
+        "possible-binding-origins": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/location"}},
         "candidates": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {
           "type": "object", "additionalProperties": false, "required": ["owner", "function", "provenance"],
           "properties": {"owner": {"type": "string", "maxLength": 4096, "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$"}, "function": {"type": "string", "maxLength": 4096, "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
@@ -98,6 +99,7 @@
         }}
       },
       "allOf": [
+        {"if": {"required": ["possible-binding-origins"]}, "then": {"properties": {"kind": {"const": "multicast"}}}},
         {"if": {"properties": {"kind": {"const": "virtual"}}}, "then": {"properties": {"opcode": {"enum": ["EX_VirtualFunction", "EX_LocalVirtualFunction"]}, "source": {"const": "kismet-serialized-v1"}}}},
         {"if": {"properties": {"kind": {"const": "delegate-binding"}}}, "then": {"properties": {"opcode": {"enum": ["EX_BindDelegate", "EX_InstanceDelegate"]}, "source": {"const": "kismet-serialized-v1"}}}},
         {"if": {"properties": {"kind": {"const": "delegate-mutation"}}}, "then": {"properties": {"opcode": {"enum": ["EX_AddMulticastDelegate", "EX_RemoveMulticastDelegate", "EX_ClearMulticastDelegate", "EX_LetDelegate", "EX_LetMulticastDelegate"]}, "source": {"const": "kismet-serialized-v1"}}}},

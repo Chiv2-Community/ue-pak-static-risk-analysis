@@ -523,6 +523,21 @@ def package_context_gate(run, image=None):
     return pak, path, policy, report
 
 
+def delegate_flow_oracle(report):
+    require(report["counts"]["invocations"] == 6 and report["counts"]["forbidden"] == 1, "delegate direct counts changed")
+    calls = [d for d in report["possible-dispatches"] if d["evidence"]["kind"] == "multicast"]
+    require([d["evidence"]["origin"]["offset"] for d in calls] == [52, 81, 119, 180, 241], "delegate invocation offsets changed")
+    for index, call in enumerate(calls):
+        evidence = call["evidence"]
+        require([c["function"] for c in evidence["candidates"]] == (["Sensitive"] if index < 3 else ["Safe", "Sensitive"]),
+                "delegate callback history lost")
+        require([b["offset"] for b in evidence["possible-binding-origins"]] ==
+                ([10] if index < 3 else [10, 138] if index == 3 else [10, 138, 209]), "delegate binding relations lost")
+        require(call["possibly-forbidden"] and evidence["resolution"] == "possible" and
+                "binding-flow-unresolved" in evidence["diagnostics"], "delegate uncertainty or possible effect lost")
+    require(report["forbidden-invocations"][0]["location"]["offset"] == 0, "original direct forbid lost")
+
+
 def package_context_boundary_gate(run, mode, image=None):
     """Serialized review regressions through ingestion, Parser and exact policy."""
     from pak_ingest import ingest
@@ -546,8 +561,9 @@ def package_context_boundary_gate(run, mode, image=None):
         require(json.loads(raw) == facts, "boundary record order changed facts")
     require(ingest(pak, inspector=reversed_inspect)["ingestion_status"] == "validated", "reordered boundary ingestion failed")
     members = {m["path"]: m for m in facts["inspection"]["members"]}
-    require(members["Content/Base.uasset"]["inspection-status"] in ("parsed", "partial"), "mandatory Base facts lost")
-    require(members["Content/ChildOverride.uasset"]["inspection-status"] in ("parsed", "partial"), "later package lost")
+    if not mode.startswith("delegate-flow"):
+        require(members["Content/Base.uasset"]["inspection-status"] in ("parsed", "partial"), "mandatory Base facts lost")
+        require(members["Content/ChildOverride.uasset"]["inspection-status"] in ("parsed", "partial"), "later package lost")
     policy = (ROOT / "fixtures/corpus/policy.yaml").read_text() + """
   - id: exact-base-declaration
     description: Original declaration identity
@@ -559,8 +575,43 @@ def package_context_boundary_gate(run, mode, image=None):
         owner: /Game/Base.Type
         function: Sensitive
 """
+    if mode == "delegate-flow":
+        policy = policy.replace("/Game/Base.Type", "/Game/DelegateFlow.Type")
+    if mode == "delegate-flow-budget":
+        policy = policy.replace("/Game/Base.Type", "/Game/Z.Type")
     report = run.evaluate(path, policy=policy)
-    if mode == "package-context-budget":
+    if mode == "delegate-flow":
+        delegate_flow_oracle(report)
+        mutant = copy.deepcopy(report)
+        call = next(d for d in mutant["possible-dispatches"] if d["evidence"]["kind"] == "multicast")
+        call["evidence"].pop("possible-binding-origins")
+        report_validation.load(json.dumps(mutant).encode(), ROOT)
+        try:
+            delegate_flow_oracle(mutant)
+        except (ValueError, KeyError):
+            pass
+        else:
+            raise ValueError("oracle accepted removed-delegate-relation")
+        stripped = copy.deepcopy(facts)
+        stripped["analysis"].pop("dispatches")
+        direct_path = run.root / "delegate-direct-facts.json"
+        direct_path.write_text(json.dumps(stripped))
+        direct = run.evaluate(direct_path, policy=policy)
+        for key in ("counts", "forbidden-invocations", "flagged-invocations"):
+            require(direct[key] == report[key], "delegate links changed original direct evidence: " + key)
+    elif mode == "delegate-flow-budget":
+        require(len(facts["analysis"]["invocations"]) == 408, "relation budget erased mandatory calls")
+        require(len(members) == 6 and all(m["inspection-status"] in ("partial", "parsed", "paired_export_data")
+                for m in members.values()), "relation budget erased later inventory")
+        dispatches = facts["analysis"]["dispatches"]
+        require(0 < sum(len(d.get("possible-binding-origins", [])) for d in dispatches) <= 10000,
+                "global binding relation budget not composed")
+        require(sum(len(d["candidates"]) for d in dispatches) <= 10000, "relation candidate budget not composed")
+        require({"unresolved-dispatch", "incomplete-extraction"} <= set(facts["analysis"]["coverage-gaps"]),
+                "relation truncation uncertainty lost")
+        require(any(d["target"] == {"owner": "/Game/Z.Type", "function": "Sensitive"}
+                    for d in report["forbidden-invocations"]), "later mandatory forbid lost to relation overflow")
+    elif mode == "package-context-budget":
         require(len(facts["analysis"]["invocations"]) == 5006, "combined budget erased mandatory calls")
         dispatches = facts["analysis"]["dispatches"]
         # The existing optional transport bound retains a prefix, independently
@@ -687,7 +738,7 @@ def main():
         call_chain_gate(run, args.docker_image)
         data_policy_gate(run, policy)
         package_context_gate(run, args.docker_image)
-        for mode in ("package-context-budget", "package-context-case"):
+        for mode in ("package-context-budget", "package-context-case", "delegate-flow", "delegate-flow-budget"):
             package_context_boundary_gate(run, mode, args.docker_image)
         if args.docker_image:
             integrated(run, args.docker_image, pak, expected, policy)
@@ -698,7 +749,7 @@ def main():
         if args.components:
             components(run, args.docker_image, args.owned_evidence)
         completed = True
-        print("PASS: integrated synthetic corpus; five removal mutations rejected; Docker=" + str(bool(args.docker_image))
+        print("PASS: integrated synthetic corpus; six removal mutations rejected; Docker=" + str(bool(args.docker_image))
               + "; external owned cook=" + str(bool(args.owned_evidence)))
         return 0
     finally:
@@ -707,7 +758,8 @@ def main():
             "source-sha256": {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
                 (ROOT / "scripts/regression_corpus.py", ROOT / "tests/Corpus.Generate/Program.cs",
                   ROOT / "fixtures/corpus/expectations.json", ROOT / "fixtures/corpus/policy.yaml",
-                  ROOT / "tests/PackageContextFixture.cs", ROOT / "fixtures/corpus/package-context-expectations.json")},
+                   ROOT / "tests/PackageContextFixture.cs", ROOT / "tests/DelegateFlowFixture.cs",
+                   ROOT / "fixtures/corpus/package-context-expectations.json")},
             "commands": run.receipts, "docker-requested": bool(args.docker_image),
             "owned-evidence-requested": bool(args.owned_evidence)}, indent=2) + "\n")
 

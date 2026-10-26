@@ -234,6 +234,7 @@ public static class FactsCodec
         {
             if (++nodes > maxNodes) throw new FactsException();
             if (property == "dispatches" && reader.TokenType != JsonTokenType.StartArray) throw new FactsException();
+            if (property == "possible-binding-origins" && reader.TokenType != JsonTokenType.StartArray) throw new FactsException();
             if (property == "call-graph" && reader.TokenType != JsonTokenType.StartObject) throw new FactsException();
             if (property == "asset-data" && reader.TokenType != JsonTokenType.StartObject) throw new FactsException();
             if (reader.TokenType is JsonTokenType.PropertyName or JsonTokenType.String)
