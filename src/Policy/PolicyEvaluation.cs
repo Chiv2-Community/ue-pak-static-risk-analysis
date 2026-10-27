@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 namespace PakRisk.Policy;
 
 public enum MatchResult { Match, NoMatch, Unknown }
-public enum UncertaintyReason { UnresolvedTarget, ArgumentMetadataUnavailable, MissingArgument, DynamicArgument }
+public enum UncertaintyReason { UnresolvedTarget, ArgumentMetadataUnavailable, MissingArgument, DynamicArgument, RegexTimeout, IncompleteProvenance, ProvenanceLimit }
 public sealed record RuleMatch(string RuleId, RuleEffect Effect);
 public sealed record InvocationFinding(InvocationLocation Location, ImmutableArray<RuleMatch> Rules)
 {

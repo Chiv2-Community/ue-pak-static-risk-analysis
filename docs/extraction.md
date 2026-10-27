@@ -60,7 +60,16 @@ control characters. Invalid caller identities/limits throw fixed setup errors.
 - FName, byte/enum-like values, floats, object references, and other unsupported
   constant types remain `ArgumentValue.Dynamic` with the fixed reason
   `unsupported-constant-type` and source opcode. They are not coerced to policy
-   strings/integers. Direct invocation ADT/evaluator semantics are unchanged.
+    strings/integers.
+- Supported nonconstant arguments also carry bounded, argument-local provenance
+  DAGs as `ArgumentValue.Derived`. Nodes record literal leaves, invocation targets
+  and named input references, return dependencies, or explicit opaque boundaries.
+  References point only to earlier nodes. Extraction follows straight-line local
+  definitions and available same-package direct-call returns with caller-specific
+  parameter substitution; it does not scan unrelated calls for matches. Native
+  bodies, unknown aliases/control flow and tracing limits remain opaque or Dynamic.
+  See [subexpression predicates](policies.md#subexpression-provenance) for limits
+  and semantics. Policies remain unavailable to the parser.
 - Policy-unrepresentable owner/function identities remain structured extraction
   evidence, but the policy target is unresolved with coverage. More than 256 named
   arguments uses unavailable policy metadata with coverage. Positional evidence

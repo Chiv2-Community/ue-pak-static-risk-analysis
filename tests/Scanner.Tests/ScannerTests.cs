@@ -19,21 +19,13 @@ public sealed class ScannerTests : IDisposable
           - id: private-canary-flag
             description: private-canary description
             effect: flag
-            match:
-              kind: invocation
-              target:
-                kind: exact
-                owner: /Script/Engine.Actor
-                function: Destroy
+            expression:
+              invocation: /Script/Engine.Actor:Destroy
           - id: private-canary-forbid
             description: private-canary description
             effect: forbid
-            match:
-              kind: invocation
-              target:
-                kind: exact
-                owner: /Script/Engine.Actor
-                function: Destroy
+            expression:
+              invocation: /Script/Engine.Actor:Destroy
         """;
 
     public ScannerTests() => Directory.CreateDirectory(directory);

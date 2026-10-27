@@ -78,12 +78,8 @@ rules:
   - id: reviewed-target
     description: "Reviewed target"
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Engine.KismetSystemLibrary
-        function: LaunchURL'
+    expression:
+      invocation: /Script/Engine.KismetSystemLibrary:LaunchURL'
 ```
 
 The evaluate CLI reads the variable directly. The Docker wrapper forwards the

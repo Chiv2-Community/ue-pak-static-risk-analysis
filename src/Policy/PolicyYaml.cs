@@ -18,7 +18,8 @@ public static partial class PolicyYaml
     {
         PropertyNamingPolicy = JsonNamingPolicy.KebabCaseLower,
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter<RuleEffect>(JsonNamingPolicy.KebabCaseLower, allowIntegerValues: false) }
+        Converters = { new JsonStringEnumConverter<RuleEffect>(JsonNamingPolicy.KebabCaseLower, allowIntegerValues: false),
+            new ExpressionConverter() }
     };
 
     public static PolicyDocument Parse(string yaml)
@@ -32,7 +33,7 @@ public static partial class PolicyYaml
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var rules = rulesNode.Items.Select(node =>
         {
-            var rule = Object(node, "id", "description", "effect", "match");
+            var rule = Object(node, "id", "description", "effect", "expression");
             var id = String(rule.Fields["id"]);
             if (!RuleId().IsMatch(id))
                 throw Error("invalid-rule-id", rule.Fields["id"].Mark);
@@ -45,7 +46,7 @@ public static partial class PolicyYaml
                 "forbid" => RuleEffect.Forbid,
                 _ => throw Error("unknown-effect", rule.Fields["effect"].Mark)
             };
-            return new PolicyRule(id, description, effect, Expression(rule.Fields["match"]));
+            return new PolicyRule(id, description, effect, Expression(rule.Fields["expression"]));
         }).ToImmutableArray();
         return new PolicyDocument(SchemaVersion, rules);
     }
@@ -61,43 +62,132 @@ public static partial class PolicyYaml
 
     private static MatchExpression Expression(Node node)
     {
-        return Kind(node) switch
+        if (node is not Map map || map.Fields.Count != 1)
+            throw Error("expected-expression", node.Mark);
+        var (name, value) = map.Fields.Single();
+        return name switch
         {
-            "all" => new MatchExpression.All(Expressions(node)),
-            "any" => new MatchExpression.Any(Expressions(node)),
-            "not" => new MatchExpression.Not(Expression(Object(node, "kind", "expression").Fields["expression"])),
-            "invocation" => new MatchExpression.Invocation(Target(Object(node, "kind", "target").Fields["target"])),
-            "argument" => Argument(node),
+            "and" => new MatchExpression.All(Expressions(value)),
+            "or" => new MatchExpression.Any(Expressions(value)),
+            "not" => new MatchExpression.Not(Expression(value)),
+            "invocation" => Invocation(value),
+            "argument" => Argument(value),
             _ => throw Error("unknown-expression-kind", node.Mark)
         };
     }
 
     private static ImmutableArray<MatchExpression> Expressions(Node node) =>
-        Array(Object(node, "kind", "expressions").Fields["expressions"]).Items.Select(Expression).ToImmutableArray();
+        Array(node).Items.Select(Expression).ToImmutableArray();
 
     private static MatchExpression.Argument Argument(Node node)
     {
-        var fields = Object(node, "kind", "name", "predicate").Fields;
+        var fields = Object(node, "name", "predicate").Fields;
         var name = String(fields["name"]);
         if (!Identifier().IsMatch(name))
             throw Error("invalid-argument-name", fields["name"].Mark);
         return new MatchExpression.Argument(name, Predicate(fields["predicate"]));
     }
 
-    private static TargetMatcher Target(Node node)
+    private static MatchExpression.Invocation Invocation(Node node)
     {
-        switch (Kind(node))
+        if (node is Text)
         {
-            case "exact":
-                var exact = Object(node, "kind", "owner", "function").Fields;
-                var function = String(exact["function"]);
-                if (!Identifier().IsMatch(function))
-                    throw Error("invalid-function-name", exact["function"].Mark);
-                return new TargetMatcher.Exact(Owner(exact["owner"]), function);
-            case "owner":
-                return new TargetMatcher.ByOwner(Owner(Object(node, "kind", "owner").Fields["owner"]));
-            default:
-                throw Error("unknown-target-kind", node.Mark);
+            var parts = String(node).Split(':');
+            if (parts.Length is < 1 or > 2 || !IsOwner(parts[0]))
+                throw Error("invalid-owner", node.Mark);
+            if (parts.Length == 1)
+                return new(new TargetMatcher.ByOwner(parts[0]));
+            if (!IsIdentifier(parts[1]))
+                throw Error("invalid-function-name", node.Mark);
+            return new(new TargetMatcher.Exact(parts[0], parts[1]));
+        }
+        if (node is not Map map || map.Fields.Keys.Any(key => key is not ("class" or "function" or "args")))
+            throw Error("invalid-invocation", node.Mark);
+        if (!map.Fields.TryGetValue("function", out var functionNode))
+        {
+            if (map.Fields.ContainsKey("args"))
+                throw Error("args-require-function", node.Mark);
+            if (!map.Fields.TryGetValue("class", out var classNode))
+                throw Error("missing-field", node.Mark);
+            return new(new TargetMatcher.ByOwner(Owner(classNode)));
+        }
+        var function = String(functionNode);
+        TargetMatcher target;
+        if (function.Contains(':'))
+        {
+            if (map.Fields.ContainsKey("class"))
+                throw Error("class-with-qualified-function", node.Mark);
+            target = Invocation(functionNode).Target;
+        }
+        else
+        {
+            if (!map.Fields.TryGetValue("class", out var classNode))
+                throw Error("missing-field", node.Mark);
+            if (!IsIdentifier(function))
+                throw Error("invalid-function-name", functionNode.Mark);
+            target = new TargetMatcher.Exact(Owner(classNode), function);
+        }
+        ImmutableArray<MatchExpression.Argument>? args = null;
+        if (map.Fields.TryGetValue("args", out var argsNode))
+            args = Array(argsNode).Items.Select(item => Expression(item) as MatchExpression.Argument
+                ?? throw Error("expected-argument", item.Mark)).ToImmutableArray();
+        return new(target, args);
+    }
+
+    private sealed class ExpressionConverter : JsonConverter<MatchExpression>
+    {
+        public override MatchExpression Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options) =>
+            throw new NotSupportedException();
+
+        public override void Write(Utf8JsonWriter writer, MatchExpression value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            switch (value)
+            {
+                case MatchExpression.All all:
+                    writer.WritePropertyName("and");
+                    JsonSerializer.Serialize(writer, all.Expressions, options);
+                    break;
+                case MatchExpression.Any any:
+                    writer.WritePropertyName("or");
+                    JsonSerializer.Serialize(writer, any.Expressions, options);
+                    break;
+                case MatchExpression.Not not:
+                    writer.WritePropertyName("not");
+                    JsonSerializer.Serialize(writer, not.Expression, options);
+                    break;
+                case MatchExpression.Invocation invocation:
+                    writer.WritePropertyName("invocation");
+                    writer.WriteStartObject();
+                    switch (invocation.Target)
+                    {
+                        case TargetMatcher.Exact exact:
+                            writer.WriteString("class", exact.Owner);
+                            writer.WriteString("function", exact.Function);
+                            break;
+                        case TargetMatcher.ByOwner owner:
+                            writer.WriteString("class", owner.Owner);
+                            break;
+                        default: throw new InvalidOperationException("Invalid policy document.");
+                    }
+                    if (invocation.Args is { } args)
+                    {
+                        writer.WritePropertyName("args");
+                        JsonSerializer.Serialize(writer, args.Cast<MatchExpression>().ToImmutableArray(), options);
+                    }
+                    writer.WriteEndObject();
+                    break;
+                case MatchExpression.Argument argument:
+                    writer.WritePropertyName("argument");
+                    writer.WriteStartObject();
+                    writer.WriteString("name", argument.Name);
+                    writer.WritePropertyName("predicate");
+                    JsonSerializer.Serialize(writer, argument.Predicate, options);
+                    writer.WriteEndObject();
+                    break;
+                default: throw new InvalidOperationException("Invalid policy document.");
+            }
+            writer.WriteEndObject();
         }
     }
 
@@ -122,13 +212,22 @@ public static partial class PolicyYaml
                 if (values.Distinct().Count() != values.Length)
                     throw Error("duplicate-literal", node.Mark);
                 return new ValuePredicate.In(values);
-            case "string-starts-with":
-                return new ValuePredicate.StringStartsWith(String(Object(node, "kind", "prefix").Fields["prefix"]));
+            case "regex-match":
+                var patternNode = Object(node, "kind", "pattern").Fields["pattern"];
+                var pattern = String(patternNode);
+                try { _ = PolicyRegex.Create(pattern); }
+                catch (Exception error) when (error is ArgumentException or NotSupportedException)
+                {
+                    throw Error("invalid-regex-pattern", patternNode.Mark);
+                }
+                return new ValuePredicate.RegexMatch(pattern);
             case "url-host-in":
                 var hosts = Array(Object(node, "kind", "hosts").Fields["hosts"]).Items.Select(Host).ToImmutableArray();
                 if (hosts.Distinct(StringComparer.Ordinal).Count() != hosts.Length)
                     throw Error("duplicate-host", node.Mark);
                 return new ValuePredicate.UrlHostIn(hosts);
+            case "subexpr-match":
+                return new ValuePredicate.SubexprMatch(Expression(Object(node, "kind", "subexpr").Fields["subexpr"]));
             default:
                 throw Error("unknown-predicate-kind", node.Mark);
         }

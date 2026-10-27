@@ -3,36 +3,24 @@ rules:
   - id: corpus-possible-dispatch
     description: corpus-policy-canary possible callback
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Game/Unresolved.BP_Corpus_C
-        function: DynamicDispatch
+    expression:
+      invocation: /Game/Unresolved.BP_Corpus_C:DynamicDispatch
   - id: corpus-policy-canary
     description: 'corpus-policy-canary ::warning:: ##[error] $() `not executed`'
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Corpus.Sensitive
-        function: Record
+    expression:
+      invocation: /Script/Corpus.Sensitive:Record
   - id: corpus-local-constant
     description: corpus-policy-canary local constant
     effect: flag
-    match:
-      kind: all
-      expressions:
-        - kind: invocation
-          target:
-            kind: exact
-            owner: /Game/Calls.BP_Corpus_C
-            function: Local
-        - kind: argument
-          name: Value
-          predicate:
-            kind: equals
-            value:
-              kind: integer
-              value: 1
+    expression:
+      invocation:
+        function: /Game/Calls.BP_Corpus_C:Local
+        args:
+          - argument:
+              name: Value
+              predicate:
+                kind: equals
+                value:
+                  kind: integer
+                  value: 1

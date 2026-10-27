@@ -24,12 +24,8 @@ rules:
   - id: review-console
     description: Review console command use.
     effect: flag
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Engine.KismetSystemLibrary
-        function: ExecuteConsoleCommand
+    expression:
+      invocation: /Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand
 ```
 
 - Exactly one document; unknown keys and schema versions are errors.
@@ -43,36 +39,90 @@ rules:
 
 ## Expression ADT
 
-| `kind` | Required fields | Contract |
+| Expression key | Value | Contract |
 | --- | --- | --- |
-| `all` | `expressions` | Nonempty expression array; every expression must match |
-| `any` | `expressions` | Nonempty expression array; at least one must match |
-| `not` | `expression` | Exactly one nested expression |
-| `invocation` | `target` | Resolved function identity, not a string search |
-| `argument` | `name`, `predicate` | Named parameter and a typed value predicate |
+| `and` | Nonempty expression list | Every expression must match |
+| `or` | Nonempty expression list | At least one expression must match |
+| `not` | One expression | Negates a known result; preserves Unknown |
+| `invocation` | Class path, function path or expanded object | Recorded call identity, optionally with argument conditions |
+| `argument` | Object with `name`, `predicate` | Named parameter and a typed value predicate |
 
-Singleton `all`/`any` arrays are valid. Empty arrays are rejected to avoid
+Each expression is a mapping with exactly one expression key; there is no
+expression-level `kind`. The rule field is `expression`, not `match`.
+Singleton `and`/`or` lists are valid. Empty lists are rejected to avoid
 accidental always-true or always-false policies. Argument and function names
 must match `[A-Za-z_][A-Za-z0-9_]*` in v1.
 
-Target variants:
+Simple invocations:
 
 ```yaml
-kind: exact
-owner: /Script/Engine.KismetSystemLibrary
-function: LaunchURL
+# Any function recorded under this exact class.
+invocation: /Script/Engine.KismetSystemLibrary
+
+# One exact function. Unreal function object paths use a colon.
+invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
 ```
 
 ```yaml
-kind: owner
-owner: /Script/Engine.KismetSystemLibrary
+invocation:
+  class: /Script/Engine.KismetSystemLibrary
+  function: LaunchURL
+  args:
+    - argument:
+        name: URL
+        predicate:
+          kind: url-host-in
+          hosts:
+            - mods.example.org
 ```
 
-Owners are absolute Unreal package/object paths, such as
+The expanded form accepts either `class` with an optional short `function` name,
+or a fully qualified `function` path with **no `class` key**:
+
+```yaml
+invocation:
+  function: /Script/Engine.KismetSystemLibrary:LaunchURL
+  args:
+    - argument:
+        name: URL
+        predicate:
+          kind: url-host-in
+          hosts: [mods.example.org]
+```
+
+A qualified function forbids `class`, even if it names the same class. A short
+function name requires `class`. If `function` is present, only that exact function
+matches. If `args` is present,
+`function` is required and `args` must be a nonempty list of `argument` expressions.
+All argument conditions are ANDed on the **same call**. A condition from another
+call cannot satisfy this invocation. Missing/dynamic arguments remain Unknown.
+Canonical output uses the expanded form, preserving argument conditions.
+
+Class identities are absolute Unreal package/object paths, such as
 `/Script/Engine.KismetSystemLibrary` or `/Game/Mods/BP_Test.BP_Test_C`.
 Segments use ASCII letters, digits, and underscores. No trimming, case folding,
 wildcards, suffix matching, or implicit rewriting occurs. Names outside this
 initial grammar require a future schema extension, not a silent approximation.
+
+Combine expressions explicitly:
+
+```yaml
+and:
+  - or:
+      - invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
+      - invocation: /Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand
+  - not:
+      argument:
+        name: URL
+        predicate:
+          kind: url-host-in
+          hosts: [mods.example.org]
+```
+
+These shapes replace the old grammar in schema version 1; old `match`, `all`,
+`any`, `target` and expression-level `kind` forms are not accepted. Predicate and
+literal `kind` discriminators are unchanged. Capability/data JSON formats and
+content CLI settings are separate and unchanged.
 
 ## Predicate and literal ADTs
 
@@ -80,8 +130,84 @@ initial grammar require a future schema extension, not a silent approximation.
 | --- | --- | --- |
 | `equals` | `value` | One typed literal |
 | `in` | `values` | Nonempty, duplicate-free array of literals of one kind |
-| `string-starts-with` | `prefix` | Nonempty text prefix; intended ordinal comparison |
+| `regex-match` | `pattern` | Nonempty .NET non-backtracking regex; searches a string for a match |
 | `url-host-in` | `hosts` | Nonempty, duplicate-free canonical DNS hosts |
+| `subexpr-match` | `subexpr` | Search the argument's recorded value-producing invocation chain |
+
+Regex example (single quotes preserve backslashes):
+
+```yaml
+kind: regex-match
+pattern: '^https://mods\.example\.org/'
+```
+
+Matching searches anywhere unless anchored; use `\A` and `\z` for the entire
+string (`$` also accepts a final newline). Matching is case-sensitive and
+culture-invariant by default; inline options such as `(?i)` are supported.
+Patterns use the .NET non-backtracking engine: lookarounds, backreferences,
+atomic groups and other unsupported constructs are rejected during validation.
+Patterns are nonempty and limited to 4,096 UTF-16 code units; regex execution
+has a 100 ms timeout per match. A timeout produces Unknown, including under
+negation; it never becomes NoMatch or approval. Non-string constants produce
+NoMatch; missing/dynamic arguments remain Unknown. The schema checks structure;
+the policy parser also validates regex syntax and engine support.
+`regex-match` replaces `string-starts-with`; the old predicate is rejected.
+For URL host checks, prefer `url-host-in` rather than approximating URL parsing.
+
+### Subexpression provenance
+
+```yaml
+invocation:
+  function: /Script/Example.Bar:Baz
+  args:
+    - argument:
+        name: foo
+        predicate:
+          kind: subexpr-match
+          subexpr:
+            invocation:
+              function: /Script/Example.String:Append
+              args:
+                - argument:
+                    name: A
+                    predicate:
+                      kind: equals
+                      value: {kind: string, value: "foo"}
+```
+
+This searches the provenance of `Baz`'s specific `foo` argument for an `Append`
+call with `A` equal to the known string `"foo"`. `subexpr` accepts the normal
+expression grammar, including nested `subexpr-match` predicates. Argument
+wrappers, typed literals and absolute Unreal class/function identities are
+unchanged. These paths are illustrative, not engine APIs.
+
+The extractor traces directly nested calls, straight-line local assignments and
+return values of directly resolved functions with available bytecode in the same
+package. Callee parameters are substituted from the exact caller. Overwrites
+replace earlier definitions; unrelated calls and unused callee arguments are
+not return dependencies. Locally propagated constants can satisfy ordinary
+predicates too. A function call's output is not evaluated or constant-folded.
+
+- **Match:** a recorded producer satisfies `subexpr`; other opaque dependencies
+  do not erase this evidence.
+- **NoMatch:** the searched chain is complete and no producer matches, including
+  a literal with no producing invocation.
+- **Unknown:** a potentially relevant dependency is unresolved or truncated;
+  negation preserves Unknown.
+
+Native/imported bodies, cross-package returns, virtual/delegate dispatch,
+branches/loops, fields/containers, unsupported transformations, out/ref aliases
+and unmodelled intervening side effects remain opaque. Imported parameter names
+are not guessed. Recursion stops at the active call boundary. This is bounded
+static evidence, not proof of runtime execution or arbitrary causal influence.
+
+Extraction permits 16 active functions, 24 tracing levels and 65,536 work units
+per package. Retained graphs have at most 256 nodes, 1,024 edges and depth 32;
+the analysis retains at most 8,192 nodes. Evaluation permits 4,096 visited nodes
+per rule/invocation and 32 nested searches. Transport exhaustion drops optional
+provenance back to Dynamic without dropping mandatory invocation facts, so
+argument-dependent results remain Unknown. Policies remain evaluator-only;
+the parser extracts provenance without seeing private rules.
 
 Literals always identify their type:
 
@@ -123,7 +249,7 @@ evaluate URLs or claim that a destination is safe.
 negation. All matching rules apply, and a flag cannot cancel a forbid. These are
 implemented by the evaluator, not by the YAML parser.
 
-| Inputs | `all` | `any` |
+| Inputs | `and` | `or` |
 | --- | --- | --- |
 | Match, Match | Match | Match |
 | Match, NoMatch | NoMatch | Match |
@@ -133,10 +259,11 @@ implemented by the evaluator, not by the YAML parser.
 | Unknown, Unknown | Unknown | Unknown |
 
 Operand order does not matter. `not` swaps Match/NoMatch and preserves Unknown.
-Decisive operands discard irrelevant uncertainty. A nonmatching target in `all`
+Decisive operands discard irrelevant uncertainty. A nonmatching target in `and`
 does not become incomplete because another operand has a dynamic argument.
 Known values of different literal kinds produce NoMatch, without coercion.
-String comparisons are ordinal and case-sensitive.
+Literal string comparisons are ordinal and case-sensitive; regex matching uses
+the options described above.
 
 URL matching requires an absolute, well-formed HTTPS URL. Scheme and DNS host
 case are normalized. Only an omitted port or literal `:443` is accepted.

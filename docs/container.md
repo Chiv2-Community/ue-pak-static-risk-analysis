@@ -42,12 +42,8 @@ rules:
   - id: review-native-call
     description: Review this native invocation.
     effect: flag
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Engine.KismetSystemLibrary
-        function: LaunchURL
+    expression:
+      invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
 '
 python3 scripts/scan.py scan --pak /approved/submission.pak \
   --report /approved/new-report.json --engine-version 4.25

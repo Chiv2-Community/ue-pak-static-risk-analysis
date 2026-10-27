@@ -158,8 +158,42 @@
     ]},
     "argument-value": {"oneOf": [
       {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "constant"}, "value": {"$ref": "#/$defs/literal"}}},
+      {"type": "object", "additionalProperties": false, "required": ["kind", "provenance"], "properties": {"kind": {"const": "derived"}, "provenance": {"$ref": "#/$defs/value-provenance"}}},
       {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"enum": ["dynamic", "missing"]}}}
     ]},
+    "value-provenance": {
+      "description": "Argument-local DAG; FactsCodec additionally validates earlier-node references, depth, edge, character and aggregate node budgets.",
+      "type": "object", "additionalProperties": false, "required": ["root", "nodes"],
+      "properties": {
+        "root": {"type": "integer", "minimum": 0, "maximum": 255},
+        "nodes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/value-origin"}}
+      }
+    },
+    "value-origin": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "inputs", "complete"],
+      "properties": {
+        "kind": {"enum": ["literal", "call", "unknown"]},
+        "inputs": {"type": "array", "maxItems": 256, "items": {"type": "integer", "minimum": 0, "maximum": 255}},
+        "complete": {"type": "boolean"},
+        "target": {"oneOf": [{"$ref": "#/$defs/target"}, {"type": "null"}]},
+        "literal": {"oneOf": [{"$ref": "#/$defs/literal"}, {"type": "null"}]},
+        "arguments": {"type": ["array", "null"], "maxItems": 256, "items": {
+          "type": "object", "additionalProperties": false, "required": ["name", "node"],
+          "properties": {"name": {"type": "string", "maxLength": 4096, "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}, "node": {"type": "integer", "minimum": 0, "maximum": 255}}
+        }}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "literal"}}}, "then": {
+          "required": ["literal"], "properties": {"complete": {"const": true}, "inputs": {"maxItems": 0}, "literal": {"$ref": "#/$defs/literal"}, "target": {"type": "null"}, "arguments": {"type": "null"}}
+        }},
+        {"if": {"properties": {"kind": {"const": "call"}}}, "then": {
+          "required": ["target"], "properties": {"target": {"$ref": "#/$defs/target"}, "literal": {"type": "null"}}
+        }},
+        {"if": {"properties": {"kind": {"const": "unknown"}}}, "then": {
+          "properties": {"complete": {"const": false}, "inputs": {"maxItems": 0}, "literal": {"type": "null"}, "target": {"type": "null"}, "arguments": {"type": "null"}}
+        }}
+      ]
+    },
     "arguments": {"oneOf": [
       {"type": "object", "additionalProperties": false, "required": ["kind", "arguments"], "properties": {
         "kind": {"const": "known"},

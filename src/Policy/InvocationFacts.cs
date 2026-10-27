@@ -28,7 +28,35 @@ public abstract record ArgumentValue
     public sealed record Constant(PolicyLiteral Value) : ArgumentValue;
     public sealed record Dynamic : ArgumentValue;
     public sealed record Missing : ArgumentValue;
+    public sealed record Derived(ValueProvenance Provenance) : ArgumentValue;
 }
+
+// Flat, argument-local DAG: input references always point to earlier nodes.
+public sealed record ValueProvenance(int Root, ImmutableArray<ValueOrigin> Nodes)
+{
+    public const int MaxNodes = 256;
+    public const int MaxEdges = 1024;
+    public const int MaxDepth = 32;
+    public const int MaxAnalysisNodes = 8192;
+
+    // Called only on already validated package evidence when combining packages.
+    public static InvocationAnalysis Bound(InvocationAnalysis analysis, int maxNodes = MaxAnalysisNodes)
+    {
+        var nodes = 0;
+        return analysis with { Invocations = analysis.Invocations.Select(fact => fact.Arguments is ArgumentMetadata.Known known
+            ? fact with { Arguments = new ArgumentMetadata.Known(known.Arguments.Select(argument =>
+            {
+                if (argument.Value is not ArgumentValue.Derived derived) return argument;
+                if (nodes + derived.Provenance.Nodes.Length > maxNodes)
+                    return argument with { Value = new ArgumentValue.Dynamic() };
+                nodes += derived.Provenance.Nodes.Length;
+                return argument;
+            }).ToImmutableArray()) } : fact).ToImmutableArray() };
+    }
+}
+public sealed record OriginArgument(string Name, int Node);
+public sealed record ValueOrigin(string Kind, ImmutableArray<int> Inputs, bool Complete,
+    InvocationTarget? Target = null, ImmutableArray<OriginArgument>? Arguments = null, PolicyLiteral? Literal = null);
 
 public enum CoverageGap { UnsupportedParsing, UnresolvedDispatch, IncompleteExtraction }
 public sealed record DispatchCandidate(string Owner, string Function, string Provenance);

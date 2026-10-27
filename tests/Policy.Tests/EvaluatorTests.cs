@@ -107,10 +107,10 @@ public sealed class EvaluatorTests
             Assert.Equal(wanted, Result(Run(Argument(new ValuePredicate.EqualTo(expected)), WithLiteral(actual))));
             Assert.Equal(wanted, Result(Run(Argument(new ValuePredicate.In([expected])), WithLiteral(actual))));
         }
-        Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(new ValuePredicate.StringStartsWith("1")), WithLiteral(new PolicyLiteral.Integer(1)))));
+        Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(new ValuePredicate.RegexMatch("1")), WithLiteral(new PolicyLiteral.Integer(1)))));
         Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(), WithLiteral(new PolicyLiteral.Null()))));
-        Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(new ValuePredicate.StringStartsWith("A")), WithLiteral(new PolicyLiteral.String("abc")))));
-        Assert.Equal(MatchResult.Match, Result(Run(Argument(new ValuePredicate.StringStartsWith("a")), WithLiteral(new PolicyLiteral.String("abc")))));
+        Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(new ValuePredicate.RegexMatch("^A")), WithLiteral(new PolicyLiteral.String("abc")))));
+        Assert.Equal(MatchResult.Match, Result(Run(Argument(new ValuePredicate.RegexMatch("^a")), WithLiteral(new PolicyLiteral.String("abc")))));
     }
 
     [Theory]
@@ -257,8 +257,8 @@ public sealed class EvaluatorTests
                 Rule(new MatchExpression.Invocation(new TargetMatcher.Exact(text, "LaunchURL"))),
                 Rule(new MatchExpression.Invocation(new TargetMatcher.Exact(Owner, text))),
                 Rule(new MatchExpression.Invocation(new TargetMatcher.ByOwner(text))),
-                Rule(new MatchExpression.Argument(text, new ValuePredicate.StringStartsWith("prefix"))),
-                Rule(Argument(new ValuePredicate.StringStartsWith(text))),
+                Rule(new MatchExpression.Argument(text, new ValuePredicate.RegexMatch("pattern"))),
+                Rule(Argument(new ValuePredicate.RegexMatch(text))),
                 Rule(Argument(new ValuePredicate.UrlHostIn([text]))),
                 Rule(Argument(new ValuePredicate.EqualTo(new PolicyLiteral.String(text)))),
                 Rule(Argument(new ValuePredicate.In([new PolicyLiteral.String(text)])))];
@@ -278,10 +278,10 @@ public sealed class EvaluatorTests
         foreach (var text in new[] { "\ufffd", "\ud800\udc00", "é" })
         {
             var fact = WithLiteral(new PolicyLiteral.String(text + "-data"));
-            var rule = Rule(Argument(new ValuePredicate.StringStartsWith(text))) with { Description = text };
+            var rule = Rule(Argument(new ValuePredicate.RegexMatch(text))) with { Description = text };
             var result = new PolicyEvaluator(Document(rule)).Evaluate(new([fact], []));
             Assert.Equal(MatchResult.Match, Result(result));
-            Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(new ValuePredicate.StringStartsWith(text)),
+            Assert.Equal(MatchResult.NoMatch, Result(Run(Argument(new ValuePredicate.RegexMatch(text)),
                 WithLiteral(new PolicyLiteral.String("other-data")))));
         }
     }
@@ -296,7 +296,9 @@ public sealed class EvaluatorTests
             Document(Rule(Target()) with { Id = null! }), Document(Rule(Target()) with { Description = null! }),
             Document(Rule(Target()) with { Description = "" }), Document(Rule(Target()) with { Description = "private\ncanary" }),
             Document(Rule(new MatchExpression.Invocation(null!))), Document(Rule(new MatchExpression.Argument("URL", null!))),
-            Document(Rule(Argument(new ValuePredicate.StringStartsWith(null!)))),
+            Document(Rule(Argument(new ValuePredicate.RegexMatch(null!)))),
+            Document(Rule(Argument(new ValuePredicate.RegexMatch("[")))),
+            Document(Rule(Argument(new ValuePredicate.RegexMatch("(?=secret)")))),
             Document(Rule(Argument(new ValuePredicate.EqualTo(null!)))),
             Document(Rule(Argument(new ValuePredicate.In([new PolicyLiteral.Integer(1), new PolicyLiteral.String("1")])))),
             Document(Rule(new MatchExpression.All([]))), Document(Rule(Argument(new ValuePredicate.In(default)))),
@@ -313,11 +315,92 @@ public sealed class EvaluatorTests
         for (var i = 0; i < PolicyYaml.MaxYamlDepth; i++) deep = new MatchExpression.Not(deep);
         PolicyDocument[] invalid = [Document(Rule(deep)),
             Document(Rule(new MatchExpression.All(Enumerable.Repeat(Target(), PolicyYaml.MaxYamlNodes + 1).ToImmutableArray()))),
-            Document(Rule(new MatchExpression.All(Enumerable.Repeat(Target(), 800).ToImmutableArray()))),
+            Document(Rule(new MatchExpression.All(Enumerable.Repeat(Target(), 1400).ToImmutableArray()))),
             Document(Rule(Target()) with { Description = new string('x', PolicyEvaluator.MaxFactStringLength + 1) }),
             Document(Enumerable.Range(0, 64).Select(i => Rule(Target(), "rule-" + i) with
                 { Description = new string('x', PolicyEvaluator.MaxFactStringLength) }).ToArray())];
         foreach (var document in invalid)
             Assert.Equal("Invalid policy document.", Assert.Throws<ArgumentException>(() => new PolicyEvaluator(document)).Message);
+    }
+
+    [Fact]
+    public void InvocationArgsAreAndedOnOneExactCall()
+    {
+        var expression = new MatchExpression.Invocation(new TargetMatcher.Exact(Owner, "LaunchURL"),
+            [new("URL", new ValuePredicate.UrlHostIn(["mods.example.org"])),
+             new("Enabled", new ValuePredicate.EqualTo(new PolicyLiteral.Boolean(true)))]);
+        var fact = Fact with { Arguments = new ArgumentMetadata.Known([
+            new("URL", new ArgumentValue.Constant(new PolicyLiteral.String("https://mods.example.org/"))),
+            new("Enabled", new ArgumentValue.Constant(new PolicyLiteral.Boolean(true)))]) };
+        Assert.Equal(MatchResult.Match, Result(Run(expression, fact)));
+        Assert.Equal(MatchResult.NoMatch, Result(Run(expression, fact with {
+            Target = new InvocationTarget.Resolved(Owner, "Other") })));
+        Assert.Equal(MatchResult.NoMatch, Result(Run(expression, fact with {
+            Target = new InvocationTarget.Resolved("/Script/Other.Class", "LaunchURL") })));
+        Assert.Equal(MatchResult.Unknown, Result(Run(expression, Fact)));
+        Assert.Equal(MatchResult.Unknown, Result(Run(expression, fact with { Target = new InvocationTarget.Unresolved() })));
+        var wrong = fact with { Arguments = new ArgumentMetadata.Known([
+            new("URL", new ArgumentValue.Dynamic()),
+            new("Enabled", new ArgumentValue.Constant(new PolicyLiteral.Boolean(false)))]) };
+        Assert.Equal(MatchResult.NoMatch, Result(Run(expression, wrong)));
+        Assert.Equal(MatchResult.NoMatch, Result(Run(expression, wrong with { Target = new InvocationTarget.Unresolved() })));
+        var split = new InvocationAnalysis([
+            fact with { Arguments = new ArgumentMetadata.Known([((ArgumentMetadata.Known)fact.Arguments).Arguments[0]]) },
+            fact with { Location = fact.Location with { Offset = 13 },
+                Arguments = new ArgumentMetadata.Known([((ArgumentMetadata.Known)fact.Arguments).Arguments[1]]) }], []);
+        var result = new PolicyEvaluator(Document(Rule(expression))).Evaluate(split);
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.Uncertainties.Length);
+    }
+
+    [Fact]
+    public void InvocationArgsRejectMalformedPublicAsts()
+    {
+        ImmutableArray<MatchExpression.Argument>?[] invalid = [default(ImmutableArray<MatchExpression.Argument>), [], [null!],
+            Enumerable.Repeat(new MatchExpression.Argument("URL", new ValuePredicate.EqualTo(new PolicyLiteral.Null())),
+                PolicyYaml.MaxYamlNodes + 1).ToImmutableArray()];
+        foreach (var args in invalid)
+            Assert.Throws<ArgumentException>(() => new PolicyEvaluator(Document(Rule(
+                new MatchExpression.Invocation(new TargetMatcher.Exact(Owner, "LaunchURL"), args)))));
+        Assert.Throws<ArgumentException>(() => new PolicyEvaluator(Document(Rule(
+            new MatchExpression.Invocation(new TargetMatcher.ByOwner(Owner),
+                [new("URL", new ValuePredicate.EqualTo(new PolicyLiteral.Null()))])))));
+    }
+
+    [Theory]
+    [InlineData("b.c", "xxbacyy", MatchResult.Match)]
+    [InlineData("\\Ab.c\\z", "xxbacyy", MatchResult.NoMatch)]
+    [InlineData("\\A(?:foo|bar)[0-9]{2}\\z", "bar42", MatchResult.Match)]
+    [InlineData("\\A(?:foo|bar)[0-9]{2}\\z", "bar42\n", MatchResult.NoMatch)]
+    [InlineData("^abc$", "ABC", MatchResult.NoMatch)]
+    [InlineData("(?i)^abc$", "ABC", MatchResult.Match)]
+    [InlineData("\\A\\z", "", MatchResult.Match)]
+    [InlineData("\\.", "a.b", MatchResult.Match)]
+    [InlineData("\\.", "abc", MatchResult.NoMatch)]
+    public void RegexMatchingUsesBoundedSearchSemantics(string pattern, string value, MatchResult expected) =>
+        Assert.Equal(expected, Result(Run(Argument(new ValuePredicate.RegexMatch(pattern)),
+            WithLiteral(new PolicyLiteral.String(value)))));
+
+    [Fact]
+    public void RegexRetainsUnknownAndRejectsNonStrings()
+    {
+        var expression = Argument(new ValuePredicate.RegexMatch(".*"));
+        Assert.Equal(MatchResult.Unknown, Result(Run(expression)));
+        Assert.Equal(MatchResult.Unknown, Result(Run(new MatchExpression.Not(expression))));
+        Assert.Equal(MatchResult.Unknown, Result(Run(expression,
+            Fact with { Arguments = new ArgumentMetadata.Unavailable() })));
+        Assert.Equal(MatchResult.Unknown, Result(Run(expression,
+            Fact with { Arguments = new ArgumentMetadata.Known([]) })));
+        foreach (var literal in new PolicyLiteral[] { new PolicyLiteral.Integer(1),
+            new PolicyLiteral.Boolean(true), new PolicyLiteral.Null() })
+            Assert.Equal(MatchResult.NoMatch, Result(Run(expression, WithLiteral(literal))));
+    }
+
+    [Fact]
+    public void RegexNestedQuantifiersDoNotBacktrack()
+    {
+        var expression = Argument(new ValuePredicate.RegexMatch("\\A(a+)+\\z"));
+        Assert.Equal(MatchResult.NoMatch, Result(Run(expression,
+            WithLiteral(new PolicyLiteral.String(new string('a', 4095) + "!")))));
     }
 }

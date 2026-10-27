@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace PakRisk.Policy;
 
@@ -10,6 +11,7 @@ public sealed class PolicyEvaluator
     public const int MaxFactStringLength = 4096;
     public const int MaxDispatchCandidates = 256;
     private readonly PolicyDocument policy;
+    private readonly Dictionary<string, Regex> regexes = new(StringComparer.Ordinal);
 
     // Validate public AST construction before recursive serialization or evaluation.
     public PolicyEvaluator(PolicyDocument document)
@@ -53,6 +55,13 @@ public sealed class PolicyEvaluator
                                 CheckString(owner.Owner);
                                 break;
                         }
+                        if (invocation.Args is { } args)
+                        {
+                            if (invocation.Target is not TargetMatcher.Exact || args.IsDefaultOrEmpty
+                                || args.Length > PolicyYaml.MaxYamlNodes)
+                                throw new ArgumentException();
+                            Push(args.Cast<MatchExpression>().ToImmutableArray(), item.Depth);
+                        }
                         break;
                     case MatchExpression.Argument argument:
                         CheckString(argument.Name);
@@ -66,13 +75,18 @@ public sealed class PolicyEvaluator
                                     throw new ArgumentException();
                                 foreach (var value in set.Values) CheckLiteral(value);
                                 break;
-                            case ValuePredicate.StringStartsWith prefix:
-                                CheckString(prefix.Prefix);
+                            case ValuePredicate.RegexMatch regex:
+                                CheckString(regex.Pattern);
+                                if (!regexes.ContainsKey(regex.Pattern))
+                                    regexes.Add(regex.Pattern, PolicyRegex.Create(regex.Pattern));
                                 break;
                             case ValuePredicate.UrlHostIn hosts:
                                 if (hosts.Hosts.IsDefaultOrEmpty || hosts.Hosts.Length > PolicyYaml.MaxYamlNodes)
                                     throw new ArgumentException();
                                 foreach (var host in hosts.Hosts) CheckString(host);
+                                break;
+                            case ValuePredicate.SubexprMatch subexpr:
+                                pending.Push((subexpr.Subexpr, item.Depth + 1));
                                 break;
                         }
                         break;
@@ -100,7 +114,7 @@ public sealed class PolicyEvaluator
                 if (value is PolicyLiteral.String text) CheckString(text.Value);
             }
         }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or JsonException or PolicyException or NullReferenceException)
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or JsonException or PolicyException or NullReferenceException or NotSupportedException)
         {
             throw new ArgumentException("Invalid policy document.");
         }
@@ -135,7 +149,7 @@ public sealed class PolicyEvaluator
             var matches = ImmutableArray.CreateBuilder<RuleMatch>();
             foreach (var rule in policy.Rules.OrderBy(r => r.Id, StringComparer.Ordinal))
                 if (dispatch.Candidates.Any(c => Evaluate(rule.Match,
-                    new InvocationTarget.Resolved(c.Owner, c.Function), new ArgumentMetadata.Unavailable()).Result != MatchResult.NoMatch))
+                    new InvocationTarget.Resolved(c.Owner, c.Function), new ArgumentMetadata.Unavailable(), new()).Result != MatchResult.NoMatch))
                     matches.Add(new(rule.Id, rule.Effect));
             possible.Add(new(dispatch.Origin, matches.ToImmutable()));
         }
@@ -150,33 +164,50 @@ public sealed class PolicyEvaluator
     private static Outcome Known(bool matches) => new(matches ? MatchResult.Match : MatchResult.NoMatch, []);
     private static Outcome Unknown(UncertaintyReason reason) => new(MatchResult.Unknown, [reason]);
 
-    private static Outcome Evaluate(MatchExpression expression, InvocationFact fact) => Evaluate(expression, fact.Target, fact.Arguments);
+    private sealed class SearchBudget { public int Remaining = 4096; public int Depth; }
 
-    private static Outcome Evaluate(MatchExpression expression, InvocationTarget target, ArgumentMetadata arguments) => expression switch
+    private Outcome Evaluate(MatchExpression expression, InvocationFact fact) => Evaluate(expression, fact.Target, fact.Arguments, new());
+
+    private Outcome Evaluate(MatchExpression expression, InvocationTarget target, ArgumentMetadata arguments, SearchBudget budget) => expression switch
     {
-        MatchExpression.All all => Combine(all.Expressions, target, arguments, all: true),
-        MatchExpression.Any any => Combine(any.Expressions, target, arguments, all: false),
-        MatchExpression.Not not => Negate(Evaluate(not.Expression, target, arguments)),
-        MatchExpression.Invocation invocation => target is InvocationTarget.Resolved resolved
+        MatchExpression.All all => Combine(all.Expressions, target, arguments, all: true, budget),
+        MatchExpression.Any any => Combine(any.Expressions, target, arguments, all: false, budget),
+        MatchExpression.Not not => Negate(Evaluate(not.Expression, target, arguments, budget)),
+        MatchExpression.Invocation invocation => EvaluateInvocation(invocation, target, arguments, budget),
+        MatchExpression.Argument argument => Evaluate(argument, arguments, budget),
+        _ => throw new InvalidOperationException("Invalid policy document.")
+    };
+
+    private Outcome EvaluateInvocation(MatchExpression.Invocation invocation, InvocationTarget target, ArgumentMetadata arguments, SearchBudget budget)
+    {
+        var matched = target is InvocationTarget.Resolved resolved
             ? Known(invocation.Target switch
             {
                 TargetMatcher.Exact exact => exact.Owner == resolved.Owner && exact.Function == resolved.Function,
                 TargetMatcher.ByOwner owner => owner.Owner == resolved.Owner,
                 _ => false
-            }) : Unknown(UncertaintyReason.UnresolvedTarget),
-        MatchExpression.Argument argument => Evaluate(argument, arguments),
-        _ => throw new InvalidOperationException("Invalid policy document.")
-    };
+            }) : Unknown(UncertaintyReason.UnresolvedTarget);
+        if (invocation.Args is not { } args || matched.Result == MatchResult.NoMatch)
+            return matched;
+        var reasons = matched.Reasons.ToHashSet();
+        foreach (var argument in args)
+        {
+            var outcome = Evaluate(argument, arguments, budget);
+            if (outcome.Result == MatchResult.NoMatch) return Known(false);
+            reasons.UnionWith(outcome.Reasons);
+        }
+        return reasons.Count == 0 ? Known(true) : new Outcome(MatchResult.Unknown, reasons.Order().ToImmutableArray());
+    }
 
     private static Outcome Negate(Outcome outcome) => outcome.Result == MatchResult.Unknown
         ? outcome : Known(outcome.Result == MatchResult.NoMatch);
 
-    private static Outcome Combine(ImmutableArray<MatchExpression> expressions, InvocationTarget target, ArgumentMetadata arguments, bool all)
+    private Outcome Combine(ImmutableArray<MatchExpression> expressions, InvocationTarget target, ArgumentMetadata arguments, bool all, SearchBudget budget)
     {
         var reasons = new HashSet<UncertaintyReason>();
         foreach (var expression in expressions)
         {
-            var outcome = Evaluate(expression, target, arguments);
+            var outcome = Evaluate(expression, target, arguments, budget);
             if (outcome.Result == (all ? MatchResult.NoMatch : MatchResult.Match))
                 return Known(!all);
             reasons.UnionWith(outcome.Reasons);
@@ -184,24 +215,74 @@ public sealed class PolicyEvaluator
         return reasons.Count == 0 ? Known(all) : new Outcome(MatchResult.Unknown, reasons.Order().ToImmutableArray());
     }
 
-    private static Outcome Evaluate(MatchExpression.Argument expression, ArgumentMetadata metadata)
+    private Outcome Evaluate(MatchExpression.Argument expression, ArgumentMetadata metadata, SearchBudget budget)
     {
         if (metadata is not ArgumentMetadata.Known known)
             return Unknown(UncertaintyReason.ArgumentMetadataUnavailable);
         var argument = known.Arguments.FirstOrDefault(argument => argument.Name == expression.Name);
-        return argument?.Value switch
+        if (expression.Predicate is ValuePredicate.SubexprMatch subexpr)
+            return argument?.Value switch
+            {
+                ArgumentValue.Constant => Known(false),
+                ArgumentValue.Derived derived => Search(subexpr.Subexpr, derived.Provenance, budget),
+                _ => Unknown(UncertaintyReason.IncompleteProvenance)
+            };
+        try
         {
-            ArgumentValue.Constant constant => Known(Matches(expression.Predicate, constant.Value)),
-            ArgumentValue.Dynamic => Unknown(UncertaintyReason.DynamicArgument),
-            _ => Unknown(UncertaintyReason.MissingArgument)
-        };
+            return argument?.Value switch
+            {
+                ArgumentValue.Constant constant => Known(Matches(expression.Predicate, constant.Value)),
+                ArgumentValue.Derived derived => derived.Provenance.Nodes[derived.Provenance.Root].Literal is { } literal
+                    ? Known(Matches(expression.Predicate, literal)) : Unknown(UncertaintyReason.DynamicArgument),
+                ArgumentValue.Dynamic => Unknown(UncertaintyReason.DynamicArgument),
+                _ => Unknown(UncertaintyReason.MissingArgument)
+            };
+        }
+        catch (RegexMatchTimeoutException) { return Unknown(UncertaintyReason.RegexTimeout); }
     }
 
-    private static bool Matches(ValuePredicate predicate, PolicyLiteral value) => predicate switch
+    private Outcome Search(MatchExpression expression, ValueProvenance graph, SearchBudget budget)
+    {
+        if (++budget.Depth > ValueProvenance.MaxDepth)
+        {
+            budget.Depth--;
+            return Unknown(UncertaintyReason.ProvenanceLimit);
+        }
+        try
+        {
+            var pending = new Stack<int>();
+            var visited = new HashSet<int>();
+            var reasons = new HashSet<UncertaintyReason>();
+            pending.Push(graph.Root);
+            while (pending.TryPop(out var index))
+            {
+                if (!visited.Add(index)) continue;
+                if (--budget.Remaining < 0) return Unknown(UncertaintyReason.ProvenanceLimit);
+                var node = graph.Nodes[index];
+                if (!node.Complete) reasons.Add(UncertaintyReason.IncompleteProvenance);
+                if (node.Target is { } target)
+                {
+                    ArgumentMetadata arguments = node.Arguments is { } args
+                        ? new ArgumentMetadata.Known(args.Select(arg => new NamedArgument(arg.Name,
+                            graph.Nodes[arg.Node].Literal is { } literal ? new ArgumentValue.Constant(literal)
+                            : (ArgumentValue)new ArgumentValue.Derived(graph with { Root = arg.Node }))).ToImmutableArray())
+                        : new ArgumentMetadata.Unavailable();
+                    var outcome = Evaluate(expression, target, arguments, budget);
+                    if (outcome.Result == MatchResult.Match) return Known(true);
+                    reasons.UnionWith(outcome.Reasons);
+                }
+                foreach (var input in node.Inputs) pending.Push(input);
+            }
+            return reasons.Count == 0 ? Known(false) : new(MatchResult.Unknown, reasons.Order().ToImmutableArray());
+        }
+        finally { budget.Depth--; }
+    }
+
+    private bool Matches(ValuePredicate predicate, PolicyLiteral value) => predicate switch
     {
         ValuePredicate.EqualTo equal => equal.Value == value,
         ValuePredicate.In set => set.Values.Contains(value),
-        ValuePredicate.StringStartsWith prefix => value is PolicyLiteral.String text && text.Value.StartsWith(prefix.Prefix, StringComparison.Ordinal),
+        ValuePredicate.RegexMatch regex => value is PolicyLiteral.String text && regexes[regex.Pattern].IsMatch(text.Value),
         ValuePredicate.UrlHostIn hosts => value is PolicyLiteral.String text && UrlMatches(text.Value, hosts.Hosts),
         _ => false
     };
@@ -232,6 +313,7 @@ public sealed class PolicyEvaluator
             || analysis.CoverageGaps.Any(gap => !Enum.IsDefined(gap)))
             InvalidFacts();
         var locations = new Dictionary<InvocationLocation, InvocationFact>();
+        var provenanceNodes = 0;
         if (analysis.CallGraph is { } graph)
         {
             if (graph.SchemaVersion != 1 || graph.Functions is null || graph.Functions.Length > 4096) InvalidFacts();
@@ -294,6 +376,10 @@ public sealed class PolicyEvaluator
                         InvalidFacts();
                     if (argument!.Value is ArgumentValue.Constant constant && !ValidLiteral(constant.Value))
                         InvalidFacts();
+                    if (argument.Value is ArgumentValue.Derived derived)
+                        ValidateProvenance(derived.Provenance, ref provenanceNodes);
+                    else if (argument.Value is not (ArgumentValue.Constant or ArgumentValue.Dynamic or ArgumentValue.Missing))
+                        InvalidFacts();
                 }
             }
             else if (fact.Arguments is not ArgumentMetadata.Unavailable)
@@ -301,6 +387,58 @@ public sealed class PolicyEvaluator
             if (locations.TryGetValue(fact.Location, out var previous) && !Equivalent(previous, fact))
                 InvalidFacts();
             locations[fact.Location] = fact;
+        }
+    }
+
+    private static void ValidateProvenance(ValueProvenance graph, ref int total)
+    {
+        if (graph is null || graph.Nodes.IsDefaultOrEmpty || graph.Nodes.Length > ValueProvenance.MaxNodes
+            || graph.Root < 0 || graph.Root >= graph.Nodes.Length
+            || (total += graph.Nodes.Length) > ValueProvenance.MaxAnalysisNodes) InvalidFacts();
+        var edges = 0;
+        var characters = 0;
+        var depths = new int[graph.Nodes.Length];
+        for (var index = 0; index < graph.Nodes.Length; index++)
+        {
+            var node = graph.Nodes[index];
+            if (node is null || node.Inputs.IsDefault || node.Inputs.Length > MaxArguments) InvalidFacts();
+            void Reference(int input)
+            {
+                if (input < 0 || input >= index || ++edges > ValueProvenance.MaxEdges) InvalidFacts();
+                depths[index] = Math.Max(depths[index], depths[input] + 1);
+                if (depths[index] > ValueProvenance.MaxDepth) InvalidFacts();
+            }
+            foreach (var input in node!.Inputs) Reference(input);
+            if (node.Kind == "literal")
+            {
+                if (!node.Complete || !node.Inputs.IsEmpty || node.Target is not null || node.Arguments is not null
+                    || !ValidLiteral(node.Literal)) InvalidFacts();
+                if (node.Literal is PolicyLiteral.String text) characters += text.Value.Length;
+            }
+            else if (node.Kind == "call")
+            {
+                if (node.Literal is not null || node.Target is null) InvalidFacts();
+                if (node.Target is InvocationTarget.Resolved target)
+                {
+                    if (!PolicyYaml.IsOwner(target.Owner) || !PolicyYaml.IsIdentifier(target.Function)) InvalidFacts();
+                    characters += target.Owner.Length + target.Function.Length;
+                }
+                else if (node.Target is not InvocationTarget.Unresolved) InvalidFacts();
+                if (node.Arguments is { } args)
+                {
+                    if (args.IsDefault || args.Length > MaxArguments) InvalidFacts();
+                    var names = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var arg in args)
+                    {
+                        if (arg is null || !PolicyYaml.IsIdentifier(arg.Name) || !names.Add(arg.Name)) InvalidFacts();
+                        characters += arg!.Name.Length;
+                        Reference(arg.Node);
+                    }
+                }
+            }
+            else if (node.Kind != "unknown" || node.Complete || !node.Inputs.IsEmpty
+                || node.Target is not null || node.Arguments is not null || node.Literal is not null) InvalidFacts();
+            if (characters > 65_536) InvalidFacts();
         }
     }
 

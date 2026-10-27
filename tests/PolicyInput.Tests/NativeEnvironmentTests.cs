@@ -43,12 +43,8 @@ public sealed class NativeEnvironmentTests
                   - id: native
                     description: Native boundary
                     effect: forbid
-                    match:
-                      kind: invocation
-                      target:
-                        kind: exact
-                        owner: /Script/Engine.KismetSystemLibrary
-                        function: LaunchURL
+                    expression:
+                      invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
                 """));
             Assert.NotNull(PolicyLoader.Load());
             Set(Encoding.UTF8.GetBytes("schema-version: 1\nrules: []"));

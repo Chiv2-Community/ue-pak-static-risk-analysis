@@ -5,23 +5,18 @@ namespace PakRisk.Policy;
 
 public sealed record PolicyDocument(int SchemaVersion, ImmutableArray<PolicyRule> Rules);
 
-public sealed record PolicyRule(string Id, string Description, RuleEffect Effect, MatchExpression Match);
+public sealed record PolicyRule(string Id, string Description, RuleEffect Effect,
+    [property: JsonPropertyName("expression")] MatchExpression Match);
 
 public enum RuleEffect { Flag, Forbid }
 
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
-[JsonDerivedType(typeof(MatchExpression.All), "all")]
-[JsonDerivedType(typeof(MatchExpression.Any), "any")]
-[JsonDerivedType(typeof(MatchExpression.Not), "not")]
-[JsonDerivedType(typeof(MatchExpression.Invocation), "invocation")]
-[JsonDerivedType(typeof(MatchExpression.Argument), "argument")]
 public abstract record MatchExpression
 {
     private MatchExpression() { }
     public sealed record All(ImmutableArray<MatchExpression> Expressions) : MatchExpression;
     public sealed record Any(ImmutableArray<MatchExpression> Expressions) : MatchExpression;
     public sealed record Not(MatchExpression Expression) : MatchExpression;
-    public sealed record Invocation(TargetMatcher Target) : MatchExpression;
+    public sealed record Invocation(TargetMatcher Target, ImmutableArray<Argument>? Args = null) : MatchExpression;
     public sealed record Argument(string Name, ValuePredicate Predicate) : MatchExpression;
 }
 
@@ -38,15 +33,17 @@ public abstract record TargetMatcher
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(ValuePredicate.EqualTo), "equals")]
 [JsonDerivedType(typeof(ValuePredicate.In), "in")]
-[JsonDerivedType(typeof(ValuePredicate.StringStartsWith), "string-starts-with")]
+[JsonDerivedType(typeof(ValuePredicate.RegexMatch), "regex-match")]
 [JsonDerivedType(typeof(ValuePredicate.UrlHostIn), "url-host-in")]
+[JsonDerivedType(typeof(ValuePredicate.SubexprMatch), "subexpr-match")]
 public abstract record ValuePredicate
 {
     private ValuePredicate() { }
     public sealed record EqualTo(PolicyLiteral Value) : ValuePredicate;
     public sealed record In(ImmutableArray<PolicyLiteral> Values) : ValuePredicate;
-    public sealed record StringStartsWith(string Prefix) : ValuePredicate;
+    public sealed record RegexMatch(string Pattern) : ValuePredicate;
     public sealed record UrlHostIn(ImmutableArray<string> Hosts) : ValuePredicate;
+    public sealed record SubexprMatch(MatchExpression Subexpr) : ValuePredicate;
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]

@@ -17,12 +17,12 @@ public sealed class InputTests : IDisposable
           - id: private-canary-id
             description: 'private-canary-description $HOME `whoami` $(touch NEVER) & * !'
             effect: forbid
-            match:
-              kind: argument
-              name: URL
-              predicate:
-                kind: string-starts-with
-                prefix: 'private-canary-literal'
+            expression:
+              argument:
+                name: URL
+                predicate:
+                  kind: regex-match
+                  pattern: '^private-canary-literal'
         """;
     private readonly string directory = Path.Combine("/tmp/opencode", "policy-input-tests-" + Guid.NewGuid().ToString("N"));
     public InputTests() => Directory.CreateDirectory(directory);

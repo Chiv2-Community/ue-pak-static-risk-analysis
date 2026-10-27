@@ -11,7 +11,7 @@ using Xunit;
 
 namespace CompatibilityProbe.Tests;
 
-public sealed class ExtractionTests
+public sealed partial class ExtractionTests
 {
     private static readonly PackageInput Input = new("pak-sha256", "entry-17", "/Game/Maps/Test", "/storage/0001.uasset");
     private static UAsset Asset()

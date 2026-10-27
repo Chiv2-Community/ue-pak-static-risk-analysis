@@ -4,39 +4,84 @@ rules:
   - id: forbid-console-commands
     description: Console commands require explicit approval.
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Engine.KismetSystemLibrary
-        function: ExecuteConsoleCommand
+    expression:
+      invocation: /Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand
 
   - id: flag-external-urls
     description: Review external destinations.
     effect: flag
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Engine.KismetSystemLibrary
-        function: LaunchURL
+    expression:
+      invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
 
   - id: forbid-unapproved-urls
     description: Only approved HTTPS destinations are permitted.
     effect: forbid
-    match:
-      kind: all
-      expressions:
-        - kind: invocation
-          target:
-            kind: exact
-            owner: /Script/Engine.KismetSystemLibrary
-            function: LaunchURL
-        - kind: not
-          expression:
-            kind: argument
-            name: URL
-            predicate:
-              kind: url-host-in
-              hosts:
-                - mods.example.org
+    expression:
+      and:
+        - invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
+        - not:
+            argument:
+              name: URL
+              predicate:
+                kind: url-host-in
+                hosts:
+                  - mods.example.org
+
+  # Qualified function: omit class. All argument conditions match this call.
+  - id: flag-approved-url-launches
+    description: Review URL calls with a known approved HTTPS host.
+    effect: flag
+    expression:
+      invocation:
+        function: /Script/Engine.KismetSystemLibrary:LaunchURL
+        args:
+          - argument:
+              name: URL
+              predicate:
+                kind: url-host-in
+                hosts: [mods.example.org]
+
+  - id: flag-stat-console-commands
+    description: Review stat console command invocations.
+    effect: flag
+    expression:
+      invocation:
+        function: /Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand
+        args:
+          - argument:
+              name: Command
+              predicate:
+                kind: regex-match
+                pattern: '\Astat(?:\s|\z)'
+
+  # Class-level scalar and or expression. Illustrative review scope only.
+  - id: flag-selected-classes
+    description: Review calls recorded under these exact classes.
+    effect: flag
+    expression:
+      or:
+        - invocation: /Script/Engine.KismetSystemLibrary
+        - invocation:
+            class: /Script/Engine.GameplayStatics
+
+  # Fictional functions: illustrate a value-producing dependency search.
+  - id: flag-selected-input-producer
+    description: Review a selected argument produced through a matching call.
+    effect: flag
+    expression:
+      invocation:
+        function: /Script/Example.Bar:Baz
+        args:
+          - argument:
+              name: foo
+              predicate:
+                kind: subexpr-match
+                subexpr:
+                  invocation:
+                    function: /Script/Example.String:Append
+                    args:
+                      - argument:
+                          name: A
+                          predicate:
+                            kind: equals
+                            value: {kind: string, value: "foo"}

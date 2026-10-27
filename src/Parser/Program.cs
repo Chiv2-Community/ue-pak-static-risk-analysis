@@ -217,8 +217,8 @@ try
             r.TryGetProperty("virtual_path", out _));
     }).ToImmutableArray();
     var facts = new FactsDocument(1, pakHash, "4.25", "container-v1",
-        dependencies, new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray(),
-            CallGraphContext.Bounded(graphFunctions, graphComplete && gaps.Count == 0)),
+        dependencies, ValueProvenance.Bound(new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray(),
+            CallGraphContext.Bounded(graphFunctions, graphComplete && gaps.Count == 0))),
         new InspectionEvidence(report.GetProperty("ingestion_status").GetString()!,
             report.GetProperty("diagnostic").GetString()!, evidence),
         new DataEvidence(1, contentRoot, logicalRoot, dataComplete && gaps.Count == 0, dataPackages.ToImmutable()));

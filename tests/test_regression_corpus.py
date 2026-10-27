@@ -67,7 +67,84 @@ class CorpusRunnerTests(unittest.TestCase):
                 self.assertEqual("run.action_script", ast.unparse(node.args[0].elts[1]))
                 callers.add(function.name)
         self.assertEqual({"integrated", "capability_policy_gate", "call_chain_container_gate",
-                          "package_context_gate", "package_context_boundary_gate"}, callers)
+                           "package_context_gate", "package_context_boundary_gate"}, callers)
+
+    def test_policy_schema_covers_new_expression_and_invocation_shapes(self):
+        try:
+            import jsonschema
+            import yaml
+        except ImportError:
+            self.skipTest('optional schema test dependencies absent')
+        schema = json.loads((corpus.ROOT / 'schemas/policy-v1.schema.json').read_bytes())
+        jsonschema.Draft202012Validator.check_schema(schema)
+        validator = jsonschema.Draft202012Validator(schema)
+        for path in (corpus.ROOT / 'examples/starter-policy.yaml', corpus.ROOT / 'fixtures/corpus/policy.yaml'):
+            validator.validate(yaml.safe_load(path.read_text()))
+        argument = {'argument': {'name': 'URL', 'predicate': {'kind': 'equals',
+                    'value': {'kind': 'string', 'value': 'https://mods.example.org/'}}}}
+        regex_argument = {'argument': {'name': 'URL', 'predicate': {'kind': 'regex-match',
+                          'pattern': r'\Ahttps://mods\.example\.org/'}}}
+        subexpr_argument = {'argument': {'name': 'URL', 'predicate': {'kind': 'subexpr-match',
+                            'subexpr': {'invocation': {'function': '/Script/Test.Actor:Call', 'args': [argument]}}}}}
+        def document(expression):
+            return {'schema-version': 1, 'rules': [{'id': 'schema-test', 'description': 'Original fixture',
+                    'effect': 'flag', 'expression': expression}]}
+        for expression in (subexpr_argument, regex_argument, {'invocation': '/Script/Test.Actor'}, {'invocation': '/Script/Test.Actor:Call'},
+                {'invocation': {'class': '/Script/Test.Actor'}},
+                {'invocation': {'class': '/Script/Test.Actor', 'function': 'Call', 'args': [argument]}},
+                {'invocation': {'function': '/Script/Test.Actor:Call'}},
+                {'invocation': {'function': '/Script/Test.Actor:Call', 'args': [argument]}},
+                {'and': [argument, {'not': {'or': [{'invocation': '/Script/Test.Actor'}]}}]}):
+            validator.validate(document(expression))
+        for expression in ({}, {'and': []}, {'or': []}, {'not': []},
+                {'argument': {'name': 'URL', 'predicate': {'kind': 'string-starts-with', 'prefix': 'https'}}},
+                {'argument': {'name': 'URL', 'predicate': {'kind': 'regex-match', 'pattern': ''}}},
+                {'argument': {'name': 'URL', 'predicate': {'kind': 'subexpr-match'}}},
+                {'argument': {'name': 'URL', 'predicate': {'kind': 'subexpr-match', 'subexpr': {}}}},
+                {'and': [argument], 'or': [argument]}, {'kind': 'argument', 'name': 'URL'},
+                {'invocation': '/Script/Test.Actor:'}, {'invocation': '/Script/Test.Actor$Call'},
+                {'invocation': {'function': 'Call'}},
+                {'invocation': {'function': '/Script/Test.Actor'}},
+                {'invocation': {'function': '/Script/Test.Actor:'}},
+                {'invocation': {'class': '/Script/Test.Actor', 'function': '/Script/Test.Actor:Call'}},
+                {'invocation': {'class': '/Script/Other.Class', 'function': '/Script/Test.Actor:Call', 'args': [argument]}},
+                {'invocation': {'class': '/Script/Test.Actor', 'args': [argument]}},
+                {'invocation': {'class': '/Script/Test.Actor', 'function': 'Call', 'args': []}},
+                {'invocation': {'class': '/Script/Test.Actor', 'function': 'Call',
+                                'args': [{'not': argument}]}}):
+            self.assertFalse(validator.is_valid(document(expression)), expression)
+        legacy = document(argument)
+        legacy['rules'][0]['match'] = legacy['rules'][0].pop('expression')
+        self.assertFalse(validator.is_valid(legacy))
+
+    def test_facts_schema_covers_bounded_argument_provenance(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest('optional schema test dependencies absent')
+        schema = json.loads((corpus.ROOT / 'schemas/facts-v1.schema.json').read_bytes())
+        jsonschema.Draft202012Validator.check_schema(schema)
+        validator = jsonschema.Draft202012Validator(schema)
+        graph = {'root': 1, 'nodes': [
+            {'kind': 'literal', 'inputs': [], 'complete': True,
+             'literal': {'kind': 'string', 'value': 'foo'}, 'target': None, 'arguments': None},
+            {'kind': 'call', 'inputs': [0], 'complete': True, 'literal': None,
+             'target': {'kind': 'resolved', 'owner': '/Script/Example.String', 'function': 'Append'},
+             'arguments': [{'name': 'A', 'node': 0}]}]}
+        document = {'schema-version': 1, 'pak-sha256': 'a' * 64, 'engine-version': '4.25',
+                    'producer-version': 'test-1', 'dependencies': [], 'analysis': {'coverage-gaps': [],
+                    'invocations': [{'location': {'asset': '/Game/Asset', 'function': 'Caller', 'offset': 1},
+                    'target': {'kind': 'resolved', 'owner': '/Script/Example.Bar', 'function': 'Baz'},
+                    'arguments': {'kind': 'known', 'arguments': [{'name': 'foo', 'value': {
+                        'kind': 'derived', 'provenance': graph}}]}}]}}
+        validator.validate(document)
+        graph['nodes'][1] = {'kind': 'unknown', 'inputs': [], 'complete': False}
+        validator.validate(document)
+        graph['nodes'][1]['complete'] = True
+        self.assertFalse(validator.is_valid(document))
+        graph['nodes'][1]['complete'] = False
+        graph['root'] = 256
+        self.assertFalse(validator.is_valid(document))
 
     def test_manifest_present_local_parity_uses_selected_image_but_production_rejects_id(self):
         # A private fixture models B; never install a synthetic manifest in the checkout.
