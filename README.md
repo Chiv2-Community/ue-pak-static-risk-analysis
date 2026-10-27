@@ -22,8 +22,9 @@ Compatibility and legal-fidelity limits remain tracked in [issue #2](https://git
 
 Start with the [operator guide](docs/operators.md), [CLI/Action input tables](docs/inputs.md),
 [security boundaries](docs/security.md) and [controlled release checklist](docs/releases.md).
-Release v0.1.0 preparation is authorized; publication and the real prebuilt image
-pin are pending operator verification. [Partial indirect evidence](docs/indirect-dispatch.md)
+The v0.1.0 Action selects a [digest-pinned prebuilt image](action-image.json),
+not a consumer-side build. See [release delivery and verification](docs/releases.md).
+[Partial indirect evidence](docs/indirect-dispatch.md)
 does not close #8; [bounded call-chain evidence](docs/call-chains.md) is partial #9,
 not exact-game native catalog proof. Optional [private serialized-data rules](docs/data-policy.md)
 are partial #10, not effective-default or exact-game behavior proof. Native implementation

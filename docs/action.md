@@ -36,10 +36,12 @@ and test a named consumer before claiming cross-repository private-Action access
 Do not make the repository public to bypass this gate. Local same-repository CI
 tests do not verify private consumer access. #13 must remain open for this gate.
 
-Release preparation now supports a public digest-pinned image. The real
-`action-image.json` pin is not checked in until the parent verifies the candidate;
-this core checkout still uses the source-development fallback. No public digest
-or successful external pull is claimed here. See [two-leg release](releases.md).
+The v0.1.0 Action uses the exact registry digest in
+[`action-image.json`](../action-image.json); it does not build on the consumer.
+The candidate passed remote and local owned-evidence gates; its private registry
+manifest/config were verified before pinning. Public visibility and anonymous
+consumer verification are separate [release gates](releases.md), not proved by
+the pin itself. Only development checkouts without the pin use the build fallback.
 Public image pulls use an empty temporary Docker config and HOME, never runner
 registry credentials. Private registry authentication is intentionally unsupported.
 

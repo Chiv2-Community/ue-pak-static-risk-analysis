@@ -3,8 +3,13 @@
 The owner authorized original project code under GPL-3.0-only, a public GitHub
 v0.1.0 release, and a public Linux amd64 image at
 `ghcr.io/chiv2-community/ue-pak-static-risk-analysis:v0.1.0`.
-Third-party licenses remain unchanged. This checkout prepares that release;
-**no image digest, publication, public pull or final tag is claimed verified**.
+Third-party licenses remain unchanged. The candidate at build commit
+`f2a843427369f0eafd53c056126c63151ac38082` passed remote validation run
+[40417420818](https://github.com/Chiv2-Community/ue-pak-static-risk-analysis/actions/runs/40417420818)
+and the local owned-evidence gate (641 .NET passes, 250 Python passes, one optional
+absent-repak skip). Its private GHCR manifest/config were verified before adding
+[`action-image.json`](../action-image.json). The pin is not proof of public
+visibility, anonymous consumption or a final release; verify those separately.
 Only the parent operator publishes after review and green CI. No major/latest
 aliases, billing changes or unrelated access changes are part of this release.
 
@@ -26,7 +31,12 @@ aliases, billing changes or unrelated access changes are part of this release.
     `publish: true` and `private_visibility_confirmed: true`. The separate
     `packages: write` job verifies transfer hashes/image ID/revision and refuses
     an existing candidate tag. It logs in using token stdin and an isolated
-    Docker config, pushing `sha-<full-A>`, not v0.1.0. An existing public namespace
+    Docker config, pushing `sha-<full-A>`, not v0.1.0. Alternatively, the operator
+    can push the checksum-verified validated archive without rebuilding, binding
+    the imported config/layers to the validation record and verifying actual
+    package visibility and remote manifest/config afterwards. The v0.1.0 candidate
+    used this path; its package was confirmed private through the GitHub API.
+    An existing public namespace
     could expose a push immediately; the acknowledgement is an operator gate,
     not API proof of visibility. No visibility changes are automatic.
 4. Commit **B** adds root `action-image.json` with exactly four keys:
