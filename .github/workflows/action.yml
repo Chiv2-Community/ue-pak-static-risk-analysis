@@ -25,10 +25,28 @@ jobs:
           from ingestion_fixture import build
           Path('action-test.pak').write_bytes(build())
           PY
-      - name: Run same-repository composite Action
+      - name: Stage source-development Action for local parity
+        run: |
+          python3 - <<'PY'
+          import os, shutil, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tests')
+          from test_action import development_action
+          stage = Path(os.environ['GITHUB_WORKSPACE']) / '.ci-development-action'
+          development_action(stage)
+          for name in ('Dockerfile', '.dockerignore', 'LICENSE', 'global.json', 'src', 'container', 'action.yml'):
+              source = Path(name)
+              if source.is_dir():
+                  shutil.copytree(source, stage / name,
+                      ignore=shutil.ignore_patterns('bin', 'obj', '__pycache__'))
+              else:
+                  shutil.copyfile(source, stage / name)
+          assert not (stage / 'action-image.json').exists()
+          PY
+      - name: Run isolated source-development composite Action
         id: scan
         continue-on-error: true
-        uses: ./
+        uses: ./.ci-development-action
         with:
           pak: action-test.pak
           report: action-test-report.json
@@ -69,14 +87,11 @@ jobs:
           "$RUNNER_TEMP/action-test-venv/bin/pip" install -r tests/requirements.txt
           export UE_PAK_CONTAINER_TEST_IMAGE="$(python3 - <<'PY'
           import subprocess, sys
-          sys.path.insert(0, 'scripts')
+          sys.path.insert(0, '.ci-development-action/scripts')
           import action
-          pinned = action.published_image()
-          if pinned:
-              print(pinned)
-          else:
-              print(subprocess.check_output(['docker', 'image', 'ls', '--filter', 'reference=ue-pak-action:*',
-                    '--no-trunc', '--format', '{{.ID}}'], text=True).splitlines()[0])
+          assert action.published_image() is None
+          print(subprocess.check_output(['docker', 'image', 'ls', '--filter', 'reference=ue-pak-action:*',
+                '--no-trunc', '--format', '{{.ID}}'], text=True).splitlines()[0])
           PY
           )"
           test -n "$UE_PAK_CONTAINER_TEST_IMAGE"

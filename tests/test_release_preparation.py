@@ -36,6 +36,34 @@ class PublishedImageTests(unittest.TestCase):
             action.prepare()
         local.assert_called_once_with()
 
+    def test_ci_development_action_staging_keeps_production_pin(self):
+        import yaml
+        path = ROOT / '.github/workflows/action.yml'
+        if (ROOT / 'SOURCE-MANIFEST.json').is_file() and not path.exists():
+            self.skipTest('runtime source archive omits the CI-only parity workflow')
+        workflow = yaml.safe_load(path.read_text())
+        steps = workflow['jobs']['action-tests']['steps']
+        stage_step = next(s for s in steps if s.get('name') ==
+                          'Stage source-development Action for local parity')
+        script = stage_step['run'].split("python3 - <<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
+        production = ROOT / 'action-image.json'
+        before = production.read_bytes() if production.exists() else None
+        subprocess.run([sys.executable, '-c', script], cwd=ROOT,
+                       env=dict(os.environ, GITHUB_WORKSPACE=str(self.root)), check=True, timeout=30)
+        stage = self.root / '.ci-development-action'
+        self.assertFalse((stage / 'action-image.json').exists())
+        self.assertEqual(before, production.read_bytes() if production.exists() else None)
+        for name in ('action.yml', 'Dockerfile', '.dockerignore', 'LICENSE', 'global.json',
+                     'scripts/action.py', 'scripts/scan.py', 'container/ExcludeUnused.targets'):
+            self.assertEqual((ROOT / name).read_bytes(), (stage / name).read_bytes())
+        self.assertTrue((stage / 'src/Parser/Parser.csproj').is_file())
+        self.assertTrue((stage / 'pak_ingest/__init__.py').is_file())
+        self.assertTrue((stage / 'schemas').is_dir())
+        self.assertIn('./.ci-development-action', [s.get('uses') for s in steps])
+        test_step = next(s for s in steps if s.get('name') == 'Test adapter and actual local Docker boundary')
+        self.assertIn("sys.path.insert(0, '.ci-development-action/scripts')", test_step['run'])
+        self.assertIn('assert action.published_image() is None', test_step['run'])
+
     def test_public_pull_digest_platform_and_isolated_environment_no_build(self):
         self.write()
         calls = []

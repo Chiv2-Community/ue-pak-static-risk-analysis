@@ -1,0 +1,6 @@
+{
+  "version": "v0.1.0",
+  "platform": "linux/amd64",
+  "build-source": "f2a843427369f0eafd53c056126c63151ac38082",
+  "image": "ghcr.io/chiv2-community/ue-pak-static-risk-analysis@sha256:8b6b84574536e4a1ecfa1a0d69880b5b2f9bd95b1460e2a35c3e4d45337ec82c"
+}
