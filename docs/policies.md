@@ -46,6 +46,7 @@ rules:
 | `not` | One expression | Negates a known result; preserves Unknown |
 | `invocation` | Class path, function path or expanded object | Recorded call identity, optionally with argument conditions |
 | `argument` | Object with `name`, `predicate` | Named parameter and a typed value predicate |
+| `property-write` | Object with `class`, `property`, optional `predicate` | Runtime assignment destination and optional value test |
 
 Each expression is a mapping with exactly one expression key; there is no
 expression-level `kind`. The rule field is `expression`, not `match`.

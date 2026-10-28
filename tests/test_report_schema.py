@@ -16,6 +16,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipIf(Draft202012Validator is None, "optional jsonschema unavailable")
 class ReportSchemaTests(unittest.TestCase):
+    def test_property_write_example_uses_declaring_owners(self):
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("optional yaml unavailable")
+        document = yaml.safe_load((ROOT / "examples/property-write-policy.yaml").read_text())
+        schema = json.loads((ROOT / "schemas/policy-v1.schema.json").read_text())
+        Draft202012Validator(schema).validate(document)
+        expressions = document["rules"][0]["expression"]["any"]
+        writes = {item["property-write"]["property"]: item["property-write"]["class"]
+                  for item in expressions if "property-write" in item}
+        self.assertEqual({
+            "bIgnoreClientMovementErrorChecksAndCorrection": "/Script/Engine.CharacterMovementComponent",
+            "CustomTimeDilation": "/Script/Engine.Actor",
+            "MinimumSpawnDelayOverride": "/Script/TBL.TBLPlayerController",
+            "InteractableSettings": "/Script/TBL.TBLCharacter",
+        }, writes)
+        self.assertIn({"invocation": "/Script/TBL.CombatStateComponent:OnEndAnimationTimeout"}, expressions)
+
     def test_policy_wildcards_shorthand_and_literal_escapes(self):
         schema = json.loads((ROOT / "schemas/policy-v1.schema.json").read_text())
         Draft202012Validator.check_schema(schema)

@@ -1,4 +1,6 @@
-# Illustrative review policy. Verify exact-game owners before production use.
+# Illustrative review policy, not the private multiplayer defense policy.
+# Owners checked against ArgonSDK d9d9759 and UE4.25Plus 2d1aaee declarations.
+# Declarations are not proof of installed-game behavior or complete coverage.
 # Matches declarations, not proof that the receiver is a protected player object.
 schema-version: 1
 rules:
@@ -8,17 +10,16 @@ rules:
     expression:
       any:
         - property-write:
-            class: __WILDCARD__
+            class: /Script/Engine.CharacterMovementComponent
             property: bIgnoreClientMovementErrorChecksAndCorrection
         - property-write:
-            class: __WILDCARD__
+            class: /Script/Engine.Actor
             property: CustomTimeDilation
+        # SDK declares this as a function, not a writable property.
+        - invocation: /Script/TBL.CombatStateComponent:OnEndAnimationTimeout
         - property-write:
-            class: __WILDCARD__
-            property: OnEndAnimationTimeout
-        - property-write:
-            class: __WILDCARD__
+            class: /Script/TBL.TBLPlayerController
             property: MinimumSpawnDelayOverride
         - property-write:
-            class: __WILDCARD__
+            class: /Script/TBL.TBLCharacter
             property: InteractableSettings
