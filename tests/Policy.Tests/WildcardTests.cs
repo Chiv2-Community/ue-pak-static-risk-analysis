@@ -136,4 +136,47 @@ public class WildcardTests
         var document = Argument("kind: equals\nvalue: foo");
         Assert.Throws<ArgumentException>(() => Evaluate(document, Known(Constant("A", new PolicyLiteral.Wildcard()))));
     }
+
+    [Theory]
+    [InlineData("owner")]
+    [InlineData("exact")]
+    [InlineData("pattern")]
+    [InlineData("write")]
+    public void PublicAstCannotReinterpretLiteralOwnerAsWildcard(string variant)
+    {
+        MatchExpression expression = variant switch
+        {
+            "owner" => new MatchExpression.Invocation(new TargetMatcher.ByOwner(PolicyYaml.Wildcard)),
+            "exact" => new MatchExpression.Invocation(new TargetMatcher.Exact(PolicyYaml.Wildcard, "Run")),
+            "pattern" => new MatchExpression.Invocation(new TargetMatcher.Pattern(PolicyYaml.Wildcard, "Run")),
+            _ => new MatchExpression.PropertyWrite(PolicyYaml.Wildcard, "Sensitive")
+        };
+        var document = new PolicyDocument(1, [new("test", "Test", RuleEffect.Forbid, expression)]);
+        Assert.Throws<InvalidOperationException>(() => PolicyYaml.Write(document));
+        Assert.Throws<ArgumentException>(() => new PolicyEvaluator(document));
+    }
+
+    [Theory]
+    [InlineData("invocation: __WILDCARD__")]
+    [InlineData("invocation: {class: __WILDCARD__, function: Run}")]
+    [InlineData("invocation: {class: __WILDCARD__, function: __WILDCARD__}")]
+    [InlineData("property-write: {class: __WILDCARD__, property: Sensitive}")]
+    public void IntentionalWildcardOwnersRemainNullAndRoundTrip(string expression)
+    {
+        var document = Parse(expression);
+        var facts = new InvocationAnalysis([
+            new(new("/Game/Test", "Run", 0), new InvocationTarget.Resolved("/Script/Engine.Test", "Run"), Known())
+        ], [], PropertyWrites: new(true, [
+            new(new("/Game/Test", "Run", 1), "EX_Let", "/Script/Engine.Test", "Sensitive", "self", new ArgumentValue.Dynamic())]));
+        foreach (var policy in new[] { document, PolicyYaml.Parse(PolicyYaml.Write(document)) })
+        {
+            var leaf = Assert.Single(policy.Rules).Match;
+            if (leaf is MatchExpression.Invocation invocation)
+                Assert.Null(Assert.IsType<TargetMatcher.Pattern>(invocation.Target).Owner);
+            else Assert.Null(Assert.IsType<MatchExpression.PropertyWrite>(leaf).Owner);
+            var result = new PolicyEvaluator(policy).Evaluate(facts);
+            Assert.True(result.HasForbiddenFindings);
+            Assert.False(result.IsIncomplete);
+        }
+    }
 }

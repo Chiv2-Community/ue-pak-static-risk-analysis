@@ -17,9 +17,12 @@ public sealed class PropertyWriteTests
         new(new FFieldPath { ResolvedOwner = new(owner), Path = names.Select(n => new FName(asset, n)).ToArray() });
     private static EX_InstanceVariable Instance(UAsset asset, string name) => new() { Variable = Pointer(asset, 1, name) };
 
-    private static ExtractionReport Extract(UAsset asset, params KismetExpression[] code)
+    private static ExtractionReport Extract(UAsset asset, params KismetExpression[] code) => Extract(asset, [], code);
+
+    private static ExtractionReport Extract(UAsset asset, FProperty[] properties, params KismetExpression[] code)
     {
         var index = PackageContextFixture.Function(asset, "Run");
+        ((FunctionExport)asset.Exports[index - 1]).LoadedProperties = properties;
         using var stream = new MemoryStream();
         using var writer = new AssetBinaryWriter(stream, asset);
         var size = code.Sum(e => ExpressionSerializer.WriteExpression(e, writer));
@@ -84,7 +87,7 @@ public sealed class PropertyWriteTests
         var local = new EX_LocalVariable { Variable = Pointer(asset, 3, "Temporary") };
         var member = new EX_StructMemberContext { StructExpression = local,
             StructMemberExpression = Pointer(asset, 1, "Distance") };
-        var report = Extract(asset,
+        var report = Extract(asset, [new FGenericProperty { Name = new(asset, "Temporary") }],
             new EX_Let { Value = local.Variable, Variable = member, Expression = new EX_IntOne() },
             new EX_LetValueOnPersistentFrame { DestinationProperty = local.Variable, AssignmentExpression = new EX_IntOne() });
         Assert.Empty(report.Analysis.PropertyWrites!.Writes);
@@ -160,5 +163,84 @@ public sealed class PropertyWriteTests
         var report = InvocationExtractor.Inspect(asset, Input);
         Assert.Single(report.Analysis.PropertyWrites!.Writes);
         Assert.False(report.Analysis.PropertyWrites.Complete);
+    }
+
+    [Theory]
+    [InlineData("missing", false)]
+    [InlineData("unrelated", false)]
+    [InlineData("duplicate", false)]
+    [InlineData("conflicting", false)]
+    [InlineData("out", false)]
+    [InlineData("ref", false)]
+    [InlineData("local", true)]
+    [InlineData("parameter", true)]
+    public void SerializedLocalExclusionRequiresUniqueNonAliasingDeclaration(string metadata, bool harmless)
+    {
+        var asset = PackageContextFixture.Asset("Type");
+        var index = PackageContextFixture.Function(asset, "Run");
+        FProperty Declaration(string name, EPropertyFlags flags = 0) => new FGenericProperty { Name = new(asset, name), PropertyFlags = flags };
+        var function = (FunctionExport)asset.Exports[index - 1];
+        function.LoadedProperties = metadata switch
+        {
+            "missing" => [],
+            "unrelated" => [Declaration("Other")],
+            "duplicate" => [Declaration("Alias"), Declaration("Alias")],
+            "conflicting" => [Declaration("Alias"), Declaration("Alias", EPropertyFlags.CPF_ReferenceParm)],
+            "out" => [Declaration("Alias", EPropertyFlags.CPF_Parm | EPropertyFlags.CPF_OutParm)],
+            "ref" => [Declaration("Alias", EPropertyFlags.CPF_Parm | EPropertyFlags.CPF_ReferenceParm)],
+            "parameter" => [Declaration("Alias", EPropertyFlags.CPF_Parm)],
+            _ => [Declaration("Alias")]
+        };
+        var pointer = Pointer(asset, index, "Alias");
+        function.ScriptBytecode = [
+            new EX_LetObj { VariableExpression = new EX_LocalVariable { Variable = pointer }, AssignmentExpression = new EX_Self() },
+            new EX_LetValueOnPersistentFrame { DestinationProperty = pointer, AssignmentExpression = new EX_Self() }];
+        function.ScriptBytecodeSize = function.ScriptBytecode.Sum(e => (int)e.GetSize(asset));
+        var root = Path.Combine(Path.GetTempPath(), "property-write-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "Writes.uasset");
+            asset.Write(path);
+            foreach (var report in new[] { InvocationExtractor.Inspect(asset, Input), InvocationExtractor.Read(Input with { StoragePath = path }) })
+            {
+                Assert.Equal(harmless ? 0 : 2, report.Analysis.PropertyWrites!.Writes.Length);
+                Assert.Equal(harmless, report.Analysis.PropertyWrites.Complete);
+                var policy = new PolicyDocument(1, [new("test", "Test", RuleEffect.Forbid, new MatchExpression.PropertyWrite(null, "Alias"))]);
+                var result = new PolicyEvaluator(policy).Evaluate(report.Analysis);
+                Assert.Equal(!harmless, result.IsIncomplete);
+                Assert.Empty(result.PropertyWriteFindings);
+                Assert.Equal(harmless ? 0 : 2, result.Uncertainties.Length);
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("missing", false)]
+    [InlineData("duplicate", false)]
+    [InlineData("out", false)]
+    [InlineData("ref", false)]
+    [InlineData("local", true)]
+    public void LegacyLocalExclusionRequiresUniqueNonAliasingDeclaration(string metadata, bool harmless)
+    {
+        var asset = PackageContextFixture.Asset("Type");
+        var index = PackageContextFixture.Function(asset, "Run");
+        var property = new PropertyExport { ObjectName = new(asset, "Alias"), OuterIndex = new(index),
+            Property = metadata == "missing" ? null : new UIntProperty {
+                PropertyFlags = metadata switch { "out" => EPropertyFlags.CPF_OutParm, "ref" => EPropertyFlags.CPF_ReferenceParm, _ => 0 } } };
+        asset.Exports.Add(property);
+        var pointer = new KismetPropertyPointer(new FPackageIndex(asset.Exports.Count));
+        if (metadata == "duplicate")
+            asset.Exports.Add(new PropertyExport { ObjectName = new(asset, "Alias"), OuterIndex = new(index), Property = new UIntProperty() });
+        var function = (FunctionExport)asset.Exports[index - 1];
+        function.ScriptBytecode = [new EX_LetObj {
+            VariableExpression = new EX_LocalVariable { Variable = pointer }, AssignmentExpression = new EX_Self() }];
+        foreach (var version in asset.CustomVersionContainer)
+            if (version.FriendlyName == "FReleaseObjectVersion") version.Version = 0;
+        function.ScriptBytecodeSize = function.ScriptBytecode.Sum(e => (int)e.GetSize(asset));
+        var report = InvocationExtractor.Inspect(asset, Input);
+        Assert.Equal(harmless ? 0 : 1, report.Analysis.PropertyWrites!.Writes.Length);
+        Assert.Equal(harmless, report.Analysis.PropertyWrites.Complete);
     }
 }

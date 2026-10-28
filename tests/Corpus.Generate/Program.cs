@@ -22,13 +22,14 @@ if (args[0] == "property-writes")
     var asset = PackageContextFixture.Asset("Type");
     KismetPropertyPointer Pointer(int owner, string name) => new(new FFieldPath { ResolvedOwner = new(owner), Path = [new(asset, name)] });
     KismetExpression Instance(string name) => new EX_InstanceVariable { Variable = Pointer(1, name) };
-    PackageContextFixture.Function(asset, "Run",
+    var function = PackageContextFixture.Function(asset, "Run",
         new EX_LetBool { VariableExpression = Instance("IgnoreCorrection"), AssignmentExpression = new EX_True() },
         new EX_Let { Value = Pointer(1, "CustomTimeDilation"), Variable = Instance("CustomTimeDilation"), Expression = new EX_FloatConst { Value = 90 } },
         new EX_Let { Value = Pointer(1, "Settings"), Variable = Instance("Settings"), Expression = new EX_LocalVariable { Variable = Pointer(3, "Temporary") } },
         new EX_Let { Value = Pointer(1, "Settings"), Variable = new EX_StructMemberContext {
             StructExpression = Instance("Settings"), StructMemberExpression = Pointer(1, "Distance") }, Expression = new EX_FloatConst { Value = 5000 } },
         new EX_Let { Value = Pointer(3, "Temporary"), Variable = new EX_LocalVariable { Variable = Pointer(3, "Temporary") }, Expression = new EX_IntOne() });
+    ((FunctionExport)asset.Exports[function - 1]).LoadedProperties = [new FGenericProperty { Name = new(asset, "Temporary") }];
     asset.Write(Path.Combine(args[1], "PropertyWrites.uasset"));
     return 0;
 }

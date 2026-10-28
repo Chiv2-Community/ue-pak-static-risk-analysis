@@ -2,6 +2,7 @@ using CompatibilityProbe;
 using PakRisk.Policy;
 using UAssetAPI;
 using UAssetAPI.ExportTypes;
+using UAssetAPI.FieldTypes;
 using UAssetAPI.Kismet.Bytecode;
 using UAssetAPI.Kismet.Bytecode.Expressions;
 using UAssetAPI.UnrealTypes;
@@ -67,18 +68,29 @@ internal static class PropertyWriteExtractor
 
     private static bool IsLocal(UAsset asset, KismetPropertyPointer? pointer, int function)
     {
+        if (function <= 0 || function > asset.Exports.Count || asset.Exports[function - 1] is not FunctionExport declaration) return false;
         if (pointer?.New is { } path)
         {
             if (path.ResolvedOwner?.Index != function || path.Path is not { Length: 1 }
                 || !PolicyYaml.IsIdentifier(TargetResolver.StoredName(path.Path[0]))) return false;
             var name = TargetResolver.StoredName(path.Path[0]);
-            var properties = (asset.Exports[function - 1] as FunctionExport)?.LoadedProperties;
-            return properties is not null && !properties.Any(property => TargetResolver.StoredName(property.Name) == name
-                && (property.PropertyFlags & (EPropertyFlags.CPF_OutParm | EPropertyFlags.CPF_ReferenceParm)) != 0);
+            if (declaration.LoadedProperties is not { } properties) return false;
+            FProperty? match = null;
+            foreach (var field in properties)
+            {
+                if (field is null) return false;
+                if (TargetResolver.StoredName(field.Name) != name) continue;
+                if (match is not null) return false;
+                match = field;
+            }
+            // Missing or ambiguous metadata cannot prove the destination is non-aliasing.
+            return match is not null && (match.PropertyFlags & (EPropertyFlags.CPF_OutParm | EPropertyFlags.CPF_ReferenceParm)) == 0;
         }
         return pointer?.Old is { Index: > 0 } old && old.Index <= asset.Exports.Count
             && asset.Exports[old.Index - 1] is PropertyExport property && property.OuterIndex?.Index == function
             && PolicyYaml.IsIdentifier(TargetResolver.StoredName(property.ObjectName)) && property.Property is not null
+            && asset.Exports.OfType<PropertyExport>().Count(candidate => candidate.OuterIndex?.Index == function
+                && TargetResolver.StoredName(candidate.ObjectName) == TargetResolver.StoredName(property.ObjectName)) == 1
             && (property.Property.PropertyFlags & (EPropertyFlags.CPF_OutParm | EPropertyFlags.CPF_ReferenceParm)) == 0;
     }
 

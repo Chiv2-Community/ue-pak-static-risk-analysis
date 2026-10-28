@@ -2,6 +2,7 @@ using PakRisk.Extraction;
 using PakRisk.Policy;
 using UAssetAPI;
 using UAssetAPI.ExportTypes;
+using UAssetAPI.FieldTypes;
 using UAssetAPI.Kismet.Bytecode;
 using UAssetAPI.Kismet.Bytecode.Expressions;
 using UAssetAPI.UnrealTypes;
@@ -41,7 +42,9 @@ public sealed partial class ExtractionTests
         var identity = Function(asset, [], "Transform"); // export 4
         identity.LoadedProperties = [Parameter(asset, "X")];
         Code(asset, identity, new EX_Return { ReturnExpression = Local(asset, 4, "X") });
-        return (asset, Function(asset, [], "Caller")); // export 5
+        var caller = Function(asset, [], "Caller"); // export 5
+        caller.LoadedProperties = [new FGenericProperty { Name = new(asset, "x") }, new FGenericProperty { Name = new(asset, "y") }];
+        return (asset, caller);
     }
 
     [Fact]

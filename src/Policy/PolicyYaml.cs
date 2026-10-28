@@ -185,14 +185,17 @@ public static partial class PolicyYaml
                     switch (invocation.Target)
                     {
                         case TargetMatcher.Exact exact:
+                            if (!IsOwner(exact.Owner)) throw new InvalidOperationException("Invalid policy document.");
                             writer.WriteString("class", exact.Owner);
                             WriteSelector(writer, "function", exact.Function, false);
                             break;
                         case TargetMatcher.ByOwner owner:
+                            if (!IsOwner(owner.Owner)) throw new InvalidOperationException("Invalid policy document.");
                             writer.WriteString("class", owner.Owner);
                             break;
                         case TargetMatcher.Pattern pattern:
-                            if (!pattern.HasFunction && pattern.Function is not null)
+                            if (pattern.Owner is not null && !IsOwner(pattern.Owner)
+                                || !pattern.HasFunction && pattern.Function is not null)
                                 throw new InvalidOperationException("Invalid policy document.");
                             writer.WriteString("class", pattern.Owner ?? Wildcard);
                             if (pattern.HasFunction) WriteSelector(writer, "function", pattern.Function ?? Wildcard, pattern.Function is null);
@@ -215,6 +218,7 @@ public static partial class PolicyYaml
                     writer.WriteEndObject();
                     break;
                 case MatchExpression.PropertyWrite write:
+                    if (write.Owner is not null && !IsOwner(write.Owner)) throw new InvalidOperationException("Invalid policy document.");
                     writer.WritePropertyName("property-write");
                     writer.WriteStartObject();
                     writer.WriteString("class", write.Owner ?? Wildcard);

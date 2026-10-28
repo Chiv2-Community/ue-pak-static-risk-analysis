@@ -36,7 +36,7 @@ rules:
 class PropertyWriteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temporary = tempfile.TemporaryDirectory(prefix="property-writes-", dir="/tmp/opencode")
+        cls.temporary = tempfile.TemporaryDirectory(prefix="property-writes-")
         cls.addClassCleanup(cls.temporary.cleanup)
         cls.root = Path(cls.temporary.name)
         generated = cls.root / "generated"
