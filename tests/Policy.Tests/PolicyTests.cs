@@ -136,8 +136,8 @@ public sealed class PolicyTests
     }
 
     [Theory]
-    [InlineData("and: []")]
-    [InlineData("or: []")]
+    [InlineData("all: []")]
+    [InlineData("any: []")]
     public void RejectsEmptyBooleanCollections(string expression)
     {
         var start = Example[..Example.IndexOf("      invocation:", StringComparison.Ordinal)];
@@ -161,11 +161,10 @@ public sealed class PolicyTests
     }
 
     [Theory]
-    [InlineData("kind: in\nvalues: [{kind: string, value: '1'}, {kind: integer, value: 1}]", "mixed-literal-types")]
     [InlineData("kind: in\nvalues: [{kind: integer, value: 1}, {kind: integer, value: 1}]", "duplicate-literal")]
     [InlineData("kind: url-host-in\nhosts: [mods.example.org, mods.example.org]", "duplicate-host")]
     [InlineData("kind: in\nvalues: []", "empty-array")]
-    public void RejectsMixedOrDuplicateCollections(string predicate, string code)
+    public void RejectsInvalidOrDuplicateCollections(string predicate, string code)
     {
         Assert.Equal(code, Assert.Throws<PolicyException>(() => PolicyYaml.Parse(Argument(predicate))).Code);
     }
@@ -278,9 +277,9 @@ public sealed class PolicyTests
     public void ExpandedArgumentsAndLogicalExpressionsRoundTrip()
     {
         var input = WithExpression("""
-            or:
+            any:
               - invocation: /Script/Engine.KismetSystemLibrary
-              - and:
+              - all:
                   - invocation:
                       class: /Script/Engine.KismetSystemLibrary
                       function: LaunchURL
@@ -306,11 +305,11 @@ public sealed class PolicyTests
 
     [Theory]
     [InlineData("{}")]
-    [InlineData("and: []")]
-    [InlineData("or: []")]
-    [InlineData("and: {invocation: /Script/Test.Actor}")]
+    [InlineData("all: []")]
+    [InlineData("any: []")]
+    [InlineData("all: {invocation: /Script/Test.Actor}")]
     [InlineData("not: [{invocation: /Script/Test.Actor}]")]
-    [InlineData("and: [{invocation: /Script/Test.Actor}]\nor: [{invocation: /Script/Test.Actor}]")]
+    [InlineData("all: [{invocation: /Script/Test.Actor}]\nany: [{invocation: /Script/Test.Actor}]")]
     [InlineData("invocation: /Script/Test.Actor:")]
     [InlineData("invocation: '/Script/Test.Actor:Call:Extra'")]
     [InlineData("invocation: '/Script/Test.Actor$Call'")]
@@ -418,7 +417,7 @@ public sealed class PolicyTests
     [InlineData("kind: subexpr-match")]
     [InlineData("kind: subexpr-match\nsubexpr: null")]
     [InlineData("kind: subexpr-match\nsubexpr: {invocation: /Script/Test.Actor}\nextra: private-canary")]
-    [InlineData("kind: subexpr-match\nsubexpr: {and: []}")]
+    [InlineData("kind: subexpr-match\nsubexpr: {all: []}")]
     public void InvalidSubexpressionsFailClosed(string predicate) =>
         Assert.Throws<PolicyException>(() => PolicyYaml.Parse(Argument(predicate)));
 }

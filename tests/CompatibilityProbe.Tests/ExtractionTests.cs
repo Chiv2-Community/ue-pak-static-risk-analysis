@@ -476,9 +476,10 @@ public sealed partial class ExtractionTests
         var function = Function(asset, [Call(args)]);
         function.ScriptBytecodeSize++; // Correct pinned IntConstByte Visit omission.
         var call = Assert.Single(InvocationExtractor.Inspect(asset, Input).Invocations);
-        Assert.Equal(11, call.Arguments.Count(a => a.Value is ArgumentValue.Constant));
+        Assert.Equal(12, call.Arguments.Count(a => a.Value is ArgumentValue.Constant));
         Assert.Equal(new ArgumentValue.Constant(new PolicyLiteral.Integer(200)), call.Arguments[4].Value);
-        Assert.All(call.Arguments.Skip(11).Take(4), a => { Assert.IsType<ArgumentValue.Dynamic>(a.Value); Assert.Equal("unsupported-constant-type", a.Reason); });
+        Assert.Equal(new ArgumentValue.Constant(new PolicyLiteral.Number(1)), call.Arguments[13].Value);
+        Assert.All(new[] { call.Arguments[11], call.Arguments[12], call.Arguments[14] }, a => { Assert.IsType<ArgumentValue.Dynamic>(a.Value); Assert.Equal("unsupported-constant-type", a.Reason); });
         Assert.Equal("runtime-expression", call.Arguments[^1].Reason);
         Assert.IsType<ArgumentMetadata.Unavailable>(call.Fact.Arguments);
     }
@@ -778,7 +779,7 @@ public sealed partial class ExtractionTests
         KismetExpression expression = kind switch
         {
             "name" => new EX_NameConst { Value = new(asset, "a") },
-            "float" => new EX_FloatConst { Value = 1 },
+            "float" => new EX_FloatConst { Value = float.NaN },
             "byte" => new EX_ByteConst { Value = 1 },
             "uint64" => new EX_UInt64Const { Value = ulong.MaxValue },
             _ => new EX_ObjectConst { Value = new(-2) }
@@ -792,6 +793,28 @@ public sealed partial class ExtractionTests
         Assert.Contains(UncertaintyReason.DynamicArgument, Assert.Single(evaluation.Uncertainties).Reasons);
         Assert.Contains(CoverageGap.IncompleteExtraction, evaluation.CoverageGaps);
         Assert.Equal("unsupported-constant-type", Assert.Single(report.Invocations).Arguments[0].Reason);
+    }
+
+    [Fact]
+    public void FiniteFloatConstantMatchesInferredNumberPolicy()
+    {
+        var asset = Asset();
+        var target = Function(asset, [], "Target");
+        target.LoadedProperties = [Parameter(asset, "Value")];
+        Function(asset, [new EX_FinalFunction { StackNode = new(2), Parameters = [new EX_FloatConst { Value = 1.5f }] }]);
+        var report = InvocationExtractor.Inspect(asset, Input);
+        var policy = PolicyYaml.Parse("""
+            schema-version: 1
+            rules:
+              - id: float
+                description: Float value
+                effect: flag
+                expression:
+                  argument:
+                    name: Value
+                    predicate: {kind: equals, value: 1.5}
+            """);
+        Assert.Single(new PolicyEvaluator(policy).Evaluate(report.Analysis).Findings);
     }
 
     [Fact]

@@ -1,0 +1,24 @@
+# Illustrative review policy. Verify exact-game owners before production use.
+# Matches declarations, not proof that the receiver is a protected player object.
+schema-version: 1
+rules:
+  - id: review-sensitive-runtime-writes
+    description: Review movement validation timing and interaction setting writes.
+    effect: flag
+    expression:
+      any:
+        - property-write:
+            class: __WILDCARD__
+            property: bIgnoreClientMovementErrorChecksAndCorrection
+        - property-write:
+            class: __WILDCARD__
+            property: CustomTimeDilation
+        - property-write:
+            class: __WILDCARD__
+            property: OnEndAnimationTimeout
+        - property-write:
+            class: __WILDCARD__
+            property: MinimumSpawnDelayOverride
+        - property-write:
+            class: __WILDCARD__
+            property: InteractableSettings

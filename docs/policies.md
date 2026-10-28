@@ -41,15 +41,15 @@ rules:
 
 | Expression key | Value | Contract |
 | --- | --- | --- |
-| `and` | Nonempty expression list | Every expression must match |
-| `or` | Nonempty expression list | At least one expression must match |
+| `all` | Nonempty expression list | Every expression must match |
+| `any` | Nonempty expression list | At least one expression must match |
 | `not` | One expression | Negates a known result; preserves Unknown |
 | `invocation` | Class path, function path or expanded object | Recorded call identity, optionally with argument conditions |
 | `argument` | Object with `name`, `predicate` | Named parameter and a typed value predicate |
 
 Each expression is a mapping with exactly one expression key; there is no
 expression-level `kind`. The rule field is `expression`, not `match`.
-Singleton `and`/`or` lists are valid. Empty lists are rejected to avoid
+Singleton `all`/`any` lists are valid. Empty lists are rejected to avoid
 accidental always-true or always-false policies. Argument and function names
 must match `[A-Za-z_][A-Za-z0-9_]*` in v1.
 
@@ -91,8 +91,8 @@ invocation:
 ```
 
 A qualified function forbids `class`, even if it names the same class. A short
-function name requires `class`. If `function` is present, only that exact function
-matches. If `args` is present,
+function name requires `class`. If `function` is present, it selects that function
+or the whole-field wildcard. If `args` is present,
 `function` is required and `args` must be a nonempty list of `argument` expressions.
 All argument conditions are ANDed on the **same call**. A condition from another
 call cannot satisfy this invocation. Missing/dynamic arguments remain Unknown.
@@ -101,14 +101,14 @@ Canonical output uses the expanded form, preserving argument conditions.
 Class identities are absolute Unreal package/object paths, such as
 `/Script/Engine.KismetSystemLibrary` or `/Game/Mods/BP_Test.BP_Test_C`.
 Segments use ASCII letters, digits, and underscores. No trimming, case folding,
-wildcards, suffix matching, or implicit rewriting occurs. Names outside this
+partial wildcards, suffix matching, or implicit rewriting occurs. Names outside this
 initial grammar require a future schema extension, not a silent approximation.
 
 Combine expressions explicitly:
 
 ```yaml
-and:
-  - or:
+all:
+  - any:
       - invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
       - invocation: /Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand
   - not:
@@ -119,17 +119,46 @@ and:
           hosts: [mods.example.org]
 ```
 
-These shapes replace the old grammar in schema version 1; old `match`, `all`,
-`any`, `target` and expression-level `kind` forms are not accepted. Predicate and
+These shapes replace the old grammar in schema version 1; old `match`, `and`,
+`or`, `target` and expression-level `kind` forms are not accepted. Predicate and
 literal `kind` discriminators are unchanged. Capability/data JSON formats and
 content CLI settings are separate and unchanged.
+
+### Whole-field wildcards
+
+`__WILDCARD__` selects any recorded class, function, argument name or literal value.
+It is a matching token, not interpolation; `Foo__WILDCARD__Bar` is literal text.
+Occurrences are independent, without variable bindings. Structural keys, IDs,
+effects, predicate kinds, regex patterns and DNS host lists do not accept wildcards.
+
+```yaml
+invocation:
+  class: /Script/Engine.KismetSystemLibrary
+  function: __WILDCARD__
+  args:
+    - argument:
+        name: __WILDCARD__
+        predicate: {kind: equals, value: foo}
+```
+
+This selects any function on that class with **at least one argument** equal to
+`foo`. Each wildcard argument condition searches independently; different
+conditions may match different arguments on the same call. An empty known
+argument list does not match. Missing metadata, dynamic values and unresolved
+targets preserve Unknown, even with wildcard selectors. Wildcards also work
+inside `subexpr-match`.
+
+Use `{literal: __WILDCARD__}` for a literal function or argument name. Use
+`{kind: string, value: "__WILDCARD__"}` for a literal string value. Quoting the
+shorthand token alone does not escape it. A qualified function may use a wildcard
+class or function component, such as `__WILDCARD__:LaunchURL`.
 
 ## Predicate and literal ADTs
 
 | `kind` | Required fields | Contract |
 | --- | --- | --- |
-| `equals` | `value` | One typed literal |
-| `in` | `values` | Nonempty, duplicate-free array of literals of one kind |
+| `equals` | `value` | One inferred or explicitly typed literal |
+| `in` | `values` | Nonempty, duplicate-free array of inferred or typed literals; mixed kinds permitted |
 | `regex-match` | `pattern` | Nonempty .NET non-backtracking regex; searches a string for a match |
 | `url-host-in` | `hosts` | Nonempty, duplicate-free canonical DNS hosts |
 | `subexpr-match` | `subexpr` | Search the argument's recorded value-producing invocation chain |
@@ -209,7 +238,24 @@ provenance back to Dynamic without dropping mandatory invocation facts, so
 argument-dependent results remain Unknown. Policies remain evaluator-only;
 the parser extracts provenance without seeing private rules.
 
-Literals always identify their type:
+Shorthand literals use YAML 1.2 core scalar inference:
+
+```yaml
+kind: in
+values: [foo, "42", 42, 1.5, true, null]
+```
+
+Quoted/block scalars remain strings. Plain `true`/`false` (including YAML core
+capitalizations) are booleans; `yes`/`no` remain strings. Plain decimal, `0x` hex
+and `0o` octal integers must fit signed 64 bits. Decimal/exponent floating-point
+values use finite IEEE-754 doubles; nonfinite and out-of-range values are rejected.
+Null is a known null, not missing evidence. Lists belong in `in.values`, not
+`equals.value`; nested lists and arbitrary mappings are not literal values.
+Equality retains numeric kinds and exact floating-point values; no string
+coercion or approximate comparison occurs. Extracted UE float constants are
+promoted to doubles, so decimal rounding can differ from a YAML double.
+
+Explicit types remain available and canonical output uses them:
 
 ```yaml
 kind: equals
@@ -228,6 +274,8 @@ values:
 - `integer`: unquoted signed 64-bit decimal, `0` or `-?[1-9][0-9]*`. No `+`,
   leading zeros, negative zero, hex, floats, or coercion from strings.
 - `boolean`: unquoted lowercase `true` or `false`, not `yes` or `1`.
+- `number`: finite unquoted floating-point value.
+- `wildcard`: no `value` field; canonical form of the shorthand matching token.
 - `"null"`: no `value` field. Quote the discriminator: `{kind: "null"}`.
 
 Known null is distinct from an unresolved value. A string `"1"` is not integer
@@ -242,6 +290,37 @@ subdomain matching are not allowed in the host list. Evaluation will require
 HTTPS and parsed host comparison, not prefix checks; the policy parser does not
 evaluate URLs or claim that a destination is safe.
 
+## Runtime property writes
+
+`property-write` matches Kismet assignments, not serialized asset defaults:
+
+```yaml
+expression:
+  property-write:
+    class: /Script/Engine.Actor
+    property: CustomTimeDilation
+    predicate: {kind: equals, value: 90.0}
+```
+
+- `class` and `property` are required. Either accepts whole-field `__WILDCARD__`.
+- `class` selects the stored declaring owner, not the runtime receiver's class.
+- `property` is a case-sensitive dotted path. A root selector such as
+  `InteractableSettings` covers writes to its nested fields.
+- `predicate` is optional and uses the argument value predicates. Dynamic values
+  remain Unknown. A predicate on a parent cannot inspect an assigned child value.
+- A whole-struct replacement is Unknown for a narrower child selector; it cannot
+  silently become NoMatch. Select the root to match any replacement or child write.
+- Direct instance/default assignments and array/map/set replacements are retained.
+  Known function-local construction is excluded. Out/ref aliases and unresolved
+  destinations remain incomplete; native mutations are not reconstructed.
+- Pure write rules evaluate write events; pure invocation rules evaluate calls.
+  `subexpr-match` cannot contain `property-write` expressions.
+- Missing or incomplete write evidence blocks completeness when write rules exist.
+  Receiver evidence does not prove ownership, reachability or runtime execution.
+
+See [the illustrative write policy](../examples/property-write-policy.yaml).
+It is not an adopted production baseline or proof of exact-game owner identities.
+
 ## Evaluation boundary
 
 `PolicyEvaluator` uses `Match`, `NoMatch`, and `Unknown`. In particular,
@@ -249,7 +328,7 @@ evaluate URLs or claim that a destination is safe.
 negation. All matching rules apply, and a flag cannot cancel a forbid. These are
 implemented by the evaluator, not by the YAML parser.
 
-| Inputs | `and` | `or` |
+| Inputs | `all` | `any` |
 | --- | --- | --- |
 | Match, Match | Match | Match |
 | Match, NoMatch | NoMatch | Match |
@@ -259,7 +338,7 @@ implemented by the evaluator, not by the YAML parser.
 | Unknown, Unknown | Unknown | Unknown |
 
 Operand order does not matter. `not` swaps Match/NoMatch and preserves Unknown.
-Decisive operands discard irrelevant uncertainty. A nonmatching target in `and`
+Decisive operands discard irrelevant uncertainty. A nonmatching target in `all`
 does not become incomplete because another operand has a dynamic argument.
 Known values of different literal kinds produce NoMatch, without coercion.
 Literal string comparisons are ordinal and case-sensitive; regex matching uses

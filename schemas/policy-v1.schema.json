@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "UE pak risk policy v1",
-  "description": "Structural schema. PolicyYaml also enforces YAML lexical rules, resource limits, unique rule IDs, homogeneous literal sets, and canonical DNS hosts.",
+  "description": "Structural schema. PolicyYaml also enforces YAML 1.2 core scalar inference, finite numeric values, resource limits, unique rule IDs and canonical DNS hosts.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema-version", "rules"],
@@ -13,6 +13,14 @@
     "text": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$" },
     "identifier": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "maxLength": 4096 },
     "ownerPath": { "type": "string", "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$", "maxLength": 4096 },
+    "nameSelector": { "oneOf": [
+      { "$ref": "#/$defs/identifier" },
+      { "type": "object", "additionalProperties": false, "required": ["literal"], "properties": { "literal": { "$ref": "#/$defs/identifier" } } }
+    ] },
+    "ownerSelector": { "oneOf": [
+      { "$ref": "#/$defs/ownerPath" }, { "const": "__WILDCARD__" },
+      { "type": "object", "additionalProperties": false, "required": ["literal"], "properties": { "literal": { "$ref": "#/$defs/ownerPath" } } }
+    ] },
     "rule": {
       "type": "object",
       "additionalProperties": false,
@@ -28,15 +36,15 @@
       "oneOf": [
         {
           "type": "object", "additionalProperties": false,
-          "required": ["and"],
+          "required": ["all"],
           "properties": {
-            "and": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expression" } }
+            "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expression" } }
           }
         },
         {
           "type": "object", "additionalProperties": false,
-          "required": ["or"],
-          "properties": { "or": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expression" } } }
+          "required": ["any"],
+          "properties": { "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expression" } } }
         },
         {
           "type": "object", "additionalProperties": false,
@@ -48,7 +56,22 @@
           "required": ["invocation"],
           "properties": { "invocation": { "$ref": "#/$defs/invocation" } }
         },
-        { "$ref": "#/$defs/argumentExpression" }
+        { "$ref": "#/$defs/argumentExpression" },
+        {
+          "type": "object", "additionalProperties": false, "required": ["property-write"],
+          "properties": { "property-write": {
+            "type": "object", "additionalProperties": false, "required": ["class", "property"],
+            "properties": {
+              "class": { "$ref": "#/$defs/ownerSelector" },
+              "property": { "oneOf": [
+                { "$ref": "#/$defs/propertyPath" },
+                { "type": "object", "additionalProperties": false, "required": ["literal"],
+                  "properties": { "literal": { "$ref": "#/$defs/propertyPath" } } }
+              ] },
+              "predicate": { "$ref": "#/$defs/predicate" }
+            }
+          } }
+        }
       ]
     },
     "argumentExpression": {
@@ -59,25 +82,26 @@
           "type": "object", "additionalProperties": false,
           "required": ["name", "predicate"],
           "properties": {
-            "name": { "$ref": "#/$defs/identifier" },
+            "name": { "$ref": "#/$defs/nameSelector" },
             "predicate": { "$ref": "#/$defs/predicate" }
           }
         }
       }
     },
+    "propertyPath": { "type": "string", "maxLength": 4096, "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*$" },
     "invocation": {
       "oneOf": [
         {
           "type": "string", "maxLength": 4096,
-          "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+(?::[A-Za-z_][A-Za-z0-9_]*)?$"
+          "pattern": "^(?:__WILDCARD__|/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+)(?::[A-Za-z_][A-Za-z0-9_]*)?$"
         },
         {
           "type": "object", "additionalProperties": false,
           "required": ["class"],
           "dependentRequired": { "args": ["function"] },
           "properties": {
-            "class": { "$ref": "#/$defs/ownerPath" },
-            "function": { "$ref": "#/$defs/identifier" },
+            "class": { "$ref": "#/$defs/ownerSelector" },
+            "function": { "$ref": "#/$defs/nameSelector" },
             "args": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/argumentExpression" } }
           }
         },
@@ -87,7 +111,7 @@
           "properties": {
             "function": {
               "type": "string", "maxLength": 4096,
-              "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+:[A-Za-z_][A-Za-z0-9_]*$"
+              "pattern": "^(?:__WILDCARD__|/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+):[A-Za-z_][A-Za-z0-9_]*$"
             },
             "args": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/argumentExpression" } }
           }
@@ -134,6 +158,16 @@
     },
     "literal": {
       "oneOf": [
+        { "type": "string", "maxLength": 4096 },
+        { "type": ["number", "boolean", "null"] },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind"],
+          "properties": { "kind": { "const": "wildcard" } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "value"],
+          "properties": { "kind": { "const": "number" }, "value": { "type": "number" } }
+        },
         {
           "type": "object", "additionalProperties": false,
           "required": ["kind", "value"],

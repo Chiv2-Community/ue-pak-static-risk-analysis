@@ -153,6 +153,22 @@ def load(data, root, *, moderator_detail=False):
             require(item["id"] not in by_id or by_id[item["id"]] == shared)
             by_id[item["id"]] = shared
     require(len(sets[0] | sets[1]) == counts["affected-union"] <= counts["invocations"])
+    if "property-writes" in report:
+        writes = report["property-writes"]
+        by_write_id = {}
+        for effect in ("flagged", "forbidden"):
+            ids = set()
+            locations = set()
+            for write in writes[effect]:
+                require(write["id"] not in ids)
+                ids.add(write["id"])
+                location = tuple(write["location"][key] for key in ("asset", "function", "offset"))
+                require(location not in locations)
+                locations.add(location)
+                shared = {key: value for key, value in write.items() if key != "rule-ids"}
+                require(write["id"] not in by_write_id or by_write_id[write["id"]] == shared)
+                by_write_id[write["id"]] = shared
+        require(len(by_write_id) <= writes["observed"] <= 10000)
     dispatch_origins = set()
     candidate_count = 0
     for dispatch in report.get("possible-dispatches", []):
@@ -226,4 +242,5 @@ def load(data, root, *, moderator_detail=False):
     require(report["analysis-complete"] == (not incomplete))
     if report["status"] == "failed":
         require(all(count == 0 for count in counts.values()))
+        require(not report.get("property-writes", {}).get("observed", 0))
     return report

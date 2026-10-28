@@ -17,17 +17,21 @@ public abstract record MatchExpression
     public sealed record Any(ImmutableArray<MatchExpression> Expressions) : MatchExpression;
     public sealed record Not(MatchExpression Expression) : MatchExpression;
     public sealed record Invocation(TargetMatcher Target, ImmutableArray<Argument>? Args = null) : MatchExpression;
-    public sealed record Argument(string Name, ValuePredicate Predicate) : MatchExpression;
+    public sealed record Argument(string Name, ValuePredicate Predicate, bool Wildcard = false) : MatchExpression;
+    public sealed record PropertyWrite(string? Owner, string? Property, ValuePredicate? Predicate = null) : MatchExpression;
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(TargetMatcher.Exact), "exact")]
 [JsonDerivedType(typeof(TargetMatcher.ByOwner), "owner")]
+[JsonDerivedType(typeof(TargetMatcher.Pattern), "pattern")]
 public abstract record TargetMatcher
 {
     private TargetMatcher() { }
     public sealed record Exact(string Owner, string Function) : TargetMatcher;
     public sealed record ByOwner(string Owner) : TargetMatcher;
+    // Null removes that selector's constraint; HasFunction preserves args validation.
+    public sealed record Pattern(string? Owner, string? Function, bool HasFunction = true) : TargetMatcher;
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
@@ -51,6 +55,8 @@ public abstract record ValuePredicate
 [JsonDerivedType(typeof(PolicyLiteral.Integer), "integer")]
 [JsonDerivedType(typeof(PolicyLiteral.Boolean), "boolean")]
 [JsonDerivedType(typeof(PolicyLiteral.Null), "null")]
+[JsonDerivedType(typeof(PolicyLiteral.Number), "number")]
+[JsonDerivedType(typeof(PolicyLiteral.Wildcard), "wildcard")]
 public abstract record PolicyLiteral
 {
     private PolicyLiteral() { }
@@ -58,4 +64,7 @@ public abstract record PolicyLiteral
     public sealed record Integer(long Value) : PolicyLiteral;
     public sealed record Boolean(bool Value) : PolicyLiteral;
     public sealed record Null : PolicyLiteral;
+    public sealed record Number(double Value) : PolicyLiteral;
+    // Policy pattern only; never valid as a fact value.
+    public sealed record Wildcard : PolicyLiteral;
 }

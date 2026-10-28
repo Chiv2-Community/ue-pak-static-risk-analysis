@@ -53,6 +53,8 @@ public static class InvocationExtractor
         limits.Validate();
         ValidateInput(input);
         var calls = new List<ExtractedInvocation>();
+        var writes = new List<PropertyWriteFact>();
+        var writeCharacters = 0;
         var functions = new List<FunctionCoverage>();
         var diagnostics = new List<ExtractionDiagnostic>();
         if (!asset.PackageFlags.HasFlag(EPackageFlags.PKG_Cooked) && !asset.IsFilterEditorOnly)
@@ -137,6 +139,25 @@ public static class InvocationExtractor
                             }
                             catch (Exception error) when (error is not OutOfMemoryException) { local.Add(new("indirect-analysis-failed", index, position)); }
                             var callCount = calls.Count;
+                            try
+                            {
+                                var write = PropertyWriteExtractor.Inspect(asset, input, identity, node, position, occurrence.Receivers.Length > 0);
+                                if (write is not null)
+                                {
+                                    if (writes.Count >= PropertyWriteEvidence.MaxWrites
+                                        || writeCharacters + PropertyWriteEvidence.Characters(write) > PropertyWriteEvidence.MaxCharacters)
+                                        local.Add(new("property-write-limit", index, position));
+                                    else
+                                    {
+                                        writes.Add(write);
+                                        writeCharacters += PropertyWriteEvidence.Characters(write);
+                                        if (write.Owner is null || write.Property is null)
+                                            local.Add(new("property-write-unresolved", index, position));
+                                    }
+                                }
+                            }
+                            catch (Exception error) when (error is not OutOfMemoryException)
+                            { local.Add(new("property-write-analysis-failed", index, position)); }
                             Extract(asset, input, identity, node, position, occurrence.Receivers, calls, local, limits,
                                 ref evidenceBudget, ref metadataBudget, signatures);
                             if (calls.Count != callCount) provenanceSites.Add(new(callCount, node, index, rootIndex));
@@ -157,12 +178,12 @@ public static class InvocationExtractor
             functions.Add(new(identity, local.Count == 0, native, visited, local.ToImmutableArray()));
         }
         new ArgumentProvenanceExtractor(asset, calls, provenanceSites, functions, unsafeProvenanceRoots).Enrich();
-        return Report(input, calls, functions, diagnostics, asset.Exports.Count, Math.Min(asset.Exports.Count, limits.MaxExports), dispatches);
+        return Report(input, calls, functions, diagnostics, asset.Exports.Count, Math.Min(asset.Exports.Count, limits.MaxExports), dispatches, writes);
     }
 
     private static ExtractionReport Report(PackageInput input, List<ExtractedInvocation> calls,
         List<FunctionCoverage> functions, List<ExtractionDiagnostic> diagnostics, int exports = 0, int inspectedExports = 0,
-        List<IndirectDispatch>? dispatches = null)
+        List<IndirectDispatch>? dispatches = null, List<PropertyWriteFact>? writes = null)
     {
         var all = diagnostics.Concat(functions.SelectMany(f => f.Diagnostics)).ToArray();
         var gaps = new List<CoverageGap>();
@@ -180,7 +201,8 @@ public static class InvocationExtractor
                 f.Identity.Owner, f.Identity.Name, f.Native)), graphFunctions.Length == functions.Count
             && all.All(d => d.Code is "imported-signature-unavailable" or "parameter-metadata-unavailable"));
         return new(input, exports, inspectedExports, calls.ToImmutableArray(), functions.ToImmutableArray(), diagnostics.ToImmutableArray(),
-            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray(), dispatches is { Count: > 0 } ? dispatches.ToArray() : null, graph));
+            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray(), dispatches is { Count: > 0 } ? dispatches.ToArray() : null, graph,
+                new(!gaps.Contains(CoverageGap.IncompleteExtraction) && !gaps.Contains(CoverageGap.UnsupportedParsing), (writes ?? []).ToImmutableArray())));
     }
 
     private static void Extract(UAsset asset, PackageInput input, FunctionIdentity containing,
@@ -346,6 +368,7 @@ public static class InvocationExtractor
             EX_IntConstByte integer => new PolicyLiteral.Integer(integer.Value),
             EX_IntZero => new PolicyLiteral.Integer(0),
             EX_IntOne => new PolicyLiteral.Integer(1),
+            EX_FloatConst number when float.IsFinite(number.Value) => new PolicyLiteral.Number(number.Value),
             EX_True => new PolicyLiteral.Boolean(true),
             EX_False => new PolicyLiteral.Boolean(false),
             EX_NoObject or EX_NoInterface => new PolicyLiteral.Null(),

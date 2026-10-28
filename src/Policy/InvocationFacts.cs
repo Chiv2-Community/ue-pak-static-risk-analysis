@@ -66,7 +66,20 @@ public sealed record IndirectDispatch(int SchemaVersion, InvocationLocation Orig
     ImmutableArray<string> Diagnostics, string Source);
 public sealed record InvocationAnalysis(ImmutableArray<InvocationFact> Invocations, ImmutableArray<CoverageGap> CoverageGaps,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IndirectDispatch[]? Dispatches = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallGraphContext? CallGraph = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallGraphContext? CallGraph = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PropertyWriteEvidence? PropertyWrites = null);
+
+// Declared destination identity, not proof of receiver ownership or runtime execution.
+public sealed record PropertyWriteFact(InvocationLocation Location, string Opcode, string? Owner,
+    string? Property, string Receiver, ArgumentValue Value);
+public sealed record PropertyWriteEvidence(bool Complete, ImmutableArray<PropertyWriteFact> Writes)
+{
+    public const int MaxWrites = 10_000;
+    public const int MaxCharacters = 262_144;
+    public static int Characters(PropertyWriteFact write) => write.Location.Asset.Length + write.Location.Function.Length
+        + (write.Owner?.Length ?? 0) + (write.Property?.Length ?? 0) + 64
+        + (write.Value is ArgumentValue.Constant { Value: PolicyLiteral.String text } ? text.Value.Length : 0);
+}
 
 // LocationFunction is the exact containing-function key, not a parsed function-name guess.
 public sealed record CallGraphFunction(string Asset, string LocationFunction, string Owner, string Function, bool Native);

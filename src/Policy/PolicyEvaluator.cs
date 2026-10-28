@@ -11,6 +11,7 @@ public sealed class PolicyEvaluator
     public const int MaxFactStringLength = 4096;
     public const int MaxDispatchCandidates = 256;
     private readonly PolicyDocument policy;
+    private readonly Dictionary<string, (bool Calls, bool Writes)> domains = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Regex> regexes = new(StringComparer.Ordinal);
 
     // Validate public AST construction before recursive serialization or evaluation.
@@ -54,14 +55,24 @@ public sealed class PolicyEvaluator
                             case TargetMatcher.ByOwner owner:
                                 CheckString(owner.Owner);
                                 break;
+                            case TargetMatcher.Pattern pattern:
+                                if (pattern.Owner is not null) CheckString(pattern.Owner);
+                                if (pattern.Function is not null) CheckString(pattern.Function);
+                                break;
                         }
                         if (invocation.Args is { } args)
                         {
-                            if (invocation.Target is not TargetMatcher.Exact || args.IsDefaultOrEmpty
+                            if (invocation.Target is not TargetMatcher.Exact and not TargetMatcher.Pattern { HasFunction: true } || args.IsDefaultOrEmpty
                                 || args.Length > PolicyYaml.MaxYamlNodes)
                                 throw new ArgumentException();
                             Push(args.Cast<MatchExpression>().ToImmutableArray(), item.Depth);
                         }
+                        break;
+                    case MatchExpression.PropertyWrite write:
+                        if (write.Owner is not null) CheckString(write.Owner);
+                        if (write.Property is not null) CheckString(write.Property);
+                        if (write.Predicate is not null)
+                            pending.Push((new MatchExpression.Argument("Value", write.Predicate), item.Depth + 1));
                         break;
                     case MatchExpression.Argument argument:
                         CheckString(argument.Name);
@@ -94,6 +105,7 @@ public sealed class PolicyEvaluator
             }
             _ = PolicyYaml.Write(document);
             policy = document;
+            foreach (var rule in document.Rules) domains.Add(rule.Id, Domain(rule.Match));
 
             void Push(ImmutableArray<MatchExpression> expressions, int depth)
             {
@@ -110,7 +122,7 @@ public sealed class PolicyEvaluator
             }
             void CheckLiteral(PolicyLiteral? value)
             {
-                if (!ValidLiteral(value) || ++count > PolicyYaml.MaxYamlNodes) throw new ArgumentException();
+                if ((value is not PolicyLiteral.Wildcard && !ValidLiteral(value)) || ++count > PolicyYaml.MaxYamlNodes) throw new ArgumentException();
                 if (value is PolicyLiteral.String text) CheckString(text.Value);
             }
         }
@@ -133,6 +145,7 @@ public sealed class PolicyEvaluator
             var matches = ImmutableArray.CreateBuilder<RuleMatch>();
             foreach (var rule in policy.Rules.OrderBy(rule => rule.Id, StringComparer.Ordinal))
             {
+                if (!domains[rule.Id].Calls) continue;
                 var result = Evaluate(rule.Match, fact);
                 if (result.Result == MatchResult.Match)
                     matches.Add(new RuleMatch(rule.Id, rule.Effect));
@@ -148,7 +161,7 @@ public sealed class PolicyEvaluator
         {
             var matches = ImmutableArray.CreateBuilder<RuleMatch>();
             foreach (var rule in policy.Rules.OrderBy(r => r.Id, StringComparer.Ordinal))
-                if (dispatch.Candidates.Any(c => Evaluate(rule.Match,
+                if (domains[rule.Id].Calls && dispatch.Candidates.Any(c => Evaluate(rule.Match,
                     new InvocationTarget.Resolved(c.Owner, c.Function), new ArgumentMetadata.Unavailable(), new()).Result != MatchResult.NoMatch))
                     matches.Add(new(rule.Id, rule.Effect));
             possible.Add(new(dispatch.Origin, matches.ToImmutable()));
@@ -156,8 +169,76 @@ public sealed class PolicyEvaluator
         // Evidence is never exhaustive: callers cannot suppress this gap by dropping a transport flag.
         var gaps = analysis.CoverageGaps.AsEnumerable();
         if (analysis.Dispatches is { Length: > 0 }) gaps = gaps.Append(CoverageGap.UnresolvedDispatch);
+        var writes = ImmutableArray.CreateBuilder<InvocationFinding>();
+        if (domains.Values.Any(domain => domain.Writes) && analysis.PropertyWrites is not { Complete: true })
+            gaps = gaps.Append(CoverageGap.IncompleteExtraction);
+        foreach (var fact in (analysis.PropertyWrites?.Writes ?? []).OrderBy(f => f.Location.Asset, StringComparer.Ordinal)
+            .ThenBy(f => f.Location.Function, StringComparer.Ordinal).ThenBy(f => f.Location.Offset))
+        {
+            var matches = ImmutableArray.CreateBuilder<RuleMatch>();
+            foreach (var rule in policy.Rules.OrderBy(r => r.Id, StringComparer.Ordinal))
+            {
+                if (!domains[rule.Id].Writes) continue;
+                var result = EvaluateWrite(rule.Match, fact, new());
+                if (result.Result == MatchResult.Match) matches.Add(new(rule.Id, rule.Effect));
+                else if (result.Result == MatchResult.Unknown) uncertainties.Add(new(fact.Location, rule.Id, result.Reasons));
+            }
+            if (matches.Count != 0) writes.Add(new(fact.Location, matches.ToImmutable()));
+        }
         return new PolicyEvaluation(findings.ToImmutable(), uncertainties.ToImmutable(),
-            gaps.Distinct().Order().ToImmutableArray(), possible.ToImmutable());
+            gaps.Distinct().Order().ToImmutableArray(), possible.ToImmutable(), writes.ToImmutable());
+    }
+
+    private static (bool Calls, bool Writes) Domain(MatchExpression expression) => expression switch
+    {
+        MatchExpression.PropertyWrite => (false, true),
+        MatchExpression.All all => MergeDomains(all.Expressions),
+        MatchExpression.Any any => MergeDomains(any.Expressions),
+        MatchExpression.Not not => Domain(not.Expression),
+        _ => (true, false)
+    };
+
+    private static (bool Calls, bool Writes) MergeDomains(ImmutableArray<MatchExpression> expressions)
+    {
+        var calls = false; var writes = false;
+        foreach (var expression in expressions) { var domain = Domain(expression); calls |= domain.Calls; writes |= domain.Writes; }
+        return (calls, writes);
+    }
+
+    private Outcome EvaluateWrite(MatchExpression expression, PropertyWriteFact fact, SearchBudget budget)
+    {
+        if (expression is MatchExpression.Not not) return Negate(EvaluateWrite(not.Expression, fact, budget));
+        if (expression is MatchExpression.All or MatchExpression.Any)
+        {
+            var all = expression is MatchExpression.All;
+            var expressions = expression is MatchExpression.All a ? a.Expressions : ((MatchExpression.Any)expression).Expressions;
+            var reasons = new HashSet<UncertaintyReason>();
+            foreach (var child in expressions)
+            {
+                var outcome = EvaluateWrite(child, fact, budget);
+                if (outcome.Result == (all ? MatchResult.NoMatch : MatchResult.Match)) return Known(!all);
+                reasons.UnionWith(outcome.Reasons);
+            }
+            return reasons.Count == 0 ? Known(all) : new(MatchResult.Unknown, reasons.Order().ToImmutableArray());
+        }
+        if (expression is not MatchExpression.PropertyWrite write) return Known(false);
+        if (write.Owner is not null && fact.Owner is not null && write.Owner != fact.Owner) return Known(false);
+        var ancestor = false;
+        if (write.Property is not null && fact.Property is not null && write.Property != fact.Property)
+        {
+            ancestor = write.Property.StartsWith(fact.Property + ".", StringComparison.Ordinal);
+            if (!ancestor && !fact.Property.StartsWith(write.Property + ".", StringComparison.Ordinal)) return Known(false);
+        }
+        if (fact.Property is null && write.Property is not null) return Unknown(UncertaintyReason.UnresolvedProperty);
+        if (ancestor || write.Predicate is not null && write.Property is not null && write.Property != fact.Property)
+            return Unknown(UncertaintyReason.AncestorPropertyWrite);
+        var destination = fact.Owner is null || fact.Property is null ? Unknown(UncertaintyReason.UnresolvedProperty) : Known(true);
+        if (write.Predicate is null) return destination;
+        var value = Evaluate(new MatchExpression.Argument("Value", write.Predicate),
+            new ArgumentMetadata.Known([new("Value", fact.Value)]), budget);
+        if (value.Result == MatchResult.NoMatch) return value;
+        var combined = destination.Reasons.Union(value.Reasons).Order().ToImmutableArray();
+        return combined.IsEmpty ? Known(true) : new(MatchResult.Unknown, combined);
     }
 
     private sealed record Outcome(MatchResult Result, ImmutableArray<UncertaintyReason> Reasons);
@@ -175,6 +256,7 @@ public sealed class PolicyEvaluator
         MatchExpression.Not not => Negate(Evaluate(not.Expression, target, arguments, budget)),
         MatchExpression.Invocation invocation => EvaluateInvocation(invocation, target, arguments, budget),
         MatchExpression.Argument argument => Evaluate(argument, arguments, budget),
+        MatchExpression.PropertyWrite => Known(false),
         _ => throw new InvalidOperationException("Invalid policy document.")
     };
 
@@ -185,6 +267,8 @@ public sealed class PolicyEvaluator
             {
                 TargetMatcher.Exact exact => exact.Owner == resolved.Owner && exact.Function == resolved.Function,
                 TargetMatcher.ByOwner owner => owner.Owner == resolved.Owner,
+                TargetMatcher.Pattern pattern => (pattern.Owner is null || pattern.Owner == resolved.Owner)
+                    && (pattern.Function is null || pattern.Function == resolved.Function),
                 _ => false
             }) : Unknown(UncertaintyReason.UnresolvedTarget);
         if (invocation.Args is not { } args || matched.Result == MatchResult.NoMatch)
@@ -219,6 +303,17 @@ public sealed class PolicyEvaluator
     {
         if (metadata is not ArgumentMetadata.Known known)
             return Unknown(UncertaintyReason.ArgumentMetadataUnavailable);
+        if (expression.Wildcard)
+        {
+            var reasons = new HashSet<UncertaintyReason>();
+            foreach (var candidate in known.Arguments)
+            {
+                var outcome = Evaluate(expression with { Name = candidate.Name, Wildcard = false }, metadata, budget);
+                if (outcome.Result == MatchResult.Match) return outcome;
+                reasons.UnionWith(outcome.Reasons);
+            }
+            return reasons.Count == 0 ? Known(false) : new(MatchResult.Unknown, reasons.Order().ToImmutableArray());
+        }
         var argument = known.Arguments.FirstOrDefault(argument => argument.Name == expression.Name);
         if (expression.Predicate is ValuePredicate.SubexprMatch subexpr)
             return argument?.Value switch
@@ -280,12 +375,15 @@ public sealed class PolicyEvaluator
 
     private bool Matches(ValuePredicate predicate, PolicyLiteral value) => predicate switch
     {
-        ValuePredicate.EqualTo equal => equal.Value == value,
-        ValuePredicate.In set => set.Values.Contains(value),
+        ValuePredicate.EqualTo equal => LiteralMatches(equal.Value, value),
+        ValuePredicate.In set => set.Values.Any(pattern => LiteralMatches(pattern, value)),
         ValuePredicate.RegexMatch regex => value is PolicyLiteral.String text && regexes[regex.Pattern].IsMatch(text.Value),
         ValuePredicate.UrlHostIn hosts => value is PolicyLiteral.String text && UrlMatches(text.Value, hosts.Hosts),
         _ => false
     };
+
+    private static bool LiteralMatches(PolicyLiteral pattern, PolicyLiteral value) => pattern is PolicyLiteral.Wildcard
+        || pattern == value;
 
     private static bool UrlMatches(string text, ImmutableArray<string> hosts)
     {
@@ -314,6 +412,27 @@ public sealed class PolicyEvaluator
             InvalidFacts();
         var locations = new Dictionary<InvocationLocation, InvocationFact>();
         var provenanceNodes = 0;
+        if (analysis.PropertyWrites is { } writes)
+        {
+            if (writes.Writes.IsDefault || writes.Writes.Length > PropertyWriteEvidence.MaxWrites) InvalidFacts();
+            var seenWrites = new HashSet<InvocationLocation>();
+            var characters = 0;
+            foreach (var write in writes.Writes)
+            {
+                if (write is null || write.Location is null || !Text(write.Location.Asset) || !Text(write.Location.Function)
+                    || write.Location.Offset < 0 || !seenWrites.Add(write.Location)
+                    || write.Opcode is not ("EX_Let" or "EX_LetBool" or "EX_LetObj" or "EX_LetWeakObjPtr"
+                        or "EX_LetDelegate" or "EX_LetMulticastDelegate" or "EX_LetValueOnPersistentFrame"
+                        or "EX_SetArray" or "EX_SetMap" or "EX_SetSet")
+                    || write.Owner is not null && !PolicyYaml.IsOwner(write.Owner)
+                    || write.Property is not null && !PolicyYaml.IsPropertyPath(write.Property)
+                    || write.Receiver is not ("self" or "object" or "unknown")
+                    || (characters += PropertyWriteEvidence.Characters(write)) > PropertyWriteEvidence.MaxCharacters)
+                    InvalidFacts();
+                if (write!.Value is ArgumentValue.Constant constant) { if (!ValidLiteral(constant.Value)) InvalidFacts(); }
+                else if (write.Value is not ArgumentValue.Dynamic and not ArgumentValue.Missing) InvalidFacts();
+            }
+        }
         if (analysis.CallGraph is { } graph)
         {
             if (graph.SchemaVersion != 1 || graph.Functions is null || graph.Functions.Length > 4096) InvalidFacts();
@@ -474,6 +593,7 @@ public sealed class PolicyEvaluator
     {
         PolicyLiteral.String text => text.Value is not null && text.Value.Length <= MaxFactStringLength && ValidUnicode(text.Value),
         PolicyLiteral.Integer or PolicyLiteral.Boolean or PolicyLiteral.Null => true,
+        PolicyLiteral.Number number => double.IsFinite(number.Value),
         _ => false
     };
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]

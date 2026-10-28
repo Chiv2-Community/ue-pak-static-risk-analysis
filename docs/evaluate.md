@@ -7,6 +7,11 @@ policy-bearing job to manufacture facts from untrusted assets.
 
 ## Usage
 
+Runtime assignment findings appear separately in `property-writes`, with observed,
+flagged and forbidden events. Invocation counts remain invocation-only. Existing
+forbidden/flagged gates also apply to property writes; moderation preserves their
+counts and routes. Public reports omit assigned values and private rule IDs.
+
 See the [complete shared CLI input reference](inputs.md#shared-evaluator).
 
 Linux and .NET 10:

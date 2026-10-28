@@ -22,6 +22,9 @@ try
     var report = manifest.RootElement;
     var calls = ImmutableArray.CreateBuilder<InvocationFact>();
     var dispatches = new List<IndirectDispatch>();
+    var propertyWrites = ImmutableArray.CreateBuilder<PropertyWriteFact>();
+    var writeCharacters = 0;
+    var writesComplete = true;
     var graphFunctions = new List<CallGraphFunction>();
     var graphCharacters = 0;
     var graphComplete = true;
@@ -143,6 +146,12 @@ try
             catch (Exception error) when (error is not OutOfMemoryException) { dataComplete = false; }
             inspections[id] = extraction.Complete ? "parsed" : "partial";
             calls.AddRange(extraction.Analysis.Invocations);
+            writesComplete &= extraction.Analysis.PropertyWrites is { Complete: true };
+            foreach (var write in extraction.Analysis.PropertyWrites?.Writes ?? [])
+                if (propertyWrites.Count < PropertyWriteEvidence.MaxWrites
+                    && writeCharacters + PropertyWriteEvidence.Characters(write) <= PropertyWriteEvidence.MaxCharacters)
+                { propertyWrites.Add(write); writeCharacters += PropertyWriteEvidence.Characters(write); }
+                else writesComplete = false;
             var graph = extraction.Analysis.CallGraph!;
             graphComplete &= graph.Complete;
             foreach (var function in graph.Functions)
@@ -218,7 +227,8 @@ try
     }).ToImmutableArray();
     var facts = new FactsDocument(1, pakHash, "4.25", "container-v1",
         dependencies, ValueProvenance.Bound(new(calls.ToImmutable(), gaps.Order().ToImmutableArray(), dispatches.Count == 0 ? null : dispatches.ToArray(),
-            CallGraphContext.Bounded(graphFunctions, graphComplete && gaps.Count == 0))),
+            CallGraphContext.Bounded(graphFunctions, graphComplete && gaps.Count == 0),
+            new PropertyWriteEvidence(writesComplete && gaps.Count == 0, propertyWrites.ToImmutable()))),
         new InspectionEvidence(report.GetProperty("ingestion_status").GetString()!,
             report.GetProperty("diagnostic").GetString()!, evidence),
         new DataEvidence(1, contentRoot, logicalRoot, dataComplete && gaps.Count == 0, dataPackages.ToImmutable()));

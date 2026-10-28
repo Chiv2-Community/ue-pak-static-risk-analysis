@@ -300,7 +300,7 @@ public sealed class EvaluatorTests
             Document(Rule(Argument(new ValuePredicate.RegexMatch("[")))),
             Document(Rule(Argument(new ValuePredicate.RegexMatch("(?=secret)")))),
             Document(Rule(Argument(new ValuePredicate.EqualTo(null!)))),
-            Document(Rule(Argument(new ValuePredicate.In([new PolicyLiteral.Integer(1), new PolicyLiteral.String("1")])))),
+            Document(Rule(Argument(new ValuePredicate.EqualTo(new PolicyLiteral.Number(double.NaN))))),
             Document(Rule(new MatchExpression.All([]))), Document(Rule(Argument(new ValuePredicate.In(default)))),
             Document(Rule(Argument(new ValuePredicate.UrlHostIn(["UPPER.example.org"])))),
             Document(Rule(Target(), effect: (RuleEffect)99)), Document(Rule(Target()), Rule(Target()))];

@@ -17,7 +17,7 @@ rules:
     description: Only approved HTTPS destinations are permitted.
     effect: forbid
     expression:
-      and:
+      all:
         - invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
         - not:
             argument:
@@ -59,7 +59,7 @@ rules:
     description: Review calls recorded under these exact classes.
     effect: flag
     expression:
-      or:
+      any:
         - invocation: /Script/Engine.KismetSystemLibrary
         - invocation:
             class: /Script/Engine.GameplayStatics
@@ -84,4 +84,4 @@ rules:
                           name: A
                           predicate:
                             kind: equals
-                            value: {kind: string, value: "foo"}
+                            value: "foo"

@@ -94,14 +94,15 @@ class CorpusRunnerTests(unittest.TestCase):
                 {'invocation': {'class': '/Script/Test.Actor', 'function': 'Call', 'args': [argument]}},
                 {'invocation': {'function': '/Script/Test.Actor:Call'}},
                 {'invocation': {'function': '/Script/Test.Actor:Call', 'args': [argument]}},
-                {'and': [argument, {'not': {'or': [{'invocation': '/Script/Test.Actor'}]}}]}):
+                {'all': [argument, {'not': {'any': [{'invocation': '/Script/Test.Actor'}]}}]}):
             validator.validate(document(expression))
-        for expression in ({}, {'and': []}, {'or': []}, {'not': []},
+        for expression in ({}, {'all': []}, {'any': []}, {'not': []},
+                {'and': [argument]}, {'or': [argument]},
                 {'argument': {'name': 'URL', 'predicate': {'kind': 'string-starts-with', 'prefix': 'https'}}},
                 {'argument': {'name': 'URL', 'predicate': {'kind': 'regex-match', 'pattern': ''}}},
                 {'argument': {'name': 'URL', 'predicate': {'kind': 'subexpr-match'}}},
                 {'argument': {'name': 'URL', 'predicate': {'kind': 'subexpr-match', 'subexpr': {}}}},
-                {'and': [argument], 'or': [argument]}, {'kind': 'argument', 'name': 'URL'},
+                {'all': [argument], 'any': [argument]}, {'kind': 'argument', 'name': 'URL'},
                 {'invocation': '/Script/Test.Actor:'}, {'invocation': '/Script/Test.Actor$Call'},
                 {'invocation': {'function': 'Call'}},
                 {'invocation': {'function': '/Script/Test.Actor'}},

@@ -33,6 +33,44 @@ public sealed class ProvenanceCodecTests
     }
 
     [Theory]
+    [InlineData("1.5")]
+    [InlineData("__WILDCARD__")]
+    public void NumericFactsSupportWildcardProvenanceSearch(string pattern)
+    {
+        var facts = Facts();
+        var invocation = facts.Analysis.Invocations[0];
+        var derived = (ArgumentValue.Derived)((ArgumentMetadata.Known)invocation.Arguments).Arguments[0].Value;
+        var graph = derived.Provenance with { Nodes = derived.Provenance.Nodes.SetItem(0,
+            derived.Provenance.Nodes[0] with { Literal = new PolicyLiteral.Number(1.5) }) };
+        facts = facts with { Analysis = facts.Analysis with { Invocations = [invocation with {
+            Arguments = new ArgumentMetadata.Known([new("foo", new ArgumentValue.Derived(graph))]) }] } };
+        var bytes = FactsCodec.Write(facts);
+        var parsed = FactsCodec.Read(bytes);
+        Assert.Equal(bytes, FactsCodec.Write(parsed));
+        var policy = PolicyYaml.Parse($$"""
+            schema-version: 1
+            rules:
+              - id: test
+                description: Test
+                effect: forbid
+                expression:
+                  argument:
+                    name: __WILDCARD__
+                    predicate:
+                      kind: subexpr-match
+                      subexpr:
+                        invocation:
+                          class: __WILDCARD__
+                          function: __WILDCARD__
+                          args:
+                            - argument:
+                                name: __WILDCARD__
+                                predicate: {kind: equals, value: {{pattern}}}
+            """);
+        Assert.Single(new PolicyEvaluator(policy).Evaluate(parsed.Analysis).Findings);
+    }
+
+    [Theory]
     [InlineData("root", "99")]
     [InlineData("root", "-1")]
     [InlineData("root", "null")]

@@ -14,7 +14,24 @@ using System.Security.Cryptography;
 using System.Text.Json;
 
 // Original synthetic serialization, not engine-cooked or game-derived content.
-if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget" or "package-context" or "package-context-budget" or "package-context-case")) return 2;
+if (args.Length != 2 || args[0] is not ("generate" or "facts" or "properties" or "property-writes" or "chains" or "dispatch-budgets" or "data-policy" or "data-budgets" or "data-marker-budget" or "package-context" or "package-context-budget" or "package-context-case")) return 2;
+if (args[0] == "property-writes")
+{
+    if (Directory.Exists(args[1])) return 2;
+    Directory.CreateDirectory(args[1]);
+    var asset = PackageContextFixture.Asset("Type");
+    KismetPropertyPointer Pointer(int owner, string name) => new(new FFieldPath { ResolvedOwner = new(owner), Path = [new(asset, name)] });
+    KismetExpression Instance(string name) => new EX_InstanceVariable { Variable = Pointer(1, name) };
+    PackageContextFixture.Function(asset, "Run",
+        new EX_LetBool { VariableExpression = Instance("IgnoreCorrection"), AssignmentExpression = new EX_True() },
+        new EX_Let { Value = Pointer(1, "CustomTimeDilation"), Variable = Instance("CustomTimeDilation"), Expression = new EX_FloatConst { Value = 90 } },
+        new EX_Let { Value = Pointer(1, "Settings"), Variable = Instance("Settings"), Expression = new EX_LocalVariable { Variable = Pointer(3, "Temporary") } },
+        new EX_Let { Value = Pointer(1, "Settings"), Variable = new EX_StructMemberContext {
+            StructExpression = Instance("Settings"), StructMemberExpression = Pointer(1, "Distance") }, Expression = new EX_FloatConst { Value = 5000 } },
+        new EX_Let { Value = Pointer(3, "Temporary"), Variable = new EX_LocalVariable { Variable = Pointer(3, "Temporary") }, Expression = new EX_IntOne() });
+    asset.Write(Path.Combine(args[1], "PropertyWrites.uasset"));
+    return 0;
+}
 if (args[0] is "package-context" or "package-context-budget" or "package-context-case")
 {
     if (Directory.Exists(args[1])) return 2;

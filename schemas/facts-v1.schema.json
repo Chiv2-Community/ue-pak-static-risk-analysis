@@ -21,6 +21,7 @@
         "invocations": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/invocation"}},
         "dispatches": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/dispatch"}},
         "call-graph": {"$ref": "#/$defs/call-graph"},
+        "property-writes": {"$ref": "#/$defs/property-writes"},
         "coverage-gaps": {"type": "array", "maxItems": 256, "items": {"enum": ["unsupported-parsing", "unresolved-dispatch", "incomplete-extraction"]}}
       }
     }
@@ -145,12 +146,37 @@
       "type": "object", "additionalProperties": false, "required": ["asset", "function", "offset"],
       "properties": {"asset": {"$ref": "#/$defs/text"}, "function": {"$ref": "#/$defs/text"}, "offset": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}}
     },
+    "property-writes": {
+      "type": "object", "additionalProperties": false, "required": ["complete", "writes"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "writes": {"type": "array", "maxItems": 10000, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["location", "opcode", "owner", "property", "receiver", "value"],
+          "properties": {
+            "location": {"$ref": "#/$defs/location"},
+            "opcode": {"$ref": "#/$defs/write-opcode"},
+            "owner": {"$ref": "#/$defs/write-owner"},
+            "property": {"$ref": "#/$defs/write-path"},
+            "receiver": {"enum": ["self", "object", "unknown"]},
+            "value": {"oneOf": [
+              {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "constant"}, "value": {"$ref": "#/$defs/literal"}}},
+              {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"enum": ["dynamic", "missing"]}}}
+            ]}
+          }
+        }}
+      }
+    },
+    "write-opcode": {"enum": ["EX_Let", "EX_LetBool", "EX_LetObj", "EX_LetWeakObjPtr", "EX_LetDelegate", "EX_LetMulticastDelegate", "EX_LetValueOnPersistentFrame", "EX_SetArray", "EX_SetMap", "EX_SetSet"]},
+    "write-owner": {"type": ["string", "null"], "maxLength": 4096, "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\\.[A-Za-z0-9_]+)+$"},
+    "write-path": {"type": ["string", "null"], "maxLength": 4096, "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*$"},
     "target": {"oneOf": [
       {"type": "object", "additionalProperties": false, "required": ["kind", "owner", "function"],
        "properties": {"kind": {"const": "resolved"}, "owner": {"$ref": "#/$defs/text"}, "function": {"$ref": "#/$defs/text"}}},
       {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "unresolved"}}}
     ]},
     "literal": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "number"}, "value": {"type": "number"}}},
       {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "string"}, "value": {"$ref": "#/$defs/text"}}},
       {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "integer"}, "value": {"type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807}}},
       {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "boolean"}, "value": {"type": "boolean"}}},
