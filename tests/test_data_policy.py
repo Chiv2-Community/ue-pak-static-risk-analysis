@@ -26,17 +26,13 @@ rules:
   - id: original-invocation-model
     description: Original illustrative fixture only
     effect: flag
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Fixture.Other
-        function: Touch
+    expression:
+      invocation: /Script/Fixture.Other:Touch
 """
 
 MATCHING_POLICY = POLICY.replace("original-invocation-model", "operator-rule-canary").replace(
     "effect: flag", "effect: forbid").replace("/Script/Fixture.Other", "/Script/Corpus.Sensitive").replace(
-    "function: Touch", "function: Record")
+    ":Touch", ":Record")
 DUAL_POLICY = (MATCHING_POLICY + MATCHING_POLICY.split("rules:\n", 1)[1].replace(
     "operator-rule-canary", "operator-flag-canary").replace("effect: forbid", "effect: flag")).replace(
     "Original illustrative fixture only", "operator-description-canary")

@@ -53,6 +53,8 @@ public static class InvocationExtractor
         limits.Validate();
         ValidateInput(input);
         var calls = new List<ExtractedInvocation>();
+        var writes = new List<PropertyWriteFact>();
+        var writeCharacters = 0;
         var functions = new List<FunctionCoverage>();
         var diagnostics = new List<ExtractionDiagnostic>();
         if (!asset.PackageFlags.HasFlag(EPackageFlags.PKG_Cooked) && !asset.IsFilterEditorOnly)
@@ -64,10 +66,13 @@ public static class InvocationExtractor
         var evidenceBudget = 0;
         var metadataBudget = 0;
         var signatures = new Dictionary<int, (List<string>? Names, string? Error)>();
+        var byValueSignatures = new Dictionary<int, bool>();
         IndirectDispatchResolver? indirect = null;
         try { indirect = new(asset, input, limits, archiveContext); }
         catch (Exception error) when (error is not OutOfMemoryException) { diagnostics.Add(new("indirect-analysis-failed")); }
         var dispatches = new List<IndirectDispatch>();
+        var provenanceSites = new List<ProvenanceSite>();
+        var unsafeProvenanceRoots = new HashSet<(int Function, int Root)>();
         for (var i = 0; i < Math.Min(asset.Exports.Count, limits.MaxExports); i++)
         {
             var export = asset.Exports[i];
@@ -103,11 +108,18 @@ public static class InvocationExtractor
             else if (function.ScriptBytecode.Length > limits.MaxArray) local.Add(new("expression-array-limit", index));
             else
             {
-                foreach (var root in function.ScriptBytecode)
+                for (var rootIndex = 0; rootIndex < function.ScriptBytecode.Length; rootIndex++)
                 {
+                    var root = function.ScriptBytecode[rootIndex];
                     try
                     {
                         var expected = ExpressionPreflight.Check(root, limits, ref budget);
+                        if (expected.Skip(1).Any(item => item.Expression is EX_Let or EX_LetBase or EX_LetValueOnPersistentFrame
+                            or EX_LocalOutVariable)) unsafeProvenanceRoots.Add((index, rootIndex));
+                        if (expected.Any(item => item.Expression is EX_LocalVariable)
+                            && expected.Skip(1).Any(item => item.Expression is EX_VirtualFunction or EX_CallMulticastDelegate
+                                || item.Expression is EX_FinalFunction call && !ByValueSignature(asset, call, byValueSignatures)))
+                            unsafeProvenanceRoots.Add((index, rootIndex));
                         var cursor = 0;
                         root.Visit(asset, ref offset, (node, position) =>
                         {
@@ -126,8 +138,29 @@ public static class InvocationExtractor
                                 }
                             }
                             catch (Exception error) when (error is not OutOfMemoryException) { local.Add(new("indirect-analysis-failed", index, position)); }
+                            var callCount = calls.Count;
+                            try
+                            {
+                                var write = PropertyWriteExtractor.Inspect(asset, input, identity, node, position, occurrence.Receivers.Length > 0);
+                                if (write is not null)
+                                {
+                                    if (writes.Count >= PropertyWriteEvidence.MaxWrites
+                                        || writeCharacters + PropertyWriteEvidence.Characters(write) > PropertyWriteEvidence.MaxCharacters)
+                                        local.Add(new("property-write-limit", index, position));
+                                    else
+                                    {
+                                        writes.Add(write);
+                                        writeCharacters += PropertyWriteEvidence.Characters(write);
+                                        if (write.Owner is null || write.Property is null)
+                                            local.Add(new("property-write-unresolved", index, position));
+                                    }
+                                }
+                            }
+                            catch (Exception error) when (error is not OutOfMemoryException)
+                            { local.Add(new("property-write-analysis-failed", index, position)); }
                             Extract(asset, input, identity, node, position, occurrence.Receivers, calls, local, limits,
                                 ref evidenceBudget, ref metadataBudget, signatures);
+                            if (calls.Count != callCount) provenanceSites.Add(new(callCount, node, index, rootIndex));
                             // The pinned upstream IntConstByte lacks its one-byte operand in Visit.
                             if (node.GetType() == typeof(EX_IntConstByte)) offset++;
                         });
@@ -144,12 +177,13 @@ public static class InvocationExtractor
             }
             functions.Add(new(identity, local.Count == 0, native, visited, local.ToImmutableArray()));
         }
-        return Report(input, calls, functions, diagnostics, asset.Exports.Count, Math.Min(asset.Exports.Count, limits.MaxExports), dispatches);
+        new ArgumentProvenanceExtractor(asset, calls, provenanceSites, functions, unsafeProvenanceRoots).Enrich();
+        return Report(input, calls, functions, diagnostics, asset.Exports.Count, Math.Min(asset.Exports.Count, limits.MaxExports), dispatches, writes);
     }
 
     private static ExtractionReport Report(PackageInput input, List<ExtractedInvocation> calls,
         List<FunctionCoverage> functions, List<ExtractionDiagnostic> diagnostics, int exports = 0, int inspectedExports = 0,
-        List<IndirectDispatch>? dispatches = null)
+        List<IndirectDispatch>? dispatches = null, List<PropertyWriteFact>? writes = null)
     {
         var all = diagnostics.Concat(functions.SelectMany(f => f.Diagnostics)).ToArray();
         var gaps = new List<CoverageGap>();
@@ -167,7 +201,8 @@ public static class InvocationExtractor
                 f.Identity.Owner, f.Identity.Name, f.Native)), graphFunctions.Length == functions.Count
             && all.All(d => d.Code is "imported-signature-unavailable" or "parameter-metadata-unavailable"));
         return new(input, exports, inspectedExports, calls.ToImmutableArray(), functions.ToImmutableArray(), diagnostics.ToImmutableArray(),
-            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray(), dispatches is { Count: > 0 } ? dispatches.ToArray() : null, graph));
+            new(calls.Select(c => c.Fact).ToImmutableArray(), gaps.ToImmutableArray(), dispatches is { Count: > 0 } ? dispatches.ToArray() : null, graph,
+                new(!gaps.Contains(CoverageGap.IncompleteExtraction) && !gaps.Contains(CoverageGap.UnsupportedParsing), (writes ?? []).ToImmutableArray())));
     }
 
     private static void Extract(UAsset asset, PackageInput input, FunctionIdentity containing,
@@ -321,7 +356,7 @@ public static class InvocationExtractor
         return names;
     }
 
-    private static (ArgumentValue, string) Value(KismetExpression? expression)
+    internal static (ArgumentValue, string) Value(KismetExpression? expression)
     {
         if (expression is null) return (new ArgumentValue.Missing(), "missing-argument");
         PolicyLiteral? literal = expression switch
@@ -333,6 +368,7 @@ public static class InvocationExtractor
             EX_IntConstByte integer => new PolicyLiteral.Integer(integer.Value),
             EX_IntZero => new PolicyLiteral.Integer(0),
             EX_IntOne => new PolicyLiteral.Integer(1),
+            EX_FloatConst number when float.IsFinite(number.Value) => new PolicyLiteral.Number(number.Value),
             EX_True => new PolicyLiteral.Boolean(true),
             EX_False => new PolicyLiteral.Boolean(false),
             EX_NoObject or EX_NoInterface => new PolicyLiteral.Null(),
@@ -341,5 +377,17 @@ public static class InvocationExtractor
         if (literal is not null) return (new ArgumentValue.Constant(literal), "constant");
         var unsupported = expression.Token.ToString().Contains("Const", StringComparison.Ordinal);
         return (new ArgumentValue.Dynamic(), unsupported ? "unsupported-constant-type" : "runtime-expression");
+    }
+
+    private static bool ByValueSignature(UAsset asset, EX_FinalFunction call, Dictionary<int, bool> cache)
+    {
+        var index = call.StackNode.Index;
+        if (cache.TryGetValue(index, out var safe)) return safe;
+        safe = index > 0 && index <= asset.Exports.Count && asset.Exports[index - 1] is FunctionExport function
+            && function.LoadedProperties is { Length: <= 256 } properties && function.Children is not { Length: > 0 }
+            && properties.All(p => p is not null && !p.PropertyFlags.HasFlag(EPropertyFlags.CPF_ReferenceParm)
+                && (!p.PropertyFlags.HasFlag(EPropertyFlags.CPF_OutParm) || p.PropertyFlags.HasFlag(EPropertyFlags.CPF_ReturnParm)));
+        cache[index] = safe;
+        return safe;
     }
 }

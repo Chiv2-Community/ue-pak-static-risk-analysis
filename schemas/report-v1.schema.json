@@ -42,6 +42,14 @@
     "call-chains": {"$ref": "#/$defs/call-chains"},
     "data-analysis": {"$ref": "#/$defs/data-analysis"},
     "capability-analysis": {"$ref": "#/$defs/capability-analysis"},
+    "property-writes": {
+      "type": "object", "additionalProperties": false, "required": ["observed", "flagged", "forbidden"],
+      "properties": {
+        "observed": {"$ref": "#/$defs/count"},
+        "flagged": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/property-write"}},
+        "forbidden": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/property-write"}}
+      }
+    },
     "possible-dispatches": {"type": "array", "maxItems": 10000, "items": {
       "type": "object", "additionalProperties": false, "required": ["evidence", "possibly-flagged", "possibly-forbidden"],
       "properties": {"evidence": {"$ref": "facts-v1.schema.json#/$defs/dispatch"},
@@ -81,6 +89,20 @@
     {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"properties": {"diagnostics": {"minItems": 1}, "flagged-invocations": {"maxItems": 0}, "forbidden-invocations": {"maxItems": 0}}}}
   ],
   "$defs": {
+    "property-write": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "location", "opcode", "owner", "property", "receiver"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "location": {"$ref": "facts-v1.schema.json#/$defs/location"},
+        "opcode": {"$ref": "facts-v1.schema.json#/$defs/write-opcode"},
+        "owner": {"$ref": "facts-v1.schema.json#/$defs/write-owner"},
+        "property": {"$ref": "facts-v1.schema.json#/$defs/write-path"},
+        "receiver": {"enum": ["self", "object", "unknown"]},
+        "rule-ids": {"type": "array", "minItems": 1, "maxItems": 8192, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}}
+      }
+    },
     "complete-capability-evidence": {
       "required": ["call-chains"], "properties": {"call-chains": {
         "required": ["complete", "catalog-sha256", "diagnostics"],

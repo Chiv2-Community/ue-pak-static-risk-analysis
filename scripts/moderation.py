@@ -96,6 +96,10 @@ def validate(value, profile):
         else:
             reports.require(value["status"] == ("partial" if incomplete else "successful"))
         reports.require(value["routes"] == routes(value))
+        if "property-write-counts" in value:
+            writes = value["property-write-counts"]
+            reports.require(max(writes["flagged"], writes["forbidden"]) <= writes["observed"])
+            reports.require(value["status"] != "failed" or not any(writes.values()))
         if "data-analysis" in value:
             data = value["data-analysis"]
             reports.require(data["decision"] == ("reject" if data["reject-count"] else "needs-review" if data["review-count"] else "no-match"))
@@ -145,11 +149,15 @@ def routes(value):
     if value["status"] == "failed":
         return ["operational-failed"]
     result = []
-    if (value["counts"]["forbidden"] or value.get("content-policy", {}).get("decision") == "reject"
+    if (value["counts"]["forbidden"] or value.get("property-writes", {}).get("forbidden")
+            or value.get("property-write-counts", {}).get("forbidden", 0)
+            or value.get("content-policy", {}).get("decision") == "reject"
             or value.get("data-analysis", {}).get("decision") == "reject"
             or value.get("capability-analysis", {}).get("decision") == "reject"):
         result.append("policy-violation")
-    if (value["counts"]["flagged"] or value.get("content-policy", {}).get("decision") == "needs-review"
+    if (value["counts"]["flagged"] or value.get("property-writes", {}).get("flagged")
+            or value.get("property-write-counts", {}).get("flagged", 0)
+            or value.get("content-policy", {}).get("decision") == "needs-review"
             or value.get("data-analysis", {}).get("decision") == "needs-review"
             or value.get("capability-analysis", {}).get("decision") == "needs-review"
             or value.get("call-chains", value.get("call-chain-analysis", {})).get("needs-review", False)):
@@ -186,6 +194,10 @@ def handoff(report_data, context, pak, dependencies):
              "routes": routes(report)}
     if "content-policy" in report:
         value["content-policy"] = deepcopy(report["content-policy"])
+    if "property-writes" in report:
+        writes = report["property-writes"]
+        value["property-write-counts"] = {"observed": writes["observed"],
+            "flagged": len(writes["flagged"]), "forbidden": len(writes["forbidden"])}
     if "call-chains" in report:
         value["call-chain-analysis"] = {key: report["call-chains"][key] for key in ("complete", "needs-review")}
     if "capability-analysis" in report:
@@ -221,6 +233,8 @@ def feedback(value):
     public["kind"] = "submitter-feedback"
     if "content-policy" in value:
         public["content-policy"] = deepcopy(value["content-policy"])
+    if "property-write-counts" in value:
+        public["property-write-counts"] = deepcopy(value["property-write-counts"])
     if "call-chain-analysis" in value:
         public["call-chain-analysis"] = deepcopy(value["call-chain-analysis"])
     if "capability-analysis" in value:

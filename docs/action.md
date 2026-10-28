@@ -83,12 +83,8 @@ jobs:
               - id: review-launch
                 description: Review external URL launches.
                 effect: forbid
-                match:
-                  kind: invocation
-                  target:
-                    kind: exact
-                    owner: /Script/Engine.KismetSystemLibrary
-                    function: LaunchURL
+                expression:
+                  invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
       # OPTIONAL: enable only after approving access for every artifact reader.
       - name: Collect report after success or gate failure
         if: ${{ always() && steps.scan.outputs.report-available == 'true' && vars.ALLOW_PAK_REPORT_ARTIFACTS == 'true' }}

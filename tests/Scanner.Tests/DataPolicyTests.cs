@@ -14,7 +14,7 @@ public sealed class DataPolicyTests
 {
     private const string Canary = "private-data-canary";
     private const string MemberPath = "Content/Data.uasset";
-    private const string InvocationPolicy = "schema-version: 1\nrules:\n  - id: original\n    description: Original fixture\n    effect: flag\n    match:\n      kind: invocation\n      target:\n        kind: exact\n        owner: /Script/Fixture.Object\n        function: Touch\n";
+    private const string InvocationPolicy = "schema-version: 1\nrules:\n  - id: original\n    description: Original fixture\n    effect: flag\n    expression:\n      invocation: /Script/Fixture.Object:Touch\n";
     private static PolicyEvaluator Evaluator() => new(PolicyYaml.Parse(InvocationPolicy));
     private static readonly DataBuildContext Context = new("4.25", "original-fixture-v1", "Content", "/Game", null, "submission-over-baseline");
     private static SerializedProperty Property(SerializedValue? value = null) => new(1, "/Game/Data.Data", "/Script/Fixture.Object", false,

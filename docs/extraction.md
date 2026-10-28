@@ -53,14 +53,25 @@ control characters. Invalid caller identities/limits throw fixed setup errors.
   child/next chains are bounded, ownership-checked, and cycle-checked. Duplicate
   names and malformed metadata fail closed. Imported signatures are unavailable;
   positional argument evidence is retained without inventing parameter names.
-- ASCII String/valid UnicodeString, Int/Int64/IntConstByte/IntZero/IntOne, True/False, and
+- ASCII String/valid UnicodeString, Int/Int64/IntConstByte/IntZero/IntOne, finite FloatConst, True/False, and
   NoObject/NoInterface become policy constants. Null, missing argument, unavailable
   metadata, malformed metadata, runtime expression, and parser failure remain
   distinct. Argument-count mismatches generate coverage.
-- FName, byte/enum-like values, floats, object references, and other unsupported
+- FloatConst values are promoted exactly from float32 to policy double values.
+  Nonfinite floats remain Dynamic; policy equality does not use a tolerance.
+- FName, byte/enum-like values, object references, and other unsupported
   constant types remain `ArgumentValue.Dynamic` with the fixed reason
   `unsupported-constant-type` and source opcode. They are not coerced to policy
-   strings/integers. Direct invocation ADT/evaluator semantics are unchanged.
+    strings/integers.
+- Supported nonconstant arguments also carry bounded, argument-local provenance
+  DAGs as `ArgumentValue.Derived`. Nodes record literal leaves, invocation targets
+  and named input references, return dependencies, or explicit opaque boundaries.
+  References point only to earlier nodes. Extraction follows straight-line local
+  definitions and available same-package direct-call returns with caller-specific
+  parameter substitution; it does not scan unrelated calls for matches. Native
+  bodies, unknown aliases/control flow and tracing limits remain opaque or Dynamic.
+  See [subexpression predicates](policies.md#subexpression-provenance) for limits
+  and semantics. Policies remain unavailable to the parser.
 - Policy-unrepresentable owner/function identities remain structured extraction
   evidence, but the policy target is unresolved with coverage. More than 256 named
   arguments uses unavailable policy metadata with coverage. Positional evidence
@@ -143,6 +154,22 @@ Ingestion quotas and externally supervised memory, CPU, filesystem, and process
 containment remain required; the [host wrapper](container.md) implements those
 external controls. Dependency loading, native behavior,
 dynamic dispatch, and runtime argument computation remain unknown.
+
+## Runtime property assignments
+
+`InvocationAnalysis.PropertyWrites` retains separate bounded assignment evidence:
+location, opcode, declared owner, dotted property path, coarse receiver and value.
+Extraction supports `EX_Let*` and `EX_SetArray`/`EX_SetMap`/`EX_SetSet` destinations,
+including instance/default variables and nested struct members. Function-local
+assignments are excluded; out/ref aliases remain unresolved. Unsupported lvalues,
+failed traversal and exhausted bounds cannot establish complete write coverage.
+
+Each package and aggregate retains at most 10,000 writes and 262,144 evidence
+characters. Destination traversal stops at depth 24. Transport exhaustion can
+drop write evidence but preserves an incomplete marker or missing evidence;
+write policies treat either as incomplete. These facts do not reconstruct native
+mutations, inheritance overrides, receiver ownership or effective defaults.
+See [write policy semantics](policies.md#runtime-property-writes).
 
 ## Validation and remaining acceptance work
 

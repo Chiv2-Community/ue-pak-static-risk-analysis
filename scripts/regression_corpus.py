@@ -553,12 +553,8 @@ def package_context_gate(run, image=None):
   - id: original-archive-candidate
     description: Original synthetic override only
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Game/ChildOverride.Type
-        function: Sensitive
+    expression:
+      invocation: /Game/ChildOverride.Type:Sensitive
 """
     report = run.evaluate(path, policy=policy)
     package_context_oracle(report)
@@ -630,12 +626,8 @@ def package_context_boundary_gate(run, mode, image=None):
   - id: exact-base-declaration
     description: Original declaration identity
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Game/Base.Type
-        function: Sensitive
+    expression:
+      invocation: /Game/Base.Type:Sensitive
 """
     report = run.evaluate(path, policy=policy)
     if mode == "package-context-budget":

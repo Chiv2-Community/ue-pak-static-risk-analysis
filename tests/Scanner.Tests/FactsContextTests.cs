@@ -29,7 +29,7 @@ public sealed class FactsContextTests
             Analysis = new([], [CoverageGap.IncompleteExtraction]) };
         var decoded = FactsCodec.Read(FactsCodec.Write(facts));
         Assert.Equal(member, decoded.Inspection!.Members[0] with { Signatures = member.Signatures, Classes = member.Classes });
-        var policy = PolicyYaml.Parse("schema-version: 1\nrules:\n- id: test\n  description: test\n  effect: flag\n  match:\n    kind: invocation\n    target:\n      kind: exact\n      owner: /Script/Test.Actor\n      function: Call\n");
+        var policy = PolicyYaml.Parse("schema-version: 1\nrules:\n- id: test\n  description: test\n  effect: flag\n  expression:\n    invocation: /Script/Test.Actor:Call\n");
         var report = RiskReport.Create(decoded, new PolicyEvaluator(policy).Evaluate(decoded.Analysis), false, null);
         Assert.False(report.AnalysisComplete);
         Assert.Same(decoded.Inspection, report.Inspection);

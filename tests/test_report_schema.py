@@ -16,6 +16,54 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipIf(Draft202012Validator is None, "optional jsonschema unavailable")
 class ReportSchemaTests(unittest.TestCase):
+    def test_property_write_example_uses_declaring_owners(self):
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("optional yaml unavailable")
+        document = yaml.safe_load((ROOT / "examples/property-write-policy.yaml").read_text())
+        schema = json.loads((ROOT / "schemas/policy-v1.schema.json").read_text())
+        Draft202012Validator(schema).validate(document)
+        expressions = document["rules"][0]["expression"]["any"]
+        writes = {item["property-write"]["property"]: item["property-write"]["class"]
+                  for item in expressions if "property-write" in item}
+        self.assertEqual({
+            "bIgnoreClientMovementErrorChecksAndCorrection": "/Script/Engine.CharacterMovementComponent",
+            "CustomTimeDilation": "/Script/Engine.Actor",
+            "MinimumSpawnDelayOverride": "/Script/TBL.TBLPlayerController",
+            "InteractableSettings": "/Script/TBL.TBLCharacter",
+        }, writes)
+        self.assertIn({"invocation": "/Script/TBL.CombatStateComponent:OnEndAnimationTimeout"}, expressions)
+
+    def test_policy_wildcards_shorthand_and_literal_escapes(self):
+        schema = json.loads((ROOT / "schemas/policy-v1.schema.json").read_text())
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema)
+        predicates = [
+            {"kind": "equals", "value": value}
+            for value in ("foo", 42, 1.5, True, None, "__WILDCARD__",
+                          {"kind": "string", "value": "__WILDCARD__"}, {"kind": "wildcard"})
+        ] + [{"kind": "in", "values": ["foo", 42, True, None, 1.5]}]
+        for predicate in predicates:
+            for name in ("__WILDCARD__", {"literal": "__WILDCARD__"}):
+                expression = {"invocation": {
+                    "class": "__WILDCARD__", "function": "__WILDCARD__",
+                    "args": [{"argument": {"name": name, "predicate": predicate}}]}}
+                document = {"schema-version": 1, "rules": [{"id": "test", "description": "Test",
+                    "effect": "forbid", "expression": expression}]}
+                validator.validate(document)
+        for target in ("__WILDCARD__", "__WILDCARD__:Run", "/Script/Engine.Test:__WILDCARD__",
+                       {"function": "__WILDCARD__:Run"},
+                       {"class": "__WILDCARD__", "function": {"literal": "__WILDCARD__"}}):
+            document["rules"][0]["expression"] = {"invocation": target}
+            validator.validate(document)
+
+    def test_numeric_facts_exclude_policy_wildcard(self):
+        schema = json.loads((ROOT / "schemas/facts-v1.schema.json").read_text())
+        validator = Draft202012Validator({"$defs": schema["$defs"], "$ref": "#/$defs/literal"})
+        validator.validate({"kind": "number", "value": 1.5})
+        self.assertFalse(validator.is_valid({"kind": "wildcard"}))
+
     def test_dispatch_schema_has_closed_version_and_opcode_kind_pairs(self):
         schema = json.loads((ROOT / "schemas/facts-v1.schema.json").read_text())
         original = json.loads((ROOT / "examples/facts-v1.json").read_text())

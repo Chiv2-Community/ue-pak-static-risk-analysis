@@ -48,7 +48,7 @@ public static class FactsCodec
                 (typeof(ArgumentMetadata.Known), "known"), (typeof(ArgumentMetadata.Unavailable), "unavailable"));
             if (info.Type == typeof(ArgumentValue)) Tags(info,
                 (typeof(ArgumentValue.Constant), "constant"), (typeof(ArgumentValue.Dynamic), "dynamic"),
-                (typeof(ArgumentValue.Missing), "missing"));
+                (typeof(ArgumentValue.Missing), "missing"), (typeof(ArgumentValue.Derived), "derived"));
         });
         var options = new JsonSerializerOptions
         {
@@ -111,6 +111,30 @@ public static class FactsCodec
         try
         {
             Validate(document);
+            if (document.Analysis.PropertyWrites is { } writes)
+            {
+                try { return Serialize(document); }
+                catch (FactsException)
+                {
+                    if (document.Analysis.Invocations.Any(f => f.Arguments is ArgumentMetadata.Known known
+                        && known.Arguments.Any(a => a.Value is ArgumentValue.Derived)))
+                        return Write(document with { Analysis = ValueProvenance.Bound(document.Analysis, 0) });
+                    // Prefer an incomplete marker; if even that cannot fit, missing evidence
+                    // also blocks every property-write policy. Never evict mandatory calls.
+                    return Write(document with { Analysis = document.Analysis with { PropertyWrites = writes.Writes.Length > 0
+                        ? writes with { Complete = false, Writes = [] } : null } });
+                }
+            }
+            // Provenance is optional. Exhaustion must not displace mandatory invocation facts.
+            if (document.Analysis.Invocations.Any(f => f.Arguments is ArgumentMetadata.Known known
+                && known.Arguments.Any(a => a.Value is ArgumentValue.Derived)))
+            {
+                try { return Serialize(document); }
+                catch (FactsException)
+                {
+                    return Write(document with { Analysis = ValueProvenance.Bound(document.Analysis, 0) });
+                }
+            }
             try { return Serialize(document); }
             catch (FactsException) when (document.AssetData is not null || document.Analysis.CallGraph is { Functions.Length: > 0 })
             {

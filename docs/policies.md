@@ -24,12 +24,8 @@ rules:
   - id: review-console
     description: Review console command use.
     effect: flag
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Engine.KismetSystemLibrary
-        function: ExecuteConsoleCommand
+    expression:
+      invocation: /Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand
 ```
 
 - Exactly one document; unknown keys and schema versions are errors.
@@ -43,47 +39,224 @@ rules:
 
 ## Expression ADT
 
-| `kind` | Required fields | Contract |
+| Expression key | Value | Contract |
 | --- | --- | --- |
-| `all` | `expressions` | Nonempty expression array; every expression must match |
-| `any` | `expressions` | Nonempty expression array; at least one must match |
-| `not` | `expression` | Exactly one nested expression |
-| `invocation` | `target` | Resolved function identity, not a string search |
-| `argument` | `name`, `predicate` | Named parameter and a typed value predicate |
+| `all` | Nonempty expression list | Every expression must match |
+| `any` | Nonempty expression list | At least one expression must match |
+| `not` | One expression | Negates a known result; preserves Unknown |
+| `invocation` | Class path, function path or expanded object | Recorded call identity, optionally with argument conditions |
+| `argument` | Object with `name`, `predicate` | Named parameter and a typed value predicate |
+| `property-write` | Object with `class`, `property`, optional `predicate` | Runtime assignment destination and optional value test |
 
-Singleton `all`/`any` arrays are valid. Empty arrays are rejected to avoid
+Each expression is a mapping with exactly one expression key; there is no
+expression-level `kind`. The rule field is `expression`, not `match`.
+Singleton `all`/`any` lists are valid. Empty lists are rejected to avoid
 accidental always-true or always-false policies. Argument and function names
 must match `[A-Za-z_][A-Za-z0-9_]*` in v1.
 
-Target variants:
+Simple invocations:
 
 ```yaml
-kind: exact
-owner: /Script/Engine.KismetSystemLibrary
-function: LaunchURL
+# Any function recorded under this exact class.
+invocation: /Script/Engine.KismetSystemLibrary
+
+# One exact function. Unreal function object paths use a colon.
+invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
 ```
 
 ```yaml
-kind: owner
-owner: /Script/Engine.KismetSystemLibrary
+invocation:
+  class: /Script/Engine.KismetSystemLibrary
+  function: LaunchURL
+  args:
+    - argument:
+        name: URL
+        predicate:
+          kind: url-host-in
+          hosts:
+            - mods.example.org
 ```
 
-Owners are absolute Unreal package/object paths, such as
+The expanded form accepts either `class` with an optional short `function` name,
+or a fully qualified `function` path with **no `class` key**:
+
+```yaml
+invocation:
+  function: /Script/Engine.KismetSystemLibrary:LaunchURL
+  args:
+    - argument:
+        name: URL
+        predicate:
+          kind: url-host-in
+          hosts: [mods.example.org]
+```
+
+A qualified function forbids `class`, even if it names the same class. A short
+function name requires `class`. If `function` is present, it selects that function
+or the whole-field wildcard. If `args` is present,
+`function` is required and `args` must be a nonempty list of `argument` expressions.
+All argument conditions are ANDed on the **same call**. A condition from another
+call cannot satisfy this invocation. Missing/dynamic arguments remain Unknown.
+Canonical output uses the expanded form, preserving argument conditions.
+
+Class identities are absolute Unreal package/object paths, such as
 `/Script/Engine.KismetSystemLibrary` or `/Game/Mods/BP_Test.BP_Test_C`.
 Segments use ASCII letters, digits, and underscores. No trimming, case folding,
-wildcards, suffix matching, or implicit rewriting occurs. Names outside this
+partial wildcards, suffix matching, or implicit rewriting occurs. Names outside this
 initial grammar require a future schema extension, not a silent approximation.
+
+Combine expressions explicitly:
+
+```yaml
+all:
+  - any:
+      - invocation: /Script/Engine.KismetSystemLibrary:LaunchURL
+      - invocation: /Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand
+  - not:
+      argument:
+        name: URL
+        predicate:
+          kind: url-host-in
+          hosts: [mods.example.org]
+```
+
+These shapes replace the old grammar in schema version 1; old `match`, `and`,
+`or`, `target` and expression-level `kind` forms are not accepted. Predicate and
+literal `kind` discriminators are unchanged. Capability/data JSON formats and
+content CLI settings are separate and unchanged.
+
+### Whole-field wildcards
+
+`__WILDCARD__` selects any recorded class, function, argument name or literal value.
+It is a matching token, not interpolation; `Foo__WILDCARD__Bar` is literal text.
+Occurrences are independent, without variable bindings. Structural keys, IDs,
+effects, predicate kinds, regex patterns and DNS host lists do not accept wildcards.
+
+```yaml
+invocation:
+  class: /Script/Engine.KismetSystemLibrary
+  function: __WILDCARD__
+  args:
+    - argument:
+        name: __WILDCARD__
+        predicate: {kind: equals, value: foo}
+```
+
+This selects any function on that class with **at least one argument** equal to
+`foo`. Each wildcard argument condition searches independently; different
+conditions may match different arguments on the same call. An empty known
+argument list does not match. Missing metadata, dynamic values and unresolved
+targets preserve Unknown, even with wildcard selectors. Wildcards also work
+inside `subexpr-match`.
+
+Use `{literal: __WILDCARD__}` for a literal function or argument name. Use
+`{kind: string, value: "__WILDCARD__"}` for a literal string value. Quoting the
+shorthand token alone does not escape it. A qualified function may use a wildcard
+class or function component, such as `__WILDCARD__:LaunchURL`.
 
 ## Predicate and literal ADTs
 
 | `kind` | Required fields | Contract |
 | --- | --- | --- |
-| `equals` | `value` | One typed literal |
-| `in` | `values` | Nonempty, duplicate-free array of literals of one kind |
-| `string-starts-with` | `prefix` | Nonempty text prefix; intended ordinal comparison |
+| `equals` | `value` | One inferred or explicitly typed literal |
+| `in` | `values` | Nonempty, duplicate-free array of inferred or typed literals; mixed kinds permitted |
+| `regex-match` | `pattern` | Nonempty .NET non-backtracking regex; searches a string for a match |
 | `url-host-in` | `hosts` | Nonempty, duplicate-free canonical DNS hosts |
+| `subexpr-match` | `subexpr` | Search the argument's recorded value-producing invocation chain |
 
-Literals always identify their type:
+Regex example (single quotes preserve backslashes):
+
+```yaml
+kind: regex-match
+pattern: '^https://mods\.example\.org/'
+```
+
+Matching searches anywhere unless anchored; use `\A` and `\z` for the entire
+string (`$` also accepts a final newline). Matching is case-sensitive and
+culture-invariant by default; inline options such as `(?i)` are supported.
+Patterns use the .NET non-backtracking engine: lookarounds, backreferences,
+atomic groups and other unsupported constructs are rejected during validation.
+Patterns are nonempty and limited to 4,096 UTF-16 code units; regex execution
+has a 100 ms timeout per match. A timeout produces Unknown, including under
+negation; it never becomes NoMatch or approval. Non-string constants produce
+NoMatch; missing/dynamic arguments remain Unknown. The schema checks structure;
+the policy parser also validates regex syntax and engine support.
+`regex-match` replaces `string-starts-with`; the old predicate is rejected.
+For URL host checks, prefer `url-host-in` rather than approximating URL parsing.
+
+### Subexpression provenance
+
+```yaml
+invocation:
+  function: /Script/Example.Bar:Baz
+  args:
+    - argument:
+        name: foo
+        predicate:
+          kind: subexpr-match
+          subexpr:
+            invocation:
+              function: /Script/Example.String:Append
+              args:
+                - argument:
+                    name: A
+                    predicate:
+                      kind: equals
+                      value: {kind: string, value: "foo"}
+```
+
+This searches the provenance of `Baz`'s specific `foo` argument for an `Append`
+call with `A` equal to the known string `"foo"`. `subexpr` accepts the normal
+expression grammar, including nested `subexpr-match` predicates. Argument
+wrappers, typed literals and absolute Unreal class/function identities are
+unchanged. These paths are illustrative, not engine APIs.
+
+The extractor traces directly nested calls, straight-line local assignments and
+return values of directly resolved functions with available bytecode in the same
+package. Callee parameters are substituted from the exact caller. Overwrites
+replace earlier definitions; unrelated calls and unused callee arguments are
+not return dependencies. Locally propagated constants can satisfy ordinary
+predicates too. A function call's output is not evaluated or constant-folded.
+
+- **Match:** a recorded producer satisfies `subexpr`; other opaque dependencies
+  do not erase this evidence.
+- **NoMatch:** the searched chain is complete and no producer matches, including
+  a literal with no producing invocation.
+- **Unknown:** a potentially relevant dependency is unresolved or truncated;
+  negation preserves Unknown.
+
+Native/imported bodies, cross-package returns, virtual/delegate dispatch,
+branches/loops, fields/containers, unsupported transformations, out/ref aliases
+and unmodelled intervening side effects remain opaque. Imported parameter names
+are not guessed. Recursion stops at the active call boundary. This is bounded
+static evidence, not proof of runtime execution or arbitrary causal influence.
+
+Extraction permits 16 active functions, 24 tracing levels and 65,536 work units
+per package. Retained graphs have at most 256 nodes, 1,024 edges and depth 32;
+the analysis retains at most 8,192 nodes. Evaluation permits 4,096 visited nodes
+per rule/invocation and 32 nested searches. Transport exhaustion drops optional
+provenance back to Dynamic without dropping mandatory invocation facts, so
+argument-dependent results remain Unknown. Policies remain evaluator-only;
+the parser extracts provenance without seeing private rules.
+
+Shorthand literals use YAML 1.2 core scalar inference:
+
+```yaml
+kind: in
+values: [foo, "42", 42, 1.5, true, null]
+```
+
+Quoted/block scalars remain strings. Plain `true`/`false` (including YAML core
+capitalizations) are booleans; `yes`/`no` remain strings. Plain decimal, `0x` hex
+and `0o` octal integers must fit signed 64 bits. Decimal/exponent floating-point
+values use finite IEEE-754 doubles; nonfinite and out-of-range values are rejected.
+Null is a known null, not missing evidence. Lists belong in `in.values`, not
+`equals.value`; nested lists and arbitrary mappings are not literal values.
+Equality retains numeric kinds and exact floating-point values; no string
+coercion or approximate comparison occurs. Extracted UE float constants are
+promoted to doubles, so decimal rounding can differ from a YAML double.
+
+Explicit types remain available and canonical output uses them:
 
 ```yaml
 kind: equals
@@ -102,6 +275,8 @@ values:
 - `integer`: unquoted signed 64-bit decimal, `0` or `-?[1-9][0-9]*`. No `+`,
   leading zeros, negative zero, hex, floats, or coercion from strings.
 - `boolean`: unquoted lowercase `true` or `false`, not `yes` or `1`.
+- `number`: finite unquoted floating-point value.
+- `wildcard`: no `value` field; canonical form of the shorthand matching token.
 - `"null"`: no `value` field. Quote the discriminator: `{kind: "null"}`.
 
 Known null is distinct from an unresolved value. A string `"1"` is not integer
@@ -115,6 +290,37 @@ URLs, ports, credentials, IP literals, trailing dots, wildcards, and implicit
 subdomain matching are not allowed in the host list. Evaluation will require
 HTTPS and parsed host comparison, not prefix checks; the policy parser does not
 evaluate URLs or claim that a destination is safe.
+
+## Runtime property writes
+
+`property-write` matches Kismet assignments, not serialized asset defaults:
+
+```yaml
+expression:
+  property-write:
+    class: /Script/Engine.Actor
+    property: CustomTimeDilation
+    predicate: {kind: equals, value: 90.0}
+```
+
+- `class` and `property` are required. Either accepts whole-field `__WILDCARD__`.
+- `class` selects the stored declaring owner, not the runtime receiver's class.
+- `property` is a case-sensitive dotted path. A root selector such as
+  `InteractableSettings` covers writes to its nested fields.
+- `predicate` is optional and uses the argument value predicates. Dynamic values
+  remain Unknown. A predicate on a parent cannot inspect an assigned child value.
+- A whole-struct replacement is Unknown for a narrower child selector; it cannot
+  silently become NoMatch. Select the root to match any replacement or child write.
+- Direct instance/default assignments and array/map/set replacements are retained.
+  Known function-local construction is excluded. Out/ref aliases and unresolved
+  destinations remain incomplete; native mutations are not reconstructed.
+- Pure write rules evaluate write events; pure invocation rules evaluate calls.
+  `subexpr-match` cannot contain `property-write` expressions.
+- Missing or incomplete write evidence blocks completeness when write rules exist.
+  Receiver evidence does not prove ownership, reachability or runtime execution.
+
+See [the illustrative write policy](../examples/property-write-policy.yaml).
+It is not an adopted production baseline or proof of exact-game owner identities.
 
 ## Evaluation boundary
 
@@ -136,7 +342,8 @@ Operand order does not matter. `not` swaps Match/NoMatch and preserves Unknown.
 Decisive operands discard irrelevant uncertainty. A nonmatching target in `all`
 does not become incomplete because another operand has a dynamic argument.
 Known values of different literal kinds produce NoMatch, without coercion.
-String comparisons are ordinal and case-sensitive.
+Literal string comparisons are ordinal and case-sensitive; regex matching uses
+the options described above.
 
 URL matching requires an absolute, well-formed HTTPS URL. Scheme and DNS host
 case are normalized. Only an omitted port or literal `:443` is accepted.

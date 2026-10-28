@@ -14,7 +14,8 @@ public sealed record GateOptions(bool FailOnAnyForbidden = true, bool FailOnAnyF
         || report.DataAnalysis is { } data && (!data.Complete || data.Decision is "reject" or "needs-review")
         || report.CallChains?.NeedsReview == true
         || report.CapabilityAnalysis is { } capability && (!capability.Complete || capability.Decision is "reject" or "needs-review")
-        || Fails(report.Counts.Forbidden > 0, report.Counts.Flagged > 0, !report.AnalysisComplete);
+        || Fails(report.Counts.Forbidden > 0 || report.PropertyWrites?.Forbidden.Length > 0,
+            report.Counts.Flagged > 0 || report.PropertyWrites?.Flagged.Length > 0, !report.AnalysisComplete);
 }
 
 public sealed record PublicTarget(string Owner, string Function);
@@ -24,6 +25,10 @@ public sealed record ReportFinding(string Id, InvocationLocation Location, Publi
 public sealed record ReportCounts(int Invocations, int Flagged, int Forbidden, int AffectedUnion);
 public sealed record ReportPossibleDispatch(IndirectDispatch Evidence, bool PossiblyFlagged, bool PossiblyForbidden);
 public sealed record ReportCoverage(string[] Gaps, bool EvaluationIncomplete);
+public sealed record ReportPropertyWrite(string Id, InvocationLocation Location, string Opcode, string? Owner,
+    string? Property, string Receiver,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? RuleIds);
+public sealed record ReportPropertyWrites(int Observed, ReportPropertyWrite[] Flagged, ReportPropertyWrite[] Forbidden);
 public sealed record ReportContext(string ToolVersion, string EngineVersion, string? PakSha256,
     string? ProducerVersion, DependencyIdentity[] Dependencies,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PolicyRevision,
@@ -36,7 +41,8 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReportPossibleDispatch[]? PossibleDispatches = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallChainEvidence? CallChains = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DataAnalysis? DataAnalysis = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityRuleAnalysis? CapabilityAnalysis = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityRuleAnalysis? CapabilityAnalysis = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReportPropertyWrites? PropertyWrites = null)
 {
     public RiskReport WithCapabilities(CapabilityRuleAnalysis? result) => result is null ? this : this with
     {
@@ -93,6 +99,18 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
             }).ToArray();
         var flagged = Findings(RuleEffect.Flag);
         var forbidden = Findings(RuleEffect.Forbid);
+        var writesByLocation = (facts.Analysis.PropertyWrites?.Writes ?? []).ToDictionary(w => w.Location);
+        ReportPropertyWrite[] WriteFindings(RuleEffect effect) => (evaluation.PropertyWriteFindings.IsDefault ? [] : evaluation.PropertyWriteFindings)
+            .Where(f => f.Rules.Any(r => r.Effect == effect))
+            .OrderBy(f => f.Location.Asset, StringComparer.Ordinal).ThenBy(f => f.Location.Function, StringComparer.Ordinal).ThenBy(f => f.Location.Offset)
+            .Select(f =>
+            {
+                var write = writesByLocation[f.Location];
+                var identity = JsonSerializer.SerializeToUtf8Bytes(new object[] { facts.PakSha256, "property-write", f.Location.Asset, f.Location.Function, f.Location.Offset });
+                return new ReportPropertyWrite(Convert.ToHexStringLower(SHA256.HashData(identity)), f.Location, write.Opcode,
+                    write.Owner, write.Property, write.Receiver,
+                    detail ? f.Rules.Where(r => r.Effect == effect).Select(r => r.RuleId).Order(StringComparer.Ordinal).ToArray() : null);
+            }).ToArray();
         var report = new RiskReport(1, evaluation.IsIncomplete ? "partial" : "successful", !evaluation.IsIncomplete,
             ContextFor(facts, revision, catalog), new(byLocation.Count, flagged.Length, forbidden.Length, evaluation.Findings.Length),
             new(evaluation.CoverageGaps.Select(g => JsonNamingPolicy.KebabCaseLower.ConvertName(g.ToString())).ToArray(),
@@ -102,7 +120,9 @@ public sealed record RiskReport(int SchemaVersion, string Status, bool AnalysisC
                  .Select(d => new ReportPossibleDispatch(d with
                      { Candidates = d.Candidates.OrderBy(c => c.Owner, StringComparer.Ordinal).ThenBy(c => c.Function, StringComparer.Ordinal).ToImmutableArray(),
                        Diagnostics = d.Diagnostics.Order(StringComparer.Ordinal).ToImmutableArray() },
-                     PossibleEffect(d, RuleEffect.Flag), PossibleEffect(d, RuleEffect.Forbid))).ToArray() : null);
+                      PossibleEffect(d, RuleEffect.Flag), PossibleEffect(d, RuleEffect.Forbid))).ToArray() : null,
+             PropertyWrites: facts.Analysis.PropertyWrites is not null || !evaluation.PropertyWriteFindings.IsDefaultOrEmpty
+                ? new(writesByLocation.Count, WriteFindings(RuleEffect.Flag), WriteFindings(RuleEffect.Forbid)) : null);
         return report.WithCallChains(facts.Analysis.CallGraph is not null || catalog is not null
             ? Scanner.CallChains.Analyze(facts.Analysis, evaluation, catalog) : null);
     }

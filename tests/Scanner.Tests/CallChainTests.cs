@@ -24,12 +24,8 @@ public sealed class CallChainTests
           - id: private-policy-canary
             description: private-policy-canary
             effect: forbid
-            match:
-              kind: invocation
-              target:
-                kind: exact
-                owner: /Script/Fixture.Utility
-                function: Sensitive
+            expression:
+              invocation: /Script/Fixture.Utility:Sensitive
         """));
     private static CapabilityCatalog Catalog(string function = "Touch") => CapabilityCatalog.Read(Encoding.UTF8.GetBytes($$"""
         {"schema-version":1,"disclosure":"nonsecret","revision":"original-fixture-v1","summaries":[

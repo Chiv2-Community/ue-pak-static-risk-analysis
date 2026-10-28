@@ -7,6 +7,14 @@
     {"$ref": "#/$defs/review"}, {"$ref": "#/$defs/feedback"}
   ],
   "$defs": {
+    "property-write-counts": {
+      "type": "object", "additionalProperties": false, "required": ["observed", "flagged", "forbidden"],
+      "properties": {
+        "observed": {"type": "integer", "minimum": 0, "maximum": 10000},
+        "flagged": {"type": "integer", "minimum": 0, "maximum": 10000},
+        "forbidden": {"type": "integer", "minimum": 0, "maximum": 10000}
+      }
+    },
     "capability-summary": {
       "type": "object", "additionalProperties": false, "required": ["complete", "decision"],
       "properties": {"complete": {"type": "boolean"}, "decision": {"enum": ["no-match", "needs-review", "reject"]}}
@@ -78,7 +86,8 @@
         "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
         "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"},
         "data-analysis": {"$ref": "#/$defs/data-analysis-summary"},
-        "capability-analysis": {"$ref": "#/$defs/capability-summary"}
+        "capability-analysis": {"$ref": "#/$defs/capability-summary"},
+        "property-write-counts": {"$ref": "#/$defs/property-write-counts"}
       }
     },
     "review": {
@@ -106,7 +115,8 @@
         "content-policy": {"$ref": "report-v1.schema.json#/properties/content-policy"},
         "call-chain-analysis": {"$ref": "#/$defs/call-chain-analysis"},
         "data-analysis": {"$ref": "#/$defs/data-analysis-summary"},
-        "capability-analysis": {"$ref": "#/$defs/capability-summary"}
+        "capability-analysis": {"$ref": "#/$defs/capability-summary"},
+        "property-write-counts": {"$ref": "#/$defs/property-write-counts"}
       }
     }
   }

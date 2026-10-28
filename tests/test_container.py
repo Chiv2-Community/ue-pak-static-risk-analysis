@@ -28,12 +28,8 @@ rules:
   - id: private-container-canary
     description: private-container-canary $() `echo not-executed` ##[error] ::warning::
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/OwnedFixtures.FixtureActor
-        function: RecordFixture
+    expression:
+      invocation: /Script/OwnedFixtures.FixtureActor:RecordFixture
 """
 
 
@@ -520,7 +516,7 @@ except scan.Failure: sys.exit(3)
         exports = (content / "BP_OwnedParent.uexp").read_bytes()
         path = "Content/BP_OwnedParent"
         extra = ["--content-root", "Content=/Game"]
-        unrelated = POLICY.replace("function: RecordFixture", "function: Unrelated")
+        unrelated = POLICY.replace(":RecordFixture", ":Unrelated")
         # Exercise the production Read API with both split and inline cooked data.
         split, split_report = self.invoke(build([(path + ".uasset", header, False),
             (path + ".uexp", exports, False)]), policy=unrelated, extra=extra)
@@ -571,7 +567,7 @@ except scan.Failure: sys.exit(3)
         content = Path(os.environ["OWNED_FIXTURE_EVIDENCE"]) / "tagged/OwnedFixtures/Content"
         inline = (content / "BP_OwnedParent.uasset").read_bytes() + (content / "BP_OwnedParent.uexp").read_bytes()
         extra = ["--content-root", "Content=/Game"]
-        unrelated = POLICY.replace("function: RecordFixture", "function: Unrelated")
+        unrelated = POLICY.replace(":RecordFixture", ":Unrelated")
         for suffix, signature in (("py", "script_candidate"), ("ini", "config_candidate")):
             with self.subTest(suffix=suffix):
                 result, report = self.invoke(build([("Content/BP_OwnedParent." + suffix, inline, False)]),

@@ -16,12 +16,8 @@ public sealed class CapabilityCliTests : IDisposable
           - id: private-catalog-cli-canary
             description: private-catalog-cli-canary
             effect: forbid
-            match:
-              kind: invocation
-              target:
-                kind: exact
-                owner: /Script/Fixture.Other
-                function: Other
+            expression:
+              invocation: /Script/Fixture.Other:Other
         """;
     private const string Catalog = """
         {"schema-version":1,"disclosure":"nonsecret","revision":"fixture-v1","summaries":[

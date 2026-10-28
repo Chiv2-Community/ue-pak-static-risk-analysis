@@ -24,12 +24,8 @@ public sealed class CapabilityPolicyTests
           - id: unrelated
             description: Original unrelated fixture rule
             effect: forbid
-            match:
-              kind: invocation
-              target:
-                kind: exact
-                owner: /Script/Fixture.Other
-                function: Other
+            expression:
+              invocation: /Script/Fixture.Other:Other
         """));
     private static CapabilityCatalog Catalog() => CapabilityCatalog.Read(Encoding.UTF8.GetBytes("""
         {"schema-version":1,"disclosure":"nonsecret","revision":"fixture-v1","summaries":[

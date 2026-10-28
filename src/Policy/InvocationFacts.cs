@@ -28,7 +28,35 @@ public abstract record ArgumentValue
     public sealed record Constant(PolicyLiteral Value) : ArgumentValue;
     public sealed record Dynamic : ArgumentValue;
     public sealed record Missing : ArgumentValue;
+    public sealed record Derived(ValueProvenance Provenance) : ArgumentValue;
 }
+
+// Flat, argument-local DAG: input references always point to earlier nodes.
+public sealed record ValueProvenance(int Root, ImmutableArray<ValueOrigin> Nodes)
+{
+    public const int MaxNodes = 256;
+    public const int MaxEdges = 1024;
+    public const int MaxDepth = 32;
+    public const int MaxAnalysisNodes = 8192;
+
+    // Called only on already validated package evidence when combining packages.
+    public static InvocationAnalysis Bound(InvocationAnalysis analysis, int maxNodes = MaxAnalysisNodes)
+    {
+        var nodes = 0;
+        return analysis with { Invocations = analysis.Invocations.Select(fact => fact.Arguments is ArgumentMetadata.Known known
+            ? fact with { Arguments = new ArgumentMetadata.Known(known.Arguments.Select(argument =>
+            {
+                if (argument.Value is not ArgumentValue.Derived derived) return argument;
+                if (nodes + derived.Provenance.Nodes.Length > maxNodes)
+                    return argument with { Value = new ArgumentValue.Dynamic() };
+                nodes += derived.Provenance.Nodes.Length;
+                return argument;
+            }).ToImmutableArray()) } : fact).ToImmutableArray() };
+    }
+}
+public sealed record OriginArgument(string Name, int Node);
+public sealed record ValueOrigin(string Kind, ImmutableArray<int> Inputs, bool Complete,
+    InvocationTarget? Target = null, ImmutableArray<OriginArgument>? Arguments = null, PolicyLiteral? Literal = null);
 
 public enum CoverageGap { UnsupportedParsing, UnresolvedDispatch, IncompleteExtraction }
 public sealed record DispatchCandidate(string Owner, string Function, string Provenance);
@@ -38,7 +66,20 @@ public sealed record IndirectDispatch(int SchemaVersion, InvocationLocation Orig
     ImmutableArray<string> Diagnostics, string Source);
 public sealed record InvocationAnalysis(ImmutableArray<InvocationFact> Invocations, ImmutableArray<CoverageGap> CoverageGaps,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IndirectDispatch[]? Dispatches = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallGraphContext? CallGraph = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CallGraphContext? CallGraph = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PropertyWriteEvidence? PropertyWrites = null);
+
+// Declared destination identity, not proof of receiver ownership or runtime execution.
+public sealed record PropertyWriteFact(InvocationLocation Location, string Opcode, string? Owner,
+    string? Property, string Receiver, ArgumentValue Value);
+public sealed record PropertyWriteEvidence(bool Complete, ImmutableArray<PropertyWriteFact> Writes)
+{
+    public const int MaxWrites = 10_000;
+    public const int MaxCharacters = 262_144;
+    public static int Characters(PropertyWriteFact write) => write.Location.Asset.Length + write.Location.Function.Length
+        + (write.Owner?.Length ?? 0) + (write.Property?.Length ?? 0) + 64
+        + (write.Value is ArgumentValue.Constant { Value: PolicyLiteral.String text } ? text.Value.Length : 0);
+}
 
 // LocationFunction is the exact containing-function key, not a parsed function-name guess.
 public sealed record CallGraphFunction(string Asset, string LocationFunction, string Owner, string Function, bool Native);

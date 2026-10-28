@@ -25,12 +25,8 @@ rules:
   - id: private-action-canary
     description: private-action-canary ##[error] ::error:: $() `not executed`
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/OwnedFixtures.FixtureActor
-        function: RecordFixture
+    expression:
+      invocation: /Script/OwnedFixtures.FixtureActor:RecordFixture
 """
 
 

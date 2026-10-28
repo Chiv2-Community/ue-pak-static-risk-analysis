@@ -27,12 +27,8 @@ rules:
   - id: invocation-canary
     description: Original fixture only
     effect: forbid
-    match:
-      kind: invocation
-      target:
-        kind: exact
-        owner: /Script/Fixture.Other
-        function: Other
+    expression:
+      invocation: /Script/Fixture.Other:Other
 """
 
 
